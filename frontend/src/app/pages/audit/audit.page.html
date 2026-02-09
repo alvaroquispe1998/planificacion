@@ -1,0 +1,98 @@
+<section class="page">
+  <h1>Auditoria de sesiones Zoom</h1>
+
+  <div class="toolbar">
+    <label>Video Conference ID <input [(ngModel)]="videoConferenceId" placeholder="opcional" /></label>
+    <button (click)="loadInstances()">Buscar instancias</button>
+  </div>
+
+  <article>
+    <h2>Meeting Instances</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Zoom meeting</th>
+          <th>Status</th>
+          <th>Inicio real</th>
+          <th>Fin real</th>
+          <th>Duracion</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr
+          *ngFor="let row of meetingInstances"
+          (click)="selectInstance(row.id)"
+          [class.selected]="row.id === meetingInstanceId"
+        >
+          <td>{{ row.id }}</td>
+          <td>{{ row.zoom_meeting_id }}</td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.actual_start }}</td>
+          <td>{{ row.actual_end }}</td>
+          <td>{{ row.duration_minutes }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </article>
+
+  <div class="toolbar">
+    <button (click)="recomputeTeacherMetrics()">Recalcular metricas docentes</button>
+    <button (click)="generateSummary()">Generar resumen extractivo</button>
+    <button (click)="refreshInstanceData()">Recargar detalle</button>
+  </div>
+
+  <pre *ngIf="lastAction">{{ lastAction | json }}</pre>
+
+  <div class="grid three">
+    <article>
+      <h2>Participantes</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Rol</th>
+            <th>Teacher ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of participants">
+            <td>{{ row.display_name }}</td>
+            <td>{{ row.role }}</td>
+            <td>{{ row.teacher_id }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article>
+      <h2>Metricas docente</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Teacher</th>
+            <th>Ingresos</th>
+            <th>Minutos</th>
+            <th>Host</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of teacherMetrics">
+            <td>{{ row.teacher_id }}</td>
+            <td>{{ row.join_count }}</td>
+            <td>{{ row.total_minutes }}</td>
+            <td>{{ row.is_host }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article>
+      <h2>Transcript y resumen</h2>
+      <h3>Transcripts</h3>
+      <pre *ngFor="let row of transcripts">{{ row.transcript_text }}</pre>
+      <h3>Summaries</h3>
+      <pre *ngFor="let row of summaries">{{ row.summary_text }}</pre>
+    </article>
+  </div>
+</section>

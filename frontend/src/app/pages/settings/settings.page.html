@@ -1,0 +1,157 @@
+<section class="settings-page">
+  <header class="hero">
+    <p class="eyebrow">Configuracion</p>
+    <h1>Sincronizacion con Akademic</h1>
+    <p>
+      Este es el primer paso del flujo operativo. Primero valida cookies activas, luego sincroniza catalogos y
+      finalmente pasa a planificacion.
+    </p>
+  </header>
+
+  <article class="panel">
+    <div class="panel-top">
+      <h2>1) Estado de fuentes y sesiones</h2>
+      <button type="button" (click)="refreshSourceStatus()" [disabled]="isValidating">
+        {{ isValidating ? 'Validando...' : 'Validar sesiones ahora' }}
+      </button>
+    </div>
+
+    <div class="sources-grid">
+      <article class="source-card" *ngFor="let source of sources">
+        <div class="source-head">
+          <strong>{{ source.code }}</strong>
+          <span [class.warn]="sourceNeedsRenewal(source)">{{ source.session_status }}</span>
+        </div>
+        <p>{{ source.base_url }}</p>
+        <p>Expira: {{ source.expires_at ? (source.expires_at | date: 'yyyy-MM-dd HH:mm') : 'Sin fecha estimada' }}</p>
+        <p>Ultima validacion: {{ source.last_validated_at ? (source.last_validated_at | date: 'yyyy-MM-dd HH:mm') : '-' }}</p>
+        <button type="button" class="renew" (click)="startCookieRenewal(source)">Renovar cookie</button>
+        <p *ngIf="source.error_last" class="error-inline">{{ source.error_last }}</p>
+      </article>
+    </div>
+  </article>
+
+  <article class="panel" id="cookie-panel">
+    <h2>2) Renovar / actualizar cookie</h2>
+    <div class="cookie-controls">
+      <label>
+        Fuente
+        <select [(ngModel)]="selectedSourceCode" (ngModelChange)="onSelectedSourceChange()">
+          <option *ngFor="let source of sources" [value]="source.code">{{ source.code }}</option>
+        </select>
+      </label>
+      <label>
+        Expiracion estimada (opcional)
+        <input type="datetime-local" [(ngModel)]="expiresAt" />
+      </label>
+    </div>
+
+    <article class="renew-guide" *ngIf="renewalUrl">
+      <p class="guide-title">Guia rapida de renovacion</p>
+      <p class="guide-url">{{ renewalUrl }}</p>
+      <div class="actions">
+        <a class="open-link" [href]="renewalUrl" target="_blank" rel="noopener noreferrer">Abrir URL</a>
+        <button type="button" class="ghost" (click)="copyRenewalUrl()">Copiar URL</button>
+      </div>
+      <ol>
+        <li *ngFor="let step of renewalSteps">{{ step }}</li>
+      </ol>
+    </article>
+
+    <label class="cookie-label">
+      Cookie (header `Cookie:` o `Set-Cookie:`)
+      <textarea
+        rows="4"
+        [(ngModel)]="cookieText"
+        placeholder="Cookie: nombre1=valor1; nombre2=valor2"
+      ></textarea>
+    </label>
+
+    <div class="actions">
+      <button type="button" (click)="saveCookie()" [disabled]="isSavingCookie">
+        {{ isSavingCookie ? 'Guardando...' : 'Guardar cookie' }}
+      </button>
+      <button type="button" class="ghost" (click)="validateSelectedSource()" [disabled]="isValidating">
+        Validar fuente seleccionada
+      </button>
+    </div>
+  </article>
+
+  <article class="panel">
+    <h2>3) Ejecutar sincronizacion</h2>
+    <div class="run-controls">
+      <label>
+        Modo
+        <select [(ngModel)]="mode">
+          <option value="FULL">FULL</option>
+          <option value="INCREMENTAL">INCREMENTAL</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="module-grid">
+      <article class="module-card" *ngFor="let module of resourceModules">
+        <div class="module-head">
+          <label class="module-toggle">
+            <input
+              type="checkbox"
+              [checked]="isModuleFullySelected(module)"
+              [indeterminate]="isModulePartiallySelected(module)"
+              (change)="toggleModuleResources(module, $any($event.target).checked)"
+            />
+            <strong>{{ module.label }}</strong>
+          </label>
+          <span>{{ selectedCountForModule(module) }}/{{ module.resources.length }}</span>
+        </div>
+        <p>{{ module.description }}</p>
+        <div class="resource-grid">
+          <label *ngFor="let resource of module.resources">
+            <input
+              type="checkbox"
+              [checked]="isResourceSelected(resource.code)"
+              (change)="toggleResource(resource.code, $any($event.target).checked)"
+            />
+            {{ resource.label }} ({{ resource.source }})
+          </label>
+        </div>
+      </article>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="primary" (click)="runSync()" [disabled]="isSyncing">
+        {{ isSyncing ? 'Sincronizando...' : 'Ejecutar sincronizacion' }}
+      </button>
+      <button type="button" class="ghost" (click)="refreshJobs()">Refrescar jobs</button>
+    </div>
+  </article>
+
+  <p class="feedback" *ngIf="feedback">{{ feedback }}</p>
+  <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+
+  <article class="panel" *ngIf="syncResult">
+    <h2>Resultado de ejecucion</h2>
+    <pre>{{ syncResult | json }}</pre>
+  </article>
+
+  <article class="panel">
+    <h2>Historial de jobs (ultimos 20)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Recurso</th>
+          <th>Estado</th>
+          <th>Modo</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let job of jobs">
+          <td>{{ job.created_at | date: 'yyyy-MM-dd HH:mm' }}</td>
+          <td>{{ job.resource }}</td>
+          <td>{{ job.status }}</td>
+          <td>{{ job.mode }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </article>
+</section>

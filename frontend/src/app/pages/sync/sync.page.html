@@ -1,0 +1,79 @@
+<section class="sync-page">
+  <header class="hero">
+    <p class="eyebrow">Paso 1 del flujo</p>
+    <h1>Sincronizacion Akademic</h1>
+    <p class="description">
+      Importa tu data real de Akademic para poblar la base y trabajar planificacion sobre informacion actual.
+    </p>
+  </header>
+
+  <div class="status-grid">
+    <article class="status-card">
+      <p class="label">Ofertas actuales en BD</p>
+      <strong>{{ currentOfferingsCount }}</strong>
+    </article>
+    <article class="status-card">
+      <p class="label">Semestre en payload</p>
+      <strong>{{ result?.semester_id || 'Pendiente' }}</strong>
+    </article>
+    <article class="status-card">
+      <p class="label">Registros procesados</p>
+      <strong>{{ result?.totals?.processed ?? 0 }}</strong>
+    </article>
+  </div>
+
+  <article class="panel">
+    <div class="panel-header">
+      <h2>Payload de sincronizacion (JSON)</h2>
+      <div class="actions">
+        <button type="button" class="ghost" (click)="loadExamplePayload()">Cargar ejemplo</button>
+        <button type="button" class="ghost" (click)="clearPayload()">Limpiar</button>
+      </div>
+    </div>
+
+    <label class="replace-check">
+      <input type="checkbox" [(ngModel)]="replaceSemester" />
+      Reemplazar data del semestre antes de importar
+    </label>
+
+    <textarea
+      [(ngModel)]="payloadText"
+      rows="20"
+      spellcheck="false"
+      placeholder='{"semester_id":"2026-1","class_offerings":[]}'
+    ></textarea>
+
+    <div class="submit-row">
+      <button type="button" class="primary" (click)="sync()" [disabled]="isSubmitting">
+        {{ isSubmitting ? 'Sincronizando...' : 'Sincronizar desde Akademic' }}
+      </button>
+      <a routerLink="/planning">Ir a planificacion</a>
+    </div>
+
+    <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+    <p class="success" *ngIf="successMessage">{{ successMessage }}</p>
+  </article>
+
+  <article class="panel" *ngIf="result">
+    <h2>Resultado de sincronizacion</h2>
+    <div class="summary-grid">
+      <div>
+        <p>Recibidos</p>
+        <strong>{{ result.totals.received }}</strong>
+      </div>
+      <div>
+        <p>Creados</p>
+        <strong>{{ result.totals.created }}</strong>
+      </div>
+      <div>
+        <p>Actualizados</p>
+        <strong>{{ result.totals.updated }}</strong>
+      </div>
+      <div>
+        <p>Duplicados en payload</p>
+        <strong>{{ result.totals.deduplicated }}</strong>
+      </div>
+    </div>
+    <pre>{{ result | json }}</pre>
+  </article>
+</section>

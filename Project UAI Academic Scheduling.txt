@@ -1,0 +1,889 @@
+Project "UAI Academic Scheduling" {
+  database_type: "MySQL"
+  Note: "Sistema de Planificación Académica (reemplazo de Excel). Catálogos + oferta académica + horarios + asignación docente + ambientes (aulas/labs)."
+}
+
+/* =========================================================
+   ORGANIZACIÓN: UAI Academic Scheduling
+   MÓDULO: CALENDARIO ACADÉMICO
+   ========================================================= */
+
+/* Semestres Académicos */
+Table semesters {
+  id varchar(36) [pk, note: "Ej: 08dd5b5d-b9f7-4b98-8978-9b1202a3640a"]
+  name varchar(20) [not null, note: "Ej: 2006-1"]
+  state enum [not null, note: "Ej: Activo | Finalizado"]
+
+  start_date date [not null, note: "Ej: 2006-06-05"]
+  end_date date [not null, note: "Ej: 2006-09-30"]
+
+  class_start_date date [not null, note: "Ej: 2006-06-05"]
+  class_end_date date [not null, note: "Ej: 2006-09-30"]
+}
+
+/* Semanas del semestre (normalmente 16) */
+Table semester_weeks {
+  id varchar(36) [pk, note: "UUID interno"]
+  semester_id varchar(36) [not null, note: "Ej: 08dd5b5d-b9f7-4b98-8978-9b1202a3640a"]
+
+  week_number int [not null, note: "Ej: 1..16"]
+  start_date date [not null, note: "Ej: 2025-03-17"]
+  end_date date [not null, note: "Ej: 2025-03-23"]
+
+  is_active boolean [not null, note: "Ej: true"]
+  note varchar(200) [note: "Ej: Semana con feriado / semana de parciales"]
+}
+
+Ref: semester_weeks.semester_id > semesters.id
+
+/* =========================================================
+   ORGANIZACIÓN: UAI Academic Scheduling
+   MÓDULO: ESTRUCTURA ACADÉMICA
+   ========================================================= */
+
+/* Sedes / Campus */
+Table campuses {
+  id varchar(36) [pk, note: "UUID del campus / sede"]
+
+  code varchar(20) [not null, note: "Ej: sl05"]
+  name varchar(150) [not null, note: "Ej: PORUMA"]
+  address varchar(255) [note: "Ej: -"]
+
+  is_valid boolean [not null, note: "Ej: false"]
+  is_principal boolean [not null, note: "Ej: false"]
+
+  district varchar(100) [not null, note: "Ej: Chincha Baja"]
+  province varchar(100) [not null, note: "Ej: Chincha"]
+  department varchar(100) [not null, note: "Ej: Ica"]
+}
+
+/* Facultades */
+Table faculties {
+  id varchar(36) [pk, note: "Ej: 08dd5b60-278d-4c3c-8793-9098ed29e3ec"]
+
+  code varchar(20) [not null, note: "Ej: FCS"]
+  name varchar(150) [not null, note: "Ej: CIENCIAS DE LA SALUD"]
+
+  abbreviation varchar(20) [note: "Ej: FCS"]
+  institutional_email varchar(150) [note: "Ej: facultad@autonomadeica.edu.pe"]
+
+  is_active boolean [not null, note: "Ej: true"]
+  is_valid boolean [not null, note: "Ej: true"]
+}
+
+/* Programas Académicos (Carreras) */
+Table academic_programs {
+  id varchar(36) [pk, note: "Ej: 08dd5b60-4cd5-491f-85d0-af920a1ff862"]
+
+  code varchar(20) [not null, note: "Ej: P55"]
+  name varchar(200) [not null, note: "Ej: TECNOLOGÍA MÉDICA - OPTOMETRÍA"]
+
+  faculty_id varchar(36) [not null, note: "Ej: 08dd5b60-278d-4c3c-8793-9098ed29e3ec"]
+  faculty varchar(100)
+  graduate_profile text [note: "Ej: Perfil profesional del egresado"]
+  general_information text [note: "Ej: Información general del programa"]
+  comments text [note: "Ej: Observaciones adicionales"]
+
+  decanal_resolution varchar(100) [note: "Ej: RD-012-2024-FCS"]
+  rectoral_resolution varchar(100) [note: "Ej: RR-045-2024"]
+}
+
+Ref: academic_programs.faculty_id > faculties.id
+
+/* Relación Programas Académicos ↔ Campus */
+Table academic_program_campuses {
+  id varchar(36) [pk, note: "UUID interno"]
+
+  academic_program_id varchar(36) [not null, note: "Ej: 08dd5b60-4cd5-491f-85d0-af920a1ff862 (ENFERMERÍA)"]
+  campus_id varchar(36) [not null, note: "Ej: 08dd5b60-4cb6-4575-826a-5ae19c945504"]
+
+  is_active boolean [not null, note: "Ej: true"]
+}
+
+Ref: academic_program_campuses.academic_program_id > academic_programs.id
+Ref: academic_program_campuses.campus_id > campuses.id
+
+/* Planes de Estudio (Currículo / Malla por programa) */
+Table study_plans {
+  id varchar(36) [pk, note: "Ej: 08de173f-5643-404f-8534-4d4d52dbf35c"]
+
+  name varchar(150) [not null, note: "Ej: AGRICULTURA"]
+  curriculum varchar(50) [not null, note: "Ej: 2025-XYZ"]
+  curriculum_code varchar(20) [not null, note: "Ej: XYZ"]
+
+  faculty_id varchar(36) [not null, note: "Ej: 08dd5b60-278d-4c3c-8793-9098ed29e3ec"]
+  academic_program_id varchar(36) [not null, note: "Ej: 08dd5b60-4cd5-491f-85d0-af920a1ff862"]
+
+  is_active boolean [not null, note: "Ej: true"]
+}
+
+Ref: study_plans.faculty_id > faculties.id
+Ref: study_plans.academic_program_id > academic_programs.id
+
+/* =========================================================
+   ORGANIZACIÓN: UAI Academic Scheduling
+   MÓDULO: CATÁLOGOS ACADÉMICOS
+   ========================================================= */
+
+/* Secciones (Ej: A, B, BP-CH, etc.) */
+Table sections {
+  id varchar(36) [pk, note: "Ej: 08dd6f16-a1fc-4da9-8072-eba7f704db65"]
+  description varchar(50) [not null, note: "Ej: BP - CH"]
+}
+
+/* Cursos (Asignaturas) */
+Table courses {
+  id varchar(36) [pk, note: "Ej: 08dd5b61-2002-4d45-8dce-f0b4dc2f561e"]
+
+  code varchar(50) [not null, note: "Ej: P05-14210-10A01"]
+  name varchar(200) [not null, note: "Ej: MATEMÁTICA I"]
+
+  area_career varchar(200) [note: "Ej: INGENIERÍA EN INDUSTRIAS ALIMENTARIAS"]
+  cycle varchar(10) [not null, note: "Ej: I"]
+  program varchar(100) [note: "Ej: ---"]
+
+  type varchar(20) [note: "Ej: 4"]
+  has_syllabus boolean [not null, note: "Ej: true"]
+  can_edit boolean [not null, note: "Ej: true"]
+
+  career_id varchar(36) [not null, note: "Ej: 08dd5b60-4cd5-4d35-8994-835735b797b8"]
+
+  area varchar(100) [note: "Ej: ---"]
+  academic_year int [not null, note: "Ej: 1"]
+}
+
+Ref: courses.career_id > academic_programs.id
+
+/* Secciones por curso (entidad real que viene del sistema origen) */
+/* Secciones por curso (una sección = un docente) */
+Table course_sections {
+  id varchar(36) [pk, note: "Ej: 08ddf60e-cf29-442d-89ec-c1757ff6a814 (ID origen)"]
+
+  course_id varchar(36) [not null, note: "Ej: 08dd5b61-2002-4d45-8dce-f0b4dc2f561e"]
+  section_id varchar(36) [note: "Ej: 08dd6f16-a1fc-4da9-8072-eba7f704db65 (si se mapea)"]
+
+  text varchar(50) [not null, note: "Ej: AP - CH"]
+
+  teacher_id varchar(36) [not null, note: "Ej: 0043586f-9287-4b7d-aa53-7390443da5ea (mapeado por DNI)"]
+  semester_id varchar(36)
+}
+
+Ref: course_sections.course_id > courses.id
+Ref: course_sections.section_id > sections.id
+Ref: course_sections.teacher_id > teachers.id
+Ref: course_sections.semester_id > semesters.id
+
+/* Docentes asignados a una sección de curso (pueden ser varios) */
+Table course_section_teachers {
+  id varchar(36) [pk, note: "UUID interno"]
+
+  course_section_id varchar(36) [not null, note: "Ej: 08ddf60e-cf29-442d-89ec-c1757ff6a814"]
+  teacher_id varchar(36) [not null, note: "Ej: 0043586f-9287-4b7d-aa53-7390443da5ea"]
+
+  role enum [note: "Ej: TITULAR | PRACTICE_HEAD | ASSISTANT"]
+  is_primary boolean [not null, note: "Ej: true"]
+}
+
+Ref: course_section_teachers.course_section_id > course_sections.id
+Ref: course_section_teachers.teacher_id > teachers.id
+
+/* Modalidades de Dictado (Presencial / Virtual / Híbrido) */
+Table delivery_modalities {
+  id varchar(36) [pk, note: "Ej: 1f7e0000-0000-0000-0000-000000000000"]
+  name varchar(50) [not null, note: "Ej: PRESENCIAL | VIRTUAL | HIBRIDO VIRTUAL"]
+}
+
+/* Turnos (Mañana / Tarde / Noche) */
+Table shifts {
+  id varchar(36) [pk, note: "Ej: 9aa10000-0000-0000-0000-000000000000"]
+  name varchar(30) [not null, note: "Ej: MAÑANA | TARDE | NOCHE"]
+}
+
+/* =========================================================
+   ORGANIZACIÓN: UAI Academic Scheduling
+   MÓDULO: PERSONAL ACADÉMICO
+   ========================================================= */
+
+/* Docentes */
+Table teachers {
+  id varchar(36) [pk, note: "Ej: 0043586f-9287-4b7d-aa53-7390443da5ea"]
+
+  dni varchar(20) [not null, note: "Ej: 41133522"]
+  paternal_surname varchar(100) [not null, note: "Ej: YARIN"]
+  maternal_surname varchar(100) [not null, note: "Ej: ACHACHAGUA"]
+  name varchar(150) [not null, note: "Ej: ANWAR JULIO"]
+  full_name varchar(200) [not null, note: "Ej: YARIN ACHACHAGUA ANWAR JULIO"]
+
+  phone_number varchar(30) [note: "Ej: 999888777"]
+  picture varchar(255) [note: "Ej: /images/teachers/41133522.jpg"]
+  user_name varchar(50) [not null, note: "Ej: 41133522"]
+  institutional_email varchar(150) [note: "Ej: docente@autonomadeica.edu.pe"]
+}
+
+/* =========================================================
+   ORGANIZACIÓN: UAI Academic Scheduling
+   MÓDULO: INFRAESTRUCTURA (AMBIENTES)
+   ========================================================= */
+
+/* Edificios / Pabellones */
+Table buildings {
+  id varchar(36) [pk, note: "Ej: 08dd60b3-2d86-4ec2-8e47-ed7204f4608c"]
+  campus_id varchar(36) [not null, note: "Ej: 08dd5b66-d93e-4ae6-8ebf-6a31892c7743"]
+  name varchar(100) [not null, note: "Ej: Pabellon1"]
+}
+
+Ref: buildings.campus_id > campuses.id
+
+/* Tipos de Aula (Aula General, Auditorio, etc.) */
+Table classroom_types {
+  id varchar(36) [pk, note: "Ej: 08dd60b2-c1b3-4e3f-8ca4-b25ba8055dd6"]
+  name varchar(80) [not null, note: "Ej: Aula General"]
+}
+
+/* Aulas */
+Table classrooms {
+  id varchar(36) [pk, note: "Ej: 08dd60b3-3f89-498e-80f1-14668fcda964"]
+
+  name varchar(100) [not null, note: "Ej: Aula 201"]
+
+  building_id varchar(36) [not null, note: "Ej: 08dd60b3-2d86-4ec2-8e47-ed7204f4608c"]
+  campus_id varchar(36) [not null, note: "Ej: 08dd5b66-d93e-4ae6-8ebf-6a31892c7743"]
+  type_id varchar(36) [not null, note: "Ej: 08dd60b2-c1b3-4e3f-8ca4-b25ba8055dd6"]
+
+  faculty_id varchar(36) [not null, note: "Ej: 08dd5b60-278d-4c3c-8793-9098ed29e3ec"]
+
+  capacity int [not null, note: "Ej: 9"]
+  status boolean [not null, note: "Ej: true"]
+
+  iPAddress varchar(45) [note: "Ej: 8.8.8.8"]
+  code varchar(20) [note: "Ej: 1"]
+  floor varchar(10) [note: "Ej: 1"]
+  number int [note: "Ej: 1"]
+}
+
+Ref: classrooms.building_id > buildings.id
+Ref: classrooms.campus_id > campuses.id
+Ref: classrooms.type_id > classroom_types.id
+Ref: classrooms.faculty_id > faculties.id
+
+/* =========================================================
+   ORGANIZACIÓN: UAI Academic Scheduling
+   MÓDULO: PLANIFICACIÓN (REEMPLAZA EXCEL)
+   ========================================================= */
+
+/* Oferta Académica (Apertura de curso por semestre y sección) */
+Table class_offerings {
+  id varchar(36) [pk, note: "Ej: 6b9c3f2a-9f11-4a21-8b8c-6e2c1a9b0d11"]
+
+  semester_id varchar(36) [not null, note: "Ej: 08dd5b5d-b9f7-4b98-8978-9b1202a3640a"]
+  study_plan_id varchar(36) [not null, note: "Ej: 08de173f-5643-404f-8534-4d4d52dbf35c"]
+  academic_program_id varchar(36) [not null, note: "Ej: 08dd5b60-4cd5-491f-85d0-af920a1ff862"]
+
+  course_id varchar(36) [not null, note: "Ej: 08dd5b61-2002-4d45-8dce-f0b4dc2f561e"]
+  course_section_id varchar(36) [not null, note: "Ej: 08dd6f16-a1fc-4da9-8072-eba7f704db65"]
+
+  campus_id varchar(36) [not null, note: "Ej: 08dd5b66-d93e-4ae6-8ebf-6a31892c7743"]
+  delivery_modality_id varchar(36) [not null, note: "Ej: 1f7e... (PRESENCIAL)"]
+  shift_id varchar(36) [not null, note: "Ej: 9aa1... (MAÑANA)"]
+
+  projected_vacancies int [note: "Ej: 20"]
+  status boolean [not null, note: "Ej: true"]
+}
+
+Ref: class_offerings.semester_id > semesters.id
+Ref: class_offerings.study_plan_id > study_plans.id
+Ref: class_offerings.academic_program_id > academic_programs.id
+Ref: class_offerings.course_id > courses.id
+Ref: class_offerings.course_section_id > course_sections.id
+Ref: class_offerings.campus_id > campuses.id
+Ref: class_offerings.delivery_modality_id > delivery_modalities.id
+Ref: class_offerings.shift_id > shifts.id
+
+/* Grupos dentro de una oferta (ej: Teoría + Práctica A1/A2 por aforo) */
+Table class_groups {
+  id varchar(36) [pk, note: "UUID interno"]
+  class_offering_id varchar(36) [not null, note: "Ej: 6b9c... (oferta madre)"]
+
+  group_type enum [not null, note: "Ej: THEORY | PRACTICE | LAB"]
+  code varchar(20) [not null, note: "Ej: T | P1 | P2 | A1 | A2 | G1 | G2"]
+
+  capacity int [note: "Ej: 15 (aforo del laboratorio)"]
+  note varchar(200) [note: "Ej: División por aforo de laboratorio"]
+}
+
+Ref: class_groups.class_offering_id > class_offerings.id
+
+
+/* Horarios (bloques) por grupo: teoría o práctica/lab */
+Table class_meetings {
+  id varchar(36) [pk, note: "Ej: 0d2c..."]
+  class_offering_id varchar(36) [not null, note: "Oferta madre"]
+  class_group_id varchar(36) [not null, note: "Ej: grupo P1 / P2"]
+
+  day_of_week enum [not null, note: "Ej: LUNES | MARTES | ..."]
+  start_time time [not null, note: "Ej: 08:30:00"]
+  end_time time [not null, note: "Ej: 10:00:00"]
+
+  minutes int [note: "Ej: 90"]
+  academic_hours int [note: "Ej: 2"]
+
+  classroom_id varchar(36) [note: "Ej: Aula 303 A"]
+}
+
+Ref: class_meetings.class_offering_id > class_offerings.id
+Ref: class_meetings.class_group_id > class_groups.id
+Ref: class_meetings.classroom_id > classrooms.id
+
+
+/* Asignación de Docentes por Oferta (Titular / Jefe de Práctica / Asistente) */
+Table class_teachers {
+  id varchar(36) [pk, note: "Ej: 3c1a0000-0000-0000-0000-000000000000"]
+  class_offering_id varchar(36) [not null, note: "Ej: 6b9c3f2a-9f11-4a21-8b8c-6e2c1a9b0d11"]
+  teacher_id varchar(36) [not null, note: "Ej: 0043586f-9287-4b7d-aa53-7390443da5ea"]
+
+  role enum [not null, note: "Ej: TITULAR | PRACTICE_HEAD | ASSISTANT"]
+  is_primary boolean [not null, note: "Ej: true"]
+}
+
+Ref: class_teachers.class_offering_id > class_offerings.id
+Ref: class_teachers.teacher_id > teachers.id
+
+/* Usuarios Zoom (Cuentas para reuniones / Zoom Rooms) */
+Table zoom_users {
+  id varchar(36) [pk, note: "Ej: 08dd860f-70a3-4698-8f93-1925a88226c7"]
+  name varchar(150) [not null, note: "Ej: Usuario 43 pregrado"]
+  email varchar(190) [not null, note: "Ej: uai0043@autonomadeica.edu.pe"]
+}
+
+/* Videoconferencias creadas en Zoom (por semana y horario) */
+Table video_conferences {
+  id varchar(36) [pk, note: "UUID interno del sistema"]
+
+  class_offering_id varchar(36) [not null, note: "Oferta académica"]
+  semester_week_id varchar(36) [not null, note: "Semana del semestre (1..16)"]
+
+  zoom_user_id varchar(36) [not null, note: "Cuenta Zoom usada"]
+  zoom_meeting_id varchar(50) [not null, note: "ID devuelto por Zoom"]
+  topic varchar(200) [not null, note: "Tema"]
+
+  start_time datetime [not null, note: "Ej: 2025-03-20 08:30:00"]
+  end_time datetime [not null, note: "Ej: 2025-03-20 11:50:00"]
+
+  join_url varchar(500) [note: "URL para unirse"]
+  status enum [note: "PROGRAMADA | REPROGRAMADA | CANCELADA"]
+  note text [note: "Motivo o comentario"]
+
+  created_at datetime [not null, note: "Fecha de creación"]
+}
+
+Ref: video_conferences.class_offering_id > class_offerings.id
+Ref: video_conferences.semester_week_id > semester_weeks.id
+Ref: video_conferences.zoom_user_id > zoom_users.id
+
+
+
+/* =========================================================
+   ORGANIZACIÓN: UAI Academic Scheduling
+   MÓDULO: INTEGRACIONES + SINCRONIZACIÓN (NUEVO)
+   ========================================================= */
+
+/* Fuentes externas (matricula, docente, intranet, aulavirtual, etc.) */
+Table external_sources {
+  id varchar(36) [pk, note: "UUID interno"]
+  code varchar(20) [not null, unique, note: "Ej: MATRICULA | DOCENTE | INTRANET | AULAVIRTUAL"]
+  name varchar(150) [not null, note: "Nombre legible"]
+
+  base_url varchar(255) [not null, note: "Ej: https://matricula.autonomadeica.edu.pe"]
+  login_url varchar(255) [note: "Ej: https://aulavirtual2.autonomadeica.edu.pe/account/login?ReturnUrl=%2F"]
+
+  is_active boolean [not null, note: "Habilita/inhabilita la integración"]
+  created_at datetime [not null]
+  updated_at datetime [not null]
+}
+
+/* Sesiones/cookies persistidas por fuente (cookie jar encriptado) */
+Table external_sessions {
+  id varchar(36) [pk, note: "UUID interno"]
+  source_id varchar(36) [not null, note: "FK a external_sources"]
+
+  cookie_jar_encrypted longtext [not null, note: "Cookie jar serializado y ENCRIPTADO (AES-GCM)"]
+  status enum [not null, note: "ACTIVE | EXPIRED | ERROR"]
+
+  last_validated_at datetime [note: "Última vez que se validó que la sesión funcionaba"]
+  expires_at datetime [note: "Si es posible estimar expiración; si no, null"]
+  error_last text [note: "Último error detectado (si status=ERROR)"]
+
+  created_at datetime [not null]
+  updated_at datetime [not null]
+}
+
+Ref: external_sessions.source_id > external_sources.id
+
+/* Corridas de sincronización (auditoría de jobs) */
+Table sync_jobs {
+  id varchar(36) [pk, note: "UUID interno"]
+  source_id varchar(36) [not null, note: "FK a external_sources"]
+
+  resource varchar(60) [not null, note: "Ej: semesters | campuses | courses | teachers | classrooms | zoom_users"]
+  mode enum [not null, note: "FULL | INCREMENTAL"]
+  status enum [not null, note: "PENDING | RUNNING | DONE | FAILED"]
+
+  params_json json [note: "Parámetros usados: start/length/campus_id/semester_id/etc."]
+  started_at datetime [note: "Inicio del job"]
+  finished_at datetime [note: "Fin del job"]
+
+  created_by varchar(36) [note: "Usuario interno (si aplica)"]
+  created_at datetime [not null]
+}
+
+Ref: sync_jobs.source_id > external_sources.id
+
+/* Logs del job (mensajes + meta) */
+Table sync_logs {
+  id varchar(36) [pk, note: "UUID interno"]
+  job_id varchar(36) [not null, note: "FK a sync_jobs"]
+
+  level enum [not null, note: "INFO | WARN | ERROR"]
+  message text [not null]
+  meta_json json [note: "Payload extra: ids, counts, response info, etc."]
+  created_at datetime [not null]
+}
+
+Ref: sync_logs.job_id > sync_jobs.id
+
+/* (Opcional recomendado) Detalle por registro procesado */
+Table sync_job_items {
+  id varchar(36) [pk, note: "UUID interno"]
+  job_id varchar(36) [not null, note: "FK a sync_jobs"]
+
+  entity_table varchar(60) [not null, note: "Ej: classrooms"]
+  entity_id varchar(36) [note: "ID del registro en tu BD (uuid)"]
+  external_id varchar(100) [note: "ID externo si difiere"]
+
+  action enum [not null, note: "UPSERT | SKIP | DEACTIVATE | ERROR"]
+  message text [note: "Detalle de acción o error"]
+  meta_json json [note: "Antes/después/diagnóstico"]
+  created_at datetime [not null]
+}
+
+Ref: sync_job_items.job_id > sync_jobs.id
+
+/* Mapeo de días requerido por AulaVirtual (daysOfWeek[0]) */
+Table external_day_map {
+  id varchar(36) [pk, note: "UUID interno"]
+  source_id varchar(36) [not null, note: "FK a external_sources (AULAVIRTUAL normalmente)"]
+
+  day_name enum [not null, note: "LUNES | MARTES | MIERCOLES | JUEVES | VIERNES | SABADO | DOMINGO"]
+  external_value int [not null, note: "Valor requerido por el sistema externo (ej: JUEVES -> 6)"]
+
+  created_at datetime [not null]
+}
+
+Ref: external_day_map.source_id > external_sources.id
+
+/* Config de videoconferencias por oferta (qué provider/credencial usar) */
+Table class_offering_conference_config {
+  id varchar(36) [pk, note: "UUID interno"]
+
+  class_offering_id varchar(36) [not null, unique, note: "Una config por oferta"]
+  provider enum [not null, note: "AULAVIRTUAL | ZOOM (futuro)"]
+
+  credential_id varchar(36) [note: "FK a zoom_credentials; si null, auto-assign"]
+  topic_template varchar(255) [note: "Plantilla opcional para el name/topic"]
+  auto_assign boolean [not null, note: "Si true, escoger credencial automáticamente"]
+
+  created_at datetime [not null]
+  updated_at datetime [not null]
+}
+
+Ref: class_offering_conference_config.class_offering_id > class_offerings.id
+Ref: class_offering_conference_config.credential_id > zoom_users.id
+
+/* Una ejecución real de una videoclase (instancia Zoom) */
+Table meeting_instances {
+  id varchar(36) [pk, note: "UUID interno"]
+
+  video_conference_id varchar(36) [not null, note: "FK a video_conferences"]
+  zoom_meeting_id varchar(50) [not null, note: "redundante para consultas"]
+  zoom_meeting_uuid varchar(128) [not null, note: "uuid real de instancia (Zoom)"]
+
+  scheduled_start datetime [note: "desde video_conferences.start_time"]
+  scheduled_end datetime [note: "desde video_conferences.end_time"]
+
+  actual_start datetime [note: "hora real de inicio (Zoom)"]
+  actual_end datetime [note: "hora real de fin (Zoom)"]
+
+  duration_minutes int [note: "duración real"]
+  status enum [not null, note: "CREATED | IN_PROGRESS | ENDED | ERROR"]
+
+  raw_json json [note: "payload de Zoom (opcional)"]
+  created_at datetime [not null]
+  updated_at datetime [not null]
+}
+
+Ref: meeting_instances.video_conference_id > video_conferences.id
+
+/* Participantes detectados en la instancia (opcional: normalizar) */
+Table meeting_participants {
+  id varchar(36) [pk]
+
+  meeting_instance_id varchar(36) [not null]
+  zoom_participant_id varchar(128) [note: "id del participante en Zoom si existe"]
+  zoom_user_id varchar(128) [note: "si Zoom lo provee"]
+  display_name varchar(200) [not null]
+  email varchar(190) [note: "si está disponible"]
+
+  role enum [not null, note: "HOST | CO_HOST | PANELIST | ATTENDEE | UNKNOWN"]
+
+  teacher_id varchar(36) [note: "si se mapea a teachers (por dni/email)"]
+  created_at datetime [not null]
+}
+
+Ref: meeting_participants.meeting_instance_id > meeting_instances.id
+Ref: meeting_participants.teacher_id > teachers.id
+
+/* Segmentos de asistencia: cada join/leave (reconexiones) */
+Table meeting_attendance_segments {
+  id varchar(36) [pk]
+
+  meeting_instance_id varchar(36) [not null]
+  participant_id varchar(36) [not null]
+
+  join_time datetime [not null]
+  leave_time datetime [note: "null si sigue conectado"]
+  minutes int [note: "cálculo: leave-join"]
+
+  connection_type varchar(40) [note: "web/desktop/mobile/etc si Zoom lo da"]
+  ip_address varchar(45) [note: "si Zoom lo da"]
+  raw_json json [note: "payload segmento"]
+  created_at datetime [not null]
+}
+
+Ref: meeting_attendance_segments.meeting_instance_id > meeting_instances.id
+Ref: meeting_attendance_segments.participant_id > meeting_participants.id
+
+/* Resumen agregado por docente dentro de una instancia */
+Table meeting_teacher_metrics {
+  id varchar(36) [pk]
+
+  meeting_instance_id varchar(36) [not null]
+  teacher_id varchar(36) [not null]
+
+  join_count int [not null, note: "cuántas veces ingresó"]
+  total_minutes int [not null]
+  first_join datetime [not null]
+  last_leave datetime [note: "si terminó"]
+
+  is_host boolean [not null]
+  created_at datetime [not null]
+  updated_at datetime [not null]
+}
+
+Ref: meeting_teacher_metrics.meeting_instance_id > meeting_instances.id
+Ref: meeting_teacher_metrics.teacher_id > teachers.id
+
+/* Grabaciones asociadas a la instancia */
+Table meeting_recordings {
+  id varchar(36) [pk]
+
+  meeting_instance_id varchar(36) [not null]
+  zoom_recording_id varchar(128) [note: "id o file_id"]
+  recording_type enum [not null, note: "MP4 | M4A | CHAT | TRANSCRIPT | VTT | OTHER"]
+
+  file_extension varchar(10)
+  file_size_bytes bigint
+  download_url varchar(500) [note: "si decides guardarlo; o solo metadata"]
+  play_url varchar(500) [note: "opcional"]
+  start_time datetime
+  end_time datetime
+
+  status enum [not null, note: "AVAILABLE | DELETED | EXPIRED | ERROR"]
+  raw_json json
+  created_at datetime [not null]
+}
+
+Ref: meeting_recordings.meeting_instance_id > meeting_instances.id
+
+/* Transcript como asset (texto completo + formato) */
+Table meeting_transcripts {
+  id varchar(36) [pk]
+
+  meeting_instance_id varchar(36) [not null]
+  recording_id varchar(36) [note: "si viene como archivo transcript"]
+  
+  format enum [not null, note: "TEXT | VTT | SRT | JSON"]
+  language varchar(10) [note: "es-PE, es, etc"]
+
+  transcript_text longtext [note: "texto completo"]
+  confidence_avg decimal(5,2) [note: "si existe"]
+  created_at datetime [not null]
+}
+
+Ref: meeting_transcripts.meeting_instance_id > meeting_instances.id
+Ref: meeting_transcripts.recording_id > meeting_recordings.id
+
+/* (Opcional) segmentos por tiempo para buscar por minuto */
+Table meeting_transcript_segments {
+  id varchar(36) [pk]
+
+  meeting_transcript_id varchar(36) [not null]
+  start_second int [not null]
+  end_second int [not null]
+
+  speaker varchar(120) [note: "si se identifica"]
+  text text [not null]
+}
+
+Ref: meeting_transcript_segments.meeting_transcript_id > meeting_transcripts.id
+
+
+/* Syllabus esperado por oferta y semana */
+Table class_syllabus_sessions {
+  id varchar(36) [pk]
+
+  class_offering_id varchar(36) [not null]
+  semester_week_id varchar(36) [not null]
+
+  session_title varchar(200) [not null, note: "Tema de la semana"]
+  expected_content text [not null, note: "Resumen del contenido esperado"]
+  bibliography text [note: "opcional"]
+
+  created_at datetime [not null]
+  updated_at datetime [not null]
+
+  indexes {
+    (class_offering_id, semester_week_id) [unique]
+  }
+}
+
+Ref: class_syllabus_sessions.class_offering_id > class_offerings.id
+Ref: class_syllabus_sessions.semester_week_id > semester_weeks.id
+
+/* Keywords del syllabus (manual o generado) */
+Table class_syllabus_keywords {
+  id varchar(36) [pk]
+
+  syllabus_session_id varchar(36) [not null]
+  keyword varchar(80) [not null]
+  weight decimal(5,2) [note: "peso opcional"]
+
+  indexes {
+    (syllabus_session_id, keyword) [unique]
+  }
+}
+
+Ref: class_syllabus_keywords.syllabus_session_id > class_syllabus_sessions.id
+
+/* Resultado de concordancia por reunión real */
+Table meeting_syllabus_match {
+  id varchar(36) [pk]
+
+  meeting_instance_id varchar(36) [not null]
+  syllabus_session_id varchar(36) [not null]
+
+  method enum [not null, note: "TFIDF | KEYWORD_OVERLAP | HYBRID"]
+  score decimal(5,2) [not null, note: "0..100"]
+  matched_keywords_json json [note: "keywords coincidentes + pesos"]
+  notes text [note: "observaciones o razón del score"]
+
+  status enum [not null, note: "OK | REVIEW | MISMATCH"]
+  created_at datetime [not null]
+}
+
+Ref: meeting_syllabus_match.meeting_instance_id > meeting_instances.id
+Ref: meeting_syllabus_match.syllabus_session_id > class_syllabus_sessions.id
+
+/* Resumen “no IA pagada”: heurístico y auditable */
+Table meeting_summaries {
+  id varchar(36) [pk]
+
+  meeting_instance_id varchar(36) [not null]
+  summary_type enum [not null, note: "EXTRACTIVE | KEYPOINTS | KEYWORDS"]
+  summary_text text [not null]
+
+  keywords_json json [note: "top keywords"]
+  created_at datetime [not null]
+}
+
+Ref: meeting_summaries.meeting_instance_id > meeting_instances.id
+
+Table class_zoom_meetings {
+  id varchar(36) [pk]
+  class_offering_id varchar(36) [not null]
+
+  zoom_meeting_id varchar(50) [not null]
+  zoom_user_id varchar(36) [note: "cuenta Zoom usada"]
+  is_active boolean [not null]
+
+  created_at datetime [not null]
+  updated_at datetime [not null]
+
+  indexes {
+    (class_offering_id, zoom_meeting_id) [unique]
+  }
+}
+
+Ref: class_zoom_meetings.class_offering_id > class_offerings.id
+Ref: class_zoom_meetings.zoom_user_id > zoom_users.id
+
+/* =========================================================
+   1) DOCENTES POR GRUPO (P1/P2/LAB/TEORIA)
+   ========================================================= */
+
+Table class_group_teachers {
+  id varchar(36) [pk, note: "UUID"]
+
+  class_group_id varchar(36) [not null, note: "FK -> class_groups.id"]
+  teacher_id varchar(36) [not null, note: "FK -> teachers.id"]
+
+  role enum [not null, note: "PRIMARY | SUPPORT | ASSISTANT | PRACTICE_HEAD | LAB_INSTRUCTOR"]
+  is_primary boolean [not null, default: false, note: "docente principal del grupo"]
+
+  assigned_from datetime [note: "opcional: inicio vigencia"]
+  assigned_to datetime [note: "opcional: fin vigencia"]
+
+  notes varchar(300) [note: "opcional"]
+  created_at datetime [not null]
+  updated_at datetime [not null]
+
+  indexes {
+    (class_group_id, teacher_id) [unique]
+    (teacher_id)
+  }
+}
+
+Ref: class_group_teachers.class_group_id > class_groups.id
+Ref: class_group_teachers.teacher_id > teachers.id
+
+
+/* =========================================================
+   2) REQUERIMIENTOS DE HORAS POR CURSO/SECCIÓN (T/P/LAB)
+      Para validar "TIPO DE CURSO" y horas esperadas
+   ========================================================= */
+
+/*
+  Opción recomendada: por course_section (más preciso porque
+  puede variar por plan/ciclo/sección).
+  Si prefieres por course_id, lo adaptamos.
+*/
+Table course_section_hour_requirements {
+  id varchar(36) [pk, note: "UUID"]
+
+  course_section_id varchar(36) [not null, note: "FK -> course_sections.id"]
+
+  course_format enum [not null, note: "T | P | TP | LAB | MIXED"]
+
+  theory_hours_academic int [not null, default: 0, note: "horas académicas esperadas (teoría)"]
+  practice_hours_academic int [not null, default: 0, note: "horas académicas esperadas (práctica)"]
+  lab_hours_academic int [not null, default: 0, note: "horas académicas esperadas (laboratorio)"]
+
+  academic_minutes_per_hour int [not null, default: 50, note: "minutos por hora académica (ej: 50)"]
+  notes varchar(300)
+
+  created_at datetime [not null]
+  updated_at datetime [not null]
+
+  indexes {
+    (course_section_id) [unique]
+  }
+}
+
+Ref: course_section_hour_requirements.course_section_id > course_sections.id
+
+
+/* =========================================================
+   3) CRUCES (CHOQUES) - snapshot opcional para auditoría
+      (Docente / Aula / Grupo-Sección)
+   ========================================================= */
+
+Table schedule_conflicts {
+  id varchar(36) [pk, note: "UUID"]
+
+  semester_id varchar(36) [not null, note: "FK -> semesters.id"]
+
+  conflict_type enum [not null, note: "TEACHER_OVERLAP | CLASSROOM_OVERLAP | GROUP_OVERLAP | SECTION_OVERLAP"]
+  severity enum [not null, note: "INFO | WARNING | CRITICAL"]
+
+  /*
+    Entity principal afectada (dependiendo del tipo):
+    - TEACHER_OVERLAP  -> teacher_id
+    - CLASSROOM_OVERLAP-> classroom_id
+    - GROUP_OVERLAP    -> class_group_id
+    - SECTION_OVERLAP  -> class_offering_id (o section_id según tu modelo)
+  */
+  teacher_id varchar(36) [note: "nullable"]
+  classroom_id varchar(36) [note: "nullable"]
+  class_group_id varchar(36) [note: "nullable"]
+  class_offering_id varchar(36) [note: "nullable"]
+
+  meeting_a_id varchar(36) [not null, note: "FK -> class_meetings.id"]
+  meeting_b_id varchar(36) [not null, note: "FK -> class_meetings.id"]
+
+  overlap_minutes int [not null, default: 0]
+  detail_json json [note: "campos extra: rango solapado, nombres, etc."]
+
+  detected_at datetime [not null]
+  created_at datetime [not null]
+
+  indexes {
+    (semester_id, conflict_type)
+    (teacher_id)
+    (classroom_id)
+    (class_group_id)
+    (class_offering_id)
+  }
+}
+
+Ref: schedule_conflicts.semester_id > semesters.id
+Ref: schedule_conflicts.teacher_id > teachers.id
+Ref: schedule_conflicts.classroom_id > classrooms.id
+Ref: schedule_conflicts.class_group_id > class_groups.id
+Ref: schedule_conflicts.class_offering_id > class_offerings.id
+Ref: schedule_conflicts.meeting_a_id > class_meetings.id
+Ref: schedule_conflicts.meeting_b_id > class_meetings.id
+
+
+/* =========================================================
+   4) (OPCIONAL PERO ÚTIL) VERSIONADO DE HORARIOS
+      Para auditoría tipo "antes/después"
+   ========================================================= */
+
+Table schedule_versions {
+  id varchar(36) [pk, note: "UUID"]
+  semester_id varchar(36) [not null]
+
+  version_label varchar(80) [not null, note: "Ej: 'v1 preliminar', 'v2 final'"]
+  description varchar(300)
+
+  created_by varchar(80) [note: "usuario o id externo"]
+  created_at datetime [not null]
+
+  indexes {
+    (semester_id, version_label) [unique]
+  }
+}
+
+Ref: schedule_versions.semester_id > semesters.id
+
+/*
+  Si quieres versionar meetings sin duplicar todo, agrega
+  una FK opcional a class_meetings:
+    class_meetings.schedule_version_id (nullable)
+  o crea una tabla snapshot:
+*/
+Table class_meeting_snapshots {
+  id varchar(36) [pk, note: "UUID"]
+
+  schedule_version_id varchar(36) [not null]
+  class_meeting_id varchar(36) [not null]
+
+  snapshot_json json [not null, note: "copia del meeting (day/start/end/classroom/group/teacher refs)"]
+  created_at datetime [not null]
+
+  indexes {
+    (schedule_version_id, class_meeting_id) [unique]
+  }
+}
+
+Ref: class_meeting_snapshots.schedule_version_id > schedule_versions.id
+Ref: class_meeting_snapshots.class_meeting_id > class_meetings.id

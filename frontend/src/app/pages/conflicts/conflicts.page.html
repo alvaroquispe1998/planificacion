@@ -1,0 +1,35 @@
+<section class="page">
+  <h1>Deteccion de cruces</h1>
+  <div class="toolbar">
+    <label>Semester ID <input [(ngModel)]="semesterId" placeholder="UUID semester" /></label>
+    <button (click)="detectConflicts()">Detectar y guardar snapshot</button>
+    <button (click)="loadConflicts()">Recargar lista</button>
+  </div>
+
+  <pre *ngIf="lastRun">{{ lastRun | json }}</pre>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Tipo</th>
+        <th>Severidad</th>
+        <th>Overlap min</th>
+        <th>Teacher</th>
+        <th>Classroom</th>
+        <th>Meeting A</th>
+        <th>Meeting B</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr *ngFor="let conflict of conflicts">
+        <td>{{ conflict.conflict_type }}</td>
+        <td>{{ conflict.severity }}</td>
+        <td>{{ conflict.overlap_minutes }}</td>
+        <td>{{ conflict.teacher_id }}</td>
+        <td>{{ conflict.classroom_id }}</td>
+        <td>{{ conflict.meeting_a_id }}</td>
+        <td>{{ conflict.meeting_b_id }}</td>
+      </tr>
+    </tbody>
+  </table>
+</section>

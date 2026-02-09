@@ -1,0 +1,58 @@
+.page {
+  display: grid;
+  gap: 1rem;
+}
+
+.toolbar {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.grid.three {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+article {
+  border: 1px solid #e3e3e3;
+  border-radius: 8px;
+  padding: 0.7rem;
+  background: #fff;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border: 1px solid #efefef;
+  padding: 0.5rem;
+  font-size: 0.82rem;
+}
+
+tr.selected {
+  background: #ddeefe;
+}
+
+pre {
+  max-height: 220px;
+  overflow: auto;
+  background: #f7f7f7;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+}
+
+input,
+button {
+  padding: 0.45rem;
+}
+
+label {
+  display: grid;
+  gap: 0.2rem;
+}

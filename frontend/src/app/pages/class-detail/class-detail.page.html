@@ -1,0 +1,99 @@
+<section class="page" *ngIf="offering as row">
+  <h1>Detalle de clase</h1>
+  <p><strong>Class offering:</strong> {{ row.id }}</p>
+  <p><strong>Course:</strong> {{ row.course_id }} | <strong>Semester:</strong> {{ row.semester_id }}</p>
+
+  <div class="grid two">
+    <article>
+      <h2>Planificado</h2>
+      <h3>Docentes por oferta</h3>
+      <ul>
+        <li *ngFor="let teacher of teachers">
+          {{ teacher.teacher_id }} - {{ teacher.role }} - primary={{ teacher.is_primary }}
+        </li>
+      </ul>
+
+      <h3>Horarios</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Dia</th>
+            <th>Inicio</th>
+            <th>Fin</th>
+            <th>Grupo</th>
+            <th>Aula</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let meeting of meetings">
+            <td>{{ meeting.day_of_week }}</td>
+            <td>{{ meeting.start_time }}</td>
+            <td>{{ meeting.end_time }}</td>
+            <td>{{ meeting.class_group_id }}</td>
+            <td>{{ meeting.classroom_id }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Validacion de horas</h3>
+      <pre>{{ hoursValidation | json }}</pre>
+    </article>
+
+    <article>
+      <h2>Ejecucion real</h2>
+      <h3>Video conferences</h3>
+      <ul>
+        <li *ngFor="let conference of videoConferences">
+          {{ conference.id }} - zoom {{ conference.zoom_meeting_id }} - {{ conference.start_time }}
+        </li>
+      </ul>
+
+      <h3>Meeting instances</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Inicio real</th>
+            <th>Fin real</th>
+            <th>Duracion</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            *ngFor="let instance of meetingInstances"
+            (click)="selectMeetingInstance(instance.id)"
+            [class.selected]="instance.id === selectedMeetingInstanceId"
+          >
+            <td>{{ instance.id }}</td>
+            <td>{{ instance.actual_start }}</td>
+            <td>{{ instance.actual_end }}</td>
+            <td>{{ instance.duration_minutes }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
+  </div>
+
+  <article>
+    <h2>Auditoria de contenido</h2>
+    <div class="toolbar">
+      <button (click)="runSummary()">Generar resumen</button>
+      <button (click)="runMatch()">Ejecutar concordancia (HYBRID)</button>
+    </div>
+
+    <div class="grid three">
+      <div>
+        <h3>Metricas docente</h3>
+        <pre>{{ teacherMetrics | json }}</pre>
+      </div>
+      <div>
+        <h3>Resumenes</h3>
+        <pre>{{ summaries | json }}</pre>
+      </div>
+      <div>
+        <h3>Match syllabus</h3>
+        <pre>{{ matches | json }}</pre>
+      </div>
+    </div>
+  </article>
+</section>

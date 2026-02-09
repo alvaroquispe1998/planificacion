@@ -1,0 +1,138 @@
+<section class="page">
+  <h1>Planificacion academica</h1>
+
+  <div class="grid two">
+    <article>
+      <h2>Nueva oferta</h2>
+      <div class="form-grid">
+        <label>ID <input [(ngModel)]="offeringForm.id" /></label>
+        <label>Semester ID <input [(ngModel)]="offeringForm.semester_id" /></label>
+        <label>Study Plan ID <input [(ngModel)]="offeringForm.study_plan_id" /></label>
+        <label>Program ID <input [(ngModel)]="offeringForm.academic_program_id" /></label>
+        <label>Course ID <input [(ngModel)]="offeringForm.course_id" /></label>
+        <label>Course Section ID <input [(ngModel)]="offeringForm.course_section_id" /></label>
+        <label>Campus ID <input [(ngModel)]="offeringForm.campus_id" /></label>
+        <label>Delivery Modality ID <input [(ngModel)]="offeringForm.delivery_modality_id" /></label>
+        <label>Shift ID <input [(ngModel)]="offeringForm.shift_id" /></label>
+        <label>Projected Vacancies <input type="number" [(ngModel)]="offeringForm.projected_vacancies" /></label>
+        <label>Status <input type="checkbox" [(ngModel)]="offeringForm.status" /></label>
+      </div>
+      <button (click)="createOffering()">Crear oferta</button>
+    </article>
+
+    <article>
+      <h2>Ofertas</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Semester</th>
+            <th>Course</th>
+            <th>Detalle</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            *ngFor="let offering of offerings"
+            (click)="selectOffering(offering.id)"
+            [class.selected]="offering.id === selectedOfferingId"
+          >
+            <td>{{ offering.id }}</td>
+            <td>{{ offering.semester_id }}</td>
+            <td>{{ offering.course_id }}</td>
+            <td>
+              <a [routerLink]="['/class-detail', offering.id]" (click)="$event.stopPropagation()">ver</a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
+  </div>
+
+  <div class="grid two">
+    <article>
+      <h2>Grupos</h2>
+      <div class="form-grid">
+        <label>ID <input [(ngModel)]="groupForm.id" /></label>
+        <label>Offering ID <input [(ngModel)]="groupForm.class_offering_id" /></label>
+        <label>Tipo
+          <select [(ngModel)]="groupForm.group_type">
+            <option>THEORY</option>
+            <option>PRACTICE</option>
+            <option>LAB</option>
+          </select>
+        </label>
+        <label>Codigo <input [(ngModel)]="groupForm.code" /></label>
+        <label>Capacidad <input type="number" [(ngModel)]="groupForm.capacity" /></label>
+      </div>
+      <button (click)="createGroup()">Crear grupo</button>
+
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Tipo</th>
+            <th>Codigo</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let group of groups">
+            <td>{{ group.id }}</td>
+            <td>{{ group.group_type }}</td>
+            <td>{{ group.code }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article>
+      <h2>Horarios (class_meetings)</h2>
+      <div class="form-grid">
+        <label>ID <input [(ngModel)]="meetingForm.id" /></label>
+        <label>Offering ID <input [(ngModel)]="meetingForm.class_offering_id" /></label>
+        <label>Group ID <input [(ngModel)]="meetingForm.class_group_id" /></label>
+        <label>Dia
+          <select [(ngModel)]="meetingForm.day_of_week">
+            <option>LUNES</option>
+            <option>MARTES</option>
+            <option>MIERCOLES</option>
+            <option>JUEVES</option>
+            <option>VIERNES</option>
+            <option>SABADO</option>
+            <option>DOMINGO</option>
+          </select>
+        </label>
+        <label>Inicio <input [(ngModel)]="meetingForm.start_time" /></label>
+        <label>Fin <input [(ngModel)]="meetingForm.end_time" /></label>
+        <label>Minutos <input type="number" [(ngModel)]="meetingForm.minutes" /></label>
+        <label>Horas academicas <input type="number" [(ngModel)]="meetingForm.academic_hours" /></label>
+        <label>Classroom ID <input [(ngModel)]="meetingForm.classroom_id" /></label>
+      </div>
+      <button (click)="createMeeting()">Crear horario</button>
+      <button (click)="runHoursValidation()">Validar horas</button>
+
+      <pre *ngIf="hoursValidation">{{ hoursValidation | json }}</pre>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Grupo</th>
+            <th>Dia</th>
+            <th>Inicio</th>
+            <th>Fin</th>
+            <th>Min</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let meeting of meetings">
+            <td>{{ meeting.class_group_id }}</td>
+            <td>{{ meeting.day_of_week }}</td>
+            <td>{{ meeting.start_time }}</td>
+            <td>{{ meeting.end_time }}</td>
+            <td>{{ meeting.minutes }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
+  </div>
+</section>
