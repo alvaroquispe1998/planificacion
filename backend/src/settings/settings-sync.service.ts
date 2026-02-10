@@ -68,28 +68,28 @@ const SOURCE_DEFINITIONS: Array<{
       name: 'Matricula',
       base_url: 'https://matricula.autonomadeica.edu.pe',
       login_url: null,
-      validate_path: '/admin/campus/get?length=1',
+      validate_path: '/admin/campus/get?start=0&length=1',
     },
     {
       code: 'DOCENTE',
       name: 'Docente',
       base_url: 'https://docente.autonomadeica.edu.pe',
       login_url: null,
-      validate_path: '/admin/cursos/get?length=1',
+      validate_path: '/admin/especialidades/get?start=0&length=1',
     },
     {
       code: 'INTRANET',
       name: 'Intranet',
       base_url: 'https://intranet.autonomadeica.edu.pe',
       login_url: null,
-      validate_path: '/admin/docentes/get?length=1',
+      validate_path: '/admin/docentes/get?start=0&length=1',
     },
     {
       code: 'AULAVIRTUAL',
       name: 'Aula Virtual',
       base_url: 'https://aulavirtual2.autonomadeica.edu.pe',
       login_url: 'https://aulavirtual2.autonomadeica.edu.pe/account/login?ReturnUrl=%2F',
-      validate_path: '/web/conference/aulas/listar?length=1',
+      validate_path: '/web/conference/aulas/listar?start=0&length=1',
     },
   ];
 
@@ -176,7 +176,7 @@ const RESOURCE_DEFINITIONS: Array<{
     {
       code: 'courses',
       label: 'Cursos',
-      source: 'DOCENTE',
+      source: 'MATRICULA',
       module_code: 'ACADEMIC_CATALOG',
       module_label: 'Catalogo Academico',
       module_description: 'Catalogos curriculares para planificacion.',
@@ -323,15 +323,10 @@ export class SettingsSyncService {
 
     const refreshedSessions = await this.sessionsRepo.find();
     const refreshedMap = new Map(refreshedSessions.map((item) => [item.source_id, item]));
-    const now = Date.now();
     return sources.map((source) => {
       const session = refreshedMap.get(source.id) ?? bySourceId.get(source.id) ?? null;
-      const expiresMs = session?.expires_at ? session.expires_at.getTime() - now : null;
-      const sourceError = probe ? this.normalizeSourceError(session?.error_last ?? null) : null;
-      const status = probe
-        ? session?.status ??
-        (session ? 'ERROR' : ('MISSING' as 'MISSING' | (typeof ExternalSessionStatusValues)[number]))
-        : (session ? 'ACTIVE' : ('MISSING' as 'MISSING' | (typeof ExternalSessionStatusValues)[number]));
+      const sourceError = this.normalizeSourceError(session?.error_last ?? null);
+      const status: string = session?.status ?? (session ? 'ACTIVE' : 'MISSING');
 
       return {
         id: source.id,
@@ -341,14 +336,9 @@ export class SettingsSyncService {
         login_url: source.login_url,
         is_active: source.is_active,
         session_status: status,
-        last_validated_at: probe ? (session?.last_validated_at ?? null) : null,
-        expires_at: session?.expires_at ?? null,
+        last_validated_at: session?.last_validated_at ?? null,
         error_last: sourceError,
-        expires_in_minutes:
-          expiresMs === null ? null : Math.floor(expiresMs / (1000 * 60)),
-        needs_renewal: probe
-          ? !session || status !== 'ACTIVE' || (expiresMs !== null && expiresMs <= 1000 * 60 * 15)
-          : !session,
+        needs_renewal: !session || status !== 'ACTIVE',
       };
     });
   }
@@ -654,7 +644,7 @@ export class SettingsSyncService {
       return this.fetchRows(source, cookie, '/admin/codigos-de-seccion/get', { length: '500' });
     }
     if (resource === 'courses') {
-      return this.fetchRows(source, cookie, '/admin/cursos/get', { length: '1000' });
+      return this.fetchRows(source, cookie, '/admin/cursos/get', { length: '500' });
     }
     if (resource === 'classroom_types') {
       return this.fetchRows(source, cookie, '/admin/aulas/categorias/get', { length: '500' });
@@ -1128,9 +1118,9 @@ export class SettingsSyncService {
   }
 
   private getValidateRequestTimeoutMs() {
-    const raw = Number(this.configService.get<string>('SYNC_VALIDATE_TIMEOUT_MS', '8000'));
+    const raw = Number(this.configService.get<string>('SYNC_VALIDATE_TIMEOUT_MS', '5000'));
     if (!Number.isFinite(raw)) {
-      return 8000;
+      return 5000;
     }
     return Math.max(3000, Math.min(30000, Math.trunc(raw)));
   }
@@ -1538,7 +1528,26 @@ function asDateOnly(value: unknown) {
   if (value === null || value === undefined || value === '') {
     return null;
   }
-  const date = new Date(`${value}`);
+  const raw = `${value}`.trim();
+  if (!raw) return null;
+
+  // Handle DD/MM/YYYY format (from external APIs)
+  const ddmmyyyy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ddmmyyyy) {
+    const day = ddmmyyyy[1].padStart(2, '0');
+    const month = ddmmyyyy[2].padStart(2, '0');
+    const year = ddmmyyyy[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // Handle YYYY-MM-DD (already correct format)
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  }
+
+  // Fallback: try native parsing
+  const date = new Date(raw);
   if (Number.isNaN(date.getTime())) {
     return null;
   }

@@ -247,7 +247,7 @@ export class ClassroomEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;
 
-  @Column({ type: 'varchar', length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 255, nullable: true })
   name!: string | null;
 
   @Column({ type: 'varchar', length: 36, nullable: true })
@@ -271,7 +271,7 @@ export class ClassroomEntity {
   @Column({ type: 'varchar', length: 45, nullable: true })
   ip_address!: string | null;
 
-  @Column({ type: 'varchar', length: 20, nullable: true })
+  @Column({ type: 'varchar', length: 50, nullable: true })
   code!: string | null;
 
   @Column({ type: 'varchar', length: 10, nullable: true })

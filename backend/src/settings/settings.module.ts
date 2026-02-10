@@ -20,6 +20,8 @@ import {
   SyncLogEntity,
   TeacherEntity,
 } from '../entities/catalog-sync.entities';
+import { CatalogController } from './catalog.controller';
+import { CatalogService } from './catalog.service';
 import { SettingsSyncController } from './settings-sync.controller';
 import { SettingsSyncService } from './settings-sync.service';
 
@@ -46,7 +48,7 @@ import { SettingsSyncService } from './settings-sync.service';
       SyncLogEntity,
     ]),
   ],
-  controllers: [SettingsSyncController],
-  providers: [SettingsSyncService],
+  controllers: [SettingsSyncController, CatalogController],
+  providers: [SettingsSyncService, CatalogService],
 })
-export class SettingsModule {}
+export class SettingsModule { }
