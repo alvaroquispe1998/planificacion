@@ -11,20 +11,33 @@
   <article class="panel">
     <div class="panel-top">
       <h2>1) Estado de fuentes y sesiones</h2>
-      <button type="button" (click)="refreshSourceStatus()" [disabled]="isValidating">
-        {{ isValidating ? 'Validando...' : 'Validar sesiones ahora' }}
+      <button type="button" class="ghost" (click)="refreshSourceStatus()" [disabled]="isValidatingAny">
+        {{ isValidatingAny ? 'Validando...' : 'Revalidar sesiones' }}
       </button>
     </div>
 
+    <p *ngIf="isLoading && sources.length === 0" class="loading-msg">
+      Cargando fuentes...
+    </p>
+
     <div class="sources-grid">
-      <article class="source-card" *ngFor="let source of sources">
+      <article class="source-card" *ngFor="let source of sources" [class.source-warn]="sourceNeedsRenewal(source)"
+        [class.source-validating]="isSourceValidating(source.code)">
         <div class="source-head">
           <strong>{{ source.code }}</strong>
-          <span [class.warn]="sourceNeedsRenewal(source)">{{ source.session_status }}</span>
+          <span class="status-badge" [class.warn]="sourceNeedsRenewal(source)"
+            [class.ok]="source.session_status === 'ACTIVE'" [class.validating]="isSourceValidating(source.code)">
+            <ng-container *ngIf="isSourceValidating(source.code)">
+              <span class="mini-spinner"></span> Validando
+            </ng-container>
+            <ng-container *ngIf="!isSourceValidating(source.code)">
+              {{ source.session_status }}
+            </ng-container>
+          </span>
         </div>
-        <p>{{ source.base_url }}</p>
-        <p>Expira: {{ source.expires_at ? (source.expires_at | date: 'yyyy-MM-dd HH:mm') : 'Sin fecha estimada' }}</p>
-        <p>Ultima validacion: {{ source.last_validated_at ? (source.last_validated_at | date: 'yyyy-MM-dd HH:mm') : '-' }}</p>
+        <p class="source-url">{{ source.base_url }}</p>
+        <p>Ultima validacion: {{ source.last_validated_at ? (source.last_validated_at | date: 'yyyy-MM-dd HH:mm') : '-'
+          }}</p>
         <button type="button" class="renew" (click)="startCookieRenewal(source)">Renovar cookie</button>
         <p *ngIf="source.error_last" class="error-inline">{{ source.error_last }}</p>
       </article>
@@ -39,10 +52,6 @@
         <select [(ngModel)]="selectedSourceCode" (ngModelChange)="onSelectedSourceChange()">
           <option *ngFor="let source of sources" [value]="source.code">{{ source.code }}</option>
         </select>
-      </label>
-      <label>
-        Expiracion estimada (opcional)
-        <input type="datetime-local" [(ngModel)]="expiresAt" />
       </label>
     </div>
 
@@ -60,19 +69,16 @@
 
     <label class="cookie-label">
       Cookie (header `Cookie:` o `Set-Cookie:`)
-      <textarea
-        rows="4"
-        [(ngModel)]="cookieText"
-        placeholder="Cookie: nombre1=valor1; nombre2=valor2"
-      ></textarea>
+      <textarea rows="4" [(ngModel)]="cookieText" placeholder="Cookie: nombre1=valor1; nombre2=valor2"></textarea>
     </label>
 
     <div class="actions">
       <button type="button" (click)="saveCookie()" [disabled]="isSavingCookie">
         {{ isSavingCookie ? 'Guardando...' : 'Guardar cookie' }}
       </button>
-      <button type="button" class="ghost" (click)="validateSelectedSource()" [disabled]="isValidating">
-        Validar fuente seleccionada
+      <button type="button" class="ghost" (click)="validateSelectedSource()"
+        [disabled]="isSourceValidating(selectedSourceCode)">
+        {{ isSourceValidating(selectedSourceCode) ? 'Validando...' : 'Validar fuente seleccionada' }}
       </button>
     </div>
   </article>
@@ -93,12 +99,9 @@
       <article class="module-card" *ngFor="let module of resourceModules">
         <div class="module-head">
           <label class="module-toggle">
-            <input
-              type="checkbox"
-              [checked]="isModuleFullySelected(module)"
+            <input type="checkbox" [checked]="isModuleFullySelected(module)"
               [indeterminate]="isModulePartiallySelected(module)"
-              (change)="toggleModuleResources(module, $any($event.target).checked)"
-            />
+              (change)="toggleModuleResources(module, $any($event.target).checked)" />
             <strong>{{ module.label }}</strong>
           </label>
           <span>{{ selectedCountForModule(module) }}/{{ module.resources.length }}</span>
@@ -106,11 +109,8 @@
         <p>{{ module.description }}</p>
         <div class="resource-grid">
           <label *ngFor="let resource of module.resources">
-            <input
-              type="checkbox"
-              [checked]="isResourceSelected(resource.code)"
-              (change)="toggleResource(resource.code, $any($event.target).checked)"
-            />
+            <input type="checkbox" [checked]="isResourceSelected(resource.code)"
+              (change)="toggleResource(resource.code, $any($event.target).checked)" />
             {{ resource.label }} ({{ resource.source }})
           </label>
         </div>
@@ -122,6 +122,19 @@
         {{ isSyncing ? 'Sincronizando...' : 'Ejecutar sincronizacion' }}
       </button>
       <button type="button" class="ghost" (click)="refreshJobs()">Refrescar jobs</button>
+    </div>
+
+    <!-- Sync progress -->
+    <div class="sync-progress" *ngIf="isSyncing">
+      <progress style="width: 100%;"></progress>
+      <div class="sync-progress-info">
+        <span class="sync-pulse-text">
+          Sincronizando {{ syncTotalCount }} recursos...
+        </span>
+        <span class="sync-timer">
+          ⏱ {{ formatElapsed(syncElapsedSeconds) }}
+        </span>
+      </div>
     </div>
   </article>
 

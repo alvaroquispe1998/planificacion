@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service';
 
@@ -30,7 +30,7 @@ type SyncResourceModule = {
   templateUrl: './settings.page.html',
   styleUrl: './settings.page.css',
 })
-export class SettingsPageComponent implements OnInit {
+export class SettingsPageComponent implements OnInit, OnDestroy {
   sources: any[] = [];
   resources: SyncResource[] = [];
   resourceModules: SyncResourceModule[] = [];
@@ -38,7 +38,6 @@ export class SettingsPageComponent implements OnInit {
 
   selectedSourceCode = 'MATRICULA';
   cookieText = '';
-  expiresAt = '';
   renewalUrl = '';
   renewalSteps: string[] = [];
 
@@ -47,21 +46,47 @@ export class SettingsPageComponent implements OnInit {
 
   isLoading = false;
   isSavingCookie = false;
-  isValidating = false;
   isSyncing = false;
   feedback = '';
   errorMessage = '';
   syncResult: any | null = null;
 
-  constructor(private readonly api: ApiService) {}
+  /** Tracks which individual sources are currently being validated */
+  validatingSourceCodes = new Set<string>();
+
+  /** Sync elapsed time tracking */
+  syncElapsedSeconds = 0;
+  syncTotalCount = 0;
+  private syncTimer: ReturnType<typeof setInterval> | null = null;
+  private syncPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  constructor(
+    private readonly api: ApiService,
+    private readonly cdr: ChangeDetectorRef,
+    private readonly zone: NgZone,
+  ) { }
 
   ngOnInit() {
     this.loadInitialData();
   }
 
+  ngOnDestroy() {
+    this.clearSyncTimer();
+  }
+
+  get isValidatingAny(): boolean {
+    return this.validatingSourceCodes.size > 0;
+  }
+
+  isSourceValidating(code: string): boolean {
+    return this.validatingSourceCodes.has(code);
+  }
+
   loadInitialData() {
     this.isLoading = true;
     this.errorMessage = '';
+
+    // Load resources (static list)
     this.api.listSyncResources().subscribe({
       next: (resources) => {
         this.resources = resources as SyncResource[];
@@ -69,43 +94,121 @@ export class SettingsPageComponent implements OnInit {
         if (this.selectedResources.size === 0) {
           this.resources.forEach((item) => this.selectedResources.add(item.code));
         }
-      },
-      error: (err) => this.handleError(err),
-    });
-
-    this.api.listSyncSources(false).subscribe({
-      next: (sources) => {
-        this.sources = sources;
-        if (!this.sources.some((item) => item.code === this.selectedSourceCode) && this.sources.length > 0) {
-          this.selectedSourceCode = this.sources[0].code;
-        }
-        this.onSelectedSourceChange();
-        this.isLoading = false;
+        this.cdr.detectChanges();
       },
       error: (err) => {
-        this.isLoading = false;
         this.handleError(err);
+        this.cdr.detectChanges();
+      },
+    });
+
+    // Phase 1: Load sources WITHOUT probe → instant display
+    this.api.listSyncSources(false).subscribe({
+      next: (sources) => {
+        this.zone.run(() => {
+          this.sources = sources;
+          if (
+            !this.sources.some((item) => item.code === this.selectedSourceCode) &&
+            this.sources.length > 0
+          ) {
+            this.selectedSourceCode = this.sources[0].code;
+          }
+          this.onSelectedSourceChange();
+          this.isLoading = false;
+          this.cdr.detectChanges();
+
+          // Phase 2: Auto-validate each source individually in background
+          this.validateAllSourcesInBackground();
+        });
+      },
+      error: (err) => {
+        this.zone.run(() => {
+          this.isLoading = false;
+          this.handleError(err);
+          this.cdr.detectChanges();
+        });
       },
     });
 
     this.refreshJobs();
   }
 
-  refreshSourceStatus() {
-    this.isValidating = true;
-    this.feedback = '';
-    this.errorMessage = '';
-    this.api.listSyncSources(true).subscribe({
-      next: (sources) => {
-        this.sources = sources;
-        this.isValidating = false;
-        this.feedback = 'Estado de sesiones actualizado.';
+  /** Validates each source individually so each card updates as soon as its validation completes */
+  private validateAllSourcesInBackground() {
+    if (this.sources.length === 0) return;
+
+    for (const source of this.sources) {
+      this.validatingSourceCodes.add(source.code);
+    }
+    this.cdr.detectChanges();
+
+    for (const source of this.sources) {
+      this.validateSingleSourceInBackground(source.code);
+    }
+  }
+
+  private validateSingleSourceInBackground(code: string) {
+    this.api.validateSyncSource(code).subscribe({
+      next: (result) => {
+        this.zone.run(() => {
+          this.validatingSourceCodes.delete(code);
+          this.updateSourceFromValidation(code, result);
+          if (this.validatingSourceCodes.size === 0) {
+            this.feedback = 'Estado de sesiones actualizado.';
+          }
+          this.cdr.detectChanges();
+        });
       },
-      error: (err) => {
-        this.isValidating = false;
-        this.handleError(err);
+      error: () => {
+        this.zone.run(() => {
+          this.validatingSourceCodes.delete(code);
+          const idx = this.sources.findIndex((s) => s.code === code);
+          if (idx >= 0) {
+            this.sources[idx] = {
+              ...this.sources[idx],
+              session_status: 'ERROR',
+              needs_renewal: true,
+              error_last: 'Error de conexion al validar.',
+            };
+          }
+          if (this.validatingSourceCodes.size === 0) {
+            this.feedback = 'Validacion completada con errores.';
+          }
+          this.cdr.detectChanges();
+        });
       },
     });
+  }
+
+  private updateSourceFromValidation(code: string, result: any) {
+    const idx = this.sources.findIndex((s) => s.code === code);
+    if (idx < 0) return;
+    const current = this.sources[idx];
+
+    if (result.ok) {
+      this.sources[idx] = {
+        ...current,
+        session_status: 'ACTIVE',
+        last_validated_at: new Date().toISOString(),
+        needs_renewal: false,
+        error_last: null,
+      };
+    } else {
+      const status = current.session_status === 'MISSING' ? 'MISSING' : 'EXPIRED';
+      this.sources[idx] = {
+        ...current,
+        session_status: status,
+        last_validated_at: new Date().toISOString(),
+        needs_renewal: true,
+        error_last: result.reason ?? null,
+      };
+    }
+  }
+
+  refreshSourceStatus() {
+    this.feedback = '';
+    this.errorMessage = '';
+    this.validateAllSourcesInBackground();
   }
 
   saveCookie() {
@@ -116,43 +219,57 @@ export class SettingsPageComponent implements OnInit {
     this.isSavingCookie = true;
     this.feedback = '';
     this.errorMessage = '';
+    this.cdr.detectChanges();
 
     const payload: Record<string, unknown> = { cookie_text: this.cookieText.trim() };
-    if (this.expiresAt.trim()) {
-      payload['expires_at'] = new Date(this.expiresAt).toISOString();
-    }
 
     this.api.upsertSyncCookie(this.selectedSourceCode, payload).subscribe({
       next: () => {
-        this.isSavingCookie = false;
-        this.feedback = `Cookie guardada para ${this.selectedSourceCode}.`;
-        this.refreshSourceStatus();
+        this.zone.run(() => {
+          this.isSavingCookie = false;
+          this.feedback = `Cookie guardada para ${this.selectedSourceCode}. Validando...`;
+          this.cdr.detectChanges();
+          // Auto-validate the source after saving cookie
+          this.validatingSourceCodes.add(this.selectedSourceCode);
+          this.cdr.detectChanges();
+          this.validateSingleSourceInBackground(this.selectedSourceCode);
+        });
       },
       error: (err) => {
-        this.isSavingCookie = false;
-        this.handleError(err);
+        this.zone.run(() => {
+          this.isSavingCookie = false;
+          this.handleError(err);
+          this.cdr.detectChanges();
+        });
       },
     });
   }
 
   validateSelectedSource() {
-    if (!this.selectedSourceCode) {
-      return;
-    }
-    this.isValidating = true;
+    if (!this.selectedSourceCode) return;
+    const code = this.selectedSourceCode;
+    this.validatingSourceCodes.add(code);
     this.feedback = '';
     this.errorMessage = '';
-    this.api.validateSyncSource(this.selectedSourceCode).subscribe({
+    this.cdr.detectChanges();
+
+    this.api.validateSyncSource(code).subscribe({
       next: (result) => {
-        this.isValidating = false;
-        this.feedback = result.ok
-          ? `Sesion valida en ${this.selectedSourceCode}.`
-          : `Sesion invalida en ${this.selectedSourceCode}: ${result.reason ?? 'sin detalle'}.`;
-        this.refreshSourceStatus();
+        this.zone.run(() => {
+          this.validatingSourceCodes.delete(code);
+          this.updateSourceFromValidation(code, result);
+          this.feedback = result.ok
+            ? `Sesion valida en ${code}.`
+            : `Sesion invalida en ${code}: ${result.reason ?? 'sin detalle'}.`;
+          this.cdr.detectChanges();
+        });
       },
       error: (err) => {
-        this.isValidating = false;
-        this.handleError(err);
+        this.zone.run(() => {
+          this.validatingSourceCodes.delete(code);
+          this.handleError(err);
+          this.cdr.detectChanges();
+        });
       },
     });
   }
@@ -165,20 +282,50 @@ export class SettingsPageComponent implements OnInit {
     }
 
     this.isSyncing = true;
+    this.syncElapsedSeconds = 0;
+    this.syncTotalCount = resources.length;
     this.feedback = '';
     this.errorMessage = '';
     this.syncResult = null;
+    this.cdr.detectChanges();
+
+    // Start elapsed time counter
+    this.syncTimer = setInterval(() => {
+      this.zone.run(() => {
+        this.syncElapsedSeconds++;
+        this.cdr.detectChanges();
+      });
+    }, 1000);
+
+    // Poll jobs every 3s so the user sees live progress
+    this.syncPollInterval = setInterval(() => {
+      this.zone.run(() => {
+        this.refreshJobs();
+      });
+    }, 3000);
+
     this.api.runExternalSync({ mode: this.mode, resources }).subscribe({
       next: (result) => {
-        this.isSyncing = false;
-        this.syncResult = result;
-        this.feedback = 'Sincronizacion ejecutada.';
-        this.refreshJobs();
-        this.refreshSourceStatus();
+        this.zone.run(() => {
+          this.clearSyncTimer();
+          this.isSyncing = false;
+          this.syncResult = result;
+          const elapsed = this.formatElapsed(this.syncElapsedSeconds);
+          this.feedback =
+            `Sincronizacion completada en ${elapsed}. ` +
+            `${result.completed ?? 0} exitosos, ${result.failed ?? 0} fallidos.`;
+          this.refreshJobs();
+          this.cdr.detectChanges();
+        });
       },
       error: (err) => {
-        this.isSyncing = false;
-        this.handleError(err);
+        this.zone.run(() => {
+          this.clearSyncTimer();
+          this.isSyncing = false;
+          this.handleError(err);
+          this.refreshJobs();
+          this.cdr.detectChanges();
+        });
       },
     });
   }
@@ -186,10 +333,25 @@ export class SettingsPageComponent implements OnInit {
   refreshJobs() {
     this.api.listSyncJobs(20).subscribe({
       next: (jobs) => {
-        this.jobs = jobs;
+        this.zone.run(() => {
+          this.jobs = jobs;
+          this.cdr.detectChanges();
+        });
       },
-      error: (err) => this.handleError(err),
+      error: (err) => {
+        this.zone.run(() => {
+          this.handleError(err);
+          this.cdr.detectChanges();
+        });
+      },
     });
+  }
+
+  formatElapsed(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
   }
 
   toggleResource(resourceCode: string, checked: boolean) {
@@ -211,9 +373,7 @@ export class SettingsPageComponent implements OnInit {
   }
 
   isModuleFullySelected(module: SyncResourceModule) {
-    if (!module.resources.length) {
-      return false;
-    }
+    if (!module.resources.length) return false;
     return module.resources.every((item) => this.selectedResources.has(item.code));
   }
 
@@ -235,16 +395,40 @@ export class SettingsPageComponent implements OnInit {
     if (!source) {
       this.renewalUrl = '';
       this.renewalSteps = [];
+      this.cookieText = '';
       return;
     }
     this.renewalUrl = source.login_url || source.base_url || '';
     this.renewalSteps = this.getRenewalSteps(source.code);
+    this.loadSourceCookie(source.code);
+  }
+
+  private loadSourceCookie(code: string) {
+    this.api.getSyncCookie(code).subscribe({
+      next: (result) => {
+        this.zone.run(() => {
+          if (result.has_cookie && this.selectedSourceCode === code) {
+            this.cookieText = result.cookie_text ?? '';
+          } else if (this.selectedSourceCode === code) {
+            this.cookieText = '';
+          }
+          this.cdr.detectChanges();
+        });
+      },
+      error: () => {
+        this.zone.run(() => {
+          if (this.selectedSourceCode === code) {
+            this.cookieText = '';
+          }
+          this.cdr.detectChanges();
+        });
+      },
+    });
   }
 
   startCookieRenewal(source: any) {
     this.selectedSourceCode = source.code;
-    this.renewalUrl = source.login_url || source.base_url || '';
-    this.renewalSteps = this.getRenewalSteps(source.code);
+    this.onSelectedSourceChange();
     this.feedback = `Renovacion preparada para ${source.code}. Abre la URL, inicia sesion y copia el header Cookie.`;
     this.errorMessage = '';
     setTimeout(() => {
@@ -263,6 +447,17 @@ export class SettingsPageComponent implements OnInit {
       this.errorMessage = '';
     } catch {
       this.errorMessage = 'No se pudo copiar la URL. Copiala manualmente.';
+    }
+  }
+
+  private clearSyncTimer() {
+    if (this.syncTimer) {
+      clearInterval(this.syncTimer);
+      this.syncTimer = null;
+    }
+    if (this.syncPollInterval) {
+      clearInterval(this.syncPollInterval);
+      this.syncPollInterval = null;
     }
   }
 

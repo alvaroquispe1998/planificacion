@@ -5,12 +5,46 @@ import { Injectable } from '@angular/core';
 export class ApiService {
   private readonly baseUrl = 'http://localhost:3000';
 
-  constructor(private readonly http: HttpClient) {}
+  constructor(private readonly http: HttpClient) { }
 
   syncAkademic(payload: Record<string, unknown>) {
     return this.http.post<any>(`${this.baseUrl}/sync/akademic`, payload);
   }
 
+  // --- Catalog ---
+  listSemesters() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/semesters`);
+  }
+
+  listCampuses() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/campuses`);
+  }
+
+  listPrograms() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/programs`);
+  }
+
+  listCourses() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/courses`);
+  }
+
+  listTeachers() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/teachers`);
+  }
+
+  listClassrooms() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/classrooms`);
+  }
+
+  listStudyPlans() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/study-plans`);
+  }
+
+  listCourseSections() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/course-sections`);
+  }
+
+  // --- Settings Sync ---
   listSyncResources() {
     return this.http.get<any[]>(`${this.baseUrl}/settings/sync/resources`);
   }
@@ -18,6 +52,10 @@ export class ApiService {
   listSyncSources(probe = false) {
     const params = probe ? new HttpParams().set('probe', 'true') : undefined;
     return this.http.get<any[]>(`${this.baseUrl}/settings/sync/sources`, { params });
+  }
+
+  getSyncCookie(sourceCode: string) {
+    return this.http.get<any>(`${this.baseUrl}/settings/sync/sources/${sourceCode}/session-cookie`);
   }
 
   upsertSyncCookie(sourceCode: string, payload: Record<string, unknown>) {
@@ -41,6 +79,7 @@ export class ApiService {
     return this.http.get<any[]>(`${this.baseUrl}/settings/sync/jobs`, { params });
   }
 
+  // --- Planning ---
   listClassOfferings() {
     return this.http.get<any[]>(`${this.baseUrl}/planning/class-offerings`);
   }
@@ -49,26 +88,43 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/planning/class-offerings/${id}`);
   }
 
-  createClassOffering(payload: Record<string, unknown>) {
+  createClassOffering(payload: any) {
     return this.http.post<any>(`${this.baseUrl}/planning/class-offerings`, payload);
   }
 
-  listClassGroups(classOfferingId?: string) {
-    const params = classOfferingId
-      ? new HttpParams().set('class_offering_id', classOfferingId)
-      : undefined;
-    return this.http.get<any[]>(`${this.baseUrl}/planning/class-groups`, { params });
+  listClassGroups(offeringId: string) {
+    return this.http.get<any[]>(`${this.baseUrl}/planning/class-groups`, { params: { class_offering_id: offeringId } });
   }
 
-  createClassGroup(payload: Record<string, unknown>) {
+  createClassGroup(payload: any) {
     return this.http.post<any>(`${this.baseUrl}/planning/class-groups`, payload);
   }
 
-  listClassMeetings(classOfferingId?: string) {
-    const params = classOfferingId
-      ? new HttpParams().set('class_offering_id', classOfferingId)
-      : undefined;
-    return this.http.get<any[]>(`${this.baseUrl}/planning/class-meetings`, { params });
+  listClassMeetings(offeringId: string) {
+    return this.http.get<any[]>(`${this.baseUrl}/planning/class-meetings`, { params: { class_offering_id: offeringId } });
+  }
+
+  createClassMeeting(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/class-meetings`, payload);
+  }
+
+  validateHours(offeringId: string) {
+    return this.http.post<any>(`${this.baseUrl}/planning/hours-validation/${offeringId}`, {});
+  }
+
+  // --- Teachers ---
+  listClassGroupTeachers(groupId?: string) {
+    const params: any = {};
+    if (groupId) params.class_group_id = groupId;
+    return this.http.get<any[]>(`${this.baseUrl}/planning/class-group-teachers`, { params });
+  }
+
+  assignTeacherToGroup(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/class-group-teachers`, payload);
+  }
+
+  removeTeacherFromGroup(id: string) {
+    return this.http.delete<any>(`${this.baseUrl}/planning/class-group-teachers/${id}`);
   }
 
   listClassTeachers(classOfferingId?: string) {
@@ -78,13 +134,7 @@ export class ApiService {
     return this.http.get<any[]>(`${this.baseUrl}/planning/class-teachers`, { params });
   }
 
-  createClassMeeting(payload: Record<string, unknown>) {
-    return this.http.post<any>(`${this.baseUrl}/planning/class-meetings`, payload);
-  }
 
-  validateHours(classOfferingId: string) {
-    return this.http.post<any>(`${this.baseUrl}/planning/hours-validation/${classOfferingId}`, {});
-  }
 
   detectConflicts(semesterId: string) {
     return this.http.post<any>(`${this.baseUrl}/planning/schedule-conflicts/detect/${semesterId}`, {});

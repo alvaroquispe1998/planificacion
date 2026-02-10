@@ -34,22 +34,22 @@ services:
     ports:
       - '3000:3000'
 
-  seed:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: uai-seed
-    environment:
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: root
-      DB_NAME: uai_planning
-    depends_on:
-      backend:
-        condition: service_started
-    command: ['node', 'dist/seed/seed.js']
-    restart: 'no'
+  # seed:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: uai-seed
+  #   environment:
+  #     DB_HOST: mysql
+  #     DB_PORT: 3306
+  #     DB_USER: root
+  #     DB_PASSWORD: root
+  #     DB_NAME: uai_planning
+  #   depends_on:
+  #     backend:
+  #       condition: service_started
+  #   command: ['node', 'dist/seed/seed.js']
+  #   restart: 'no'
 
   frontend:
     build:

@@ -60,6 +60,12 @@
   border-radius: 10px;
   padding: 0.7rem;
   background: #fbfdff;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.source-card.source-validating {
+  border-color: #90b8e0;
+  box-shadow: 0 0 0 1px rgba(59, 130, 196, 0.15);
 }
 
 .source-head {
@@ -81,6 +87,92 @@
   border-color: #e2b56a;
   color: #8a4d00;
   background: #fff4df;
+}
+
+.source-head span.ok {
+  border-color: #6abf8a;
+  color: #145a2e;
+  background: #e3f8ec;
+}
+
+.source-head span.validating {
+  border-color: #90b8e0;
+  color: #1a5276;
+  background: #e8f4fd;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.source-warn {
+  border-color: #e2b56a;
+}
+
+.source-url {
+  word-break: break-all;
+  color: #30506f;
+}
+
+.loading-msg {
+  text-align: center;
+  padding: 1.5rem 0;
+  color: #5d7188;
+  font-size: 0.9rem;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* Mini spinner for per-source validation */
+.mini-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #90b8e0;
+  border-top-color: #1a5276;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+progress {
+  appearance: none;
+  height: 6px;
+  border: none;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #e5ebf5;
+}
+
+progress:indeterminate {
+  animation: indeterminate-bar 1.8s linear infinite;
+  background: linear-gradient(90deg, #e5ebf5 25%, #3b82c4 50%, #e5ebf5 75%);
+  background-size: 200% 100%;
+}
+
+@keyframes indeterminate-bar {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .source-card p {
@@ -261,6 +353,39 @@ button:disabled {
 
 .error-inline {
   color: #b62020;
+}
+
+/* Sync progress panel */
+.sync-progress {
+  margin-top: 1rem;
+  border: 1px solid #d8e4f2;
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: #f0f7ff;
+}
+
+.sync-progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.sync-pulse-text {
+  color: #1a5276;
+  font-weight: 500;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.sync-timer {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.9rem;
+  color: #113f67;
+  font-weight: 600;
+  background: #e0ecf8;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
 }
 
 pre {

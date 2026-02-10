@@ -89,7 +89,7 @@ const SOURCE_DEFINITIONS: Array<{
       name: 'Aula Virtual',
       base_url: 'https://aulavirtual2.autonomadeica.edu.pe',
       login_url: 'https://aulavirtual2.autonomadeica.edu.pe/account/login?ReturnUrl=%2F',
-      validate_path: '/web/conference/aulas/listar?start=0&length=1',
+      validate_path: '/facultades/get',
     },
   ];
 
@@ -466,7 +466,10 @@ export class SettingsSyncService {
       // Try parse JSON
       try {
         const json = JSON.parse(text);
-        const hasData = json && (Array.isArray(json.data) || json.data !== undefined || json.recordsTotal !== undefined);
+        const hasData =
+          Array.isArray(json) ||
+          (json && (Array.isArray(json.data) || json.data !== undefined || json.recordsTotal !== undefined));
+
         if (hasData) {
           await this.sessionsRepo.update({ id: session.id }, {
             status: 'ACTIVE',
@@ -476,7 +479,7 @@ export class SettingsSyncService {
           });
           return { source_code: normalized, ok: true, reason: null };
         }
-        return { source_code: normalized, ok: false, reason: `JSON sin campo "data". Keys: ${Object.keys(json).join(', ')}` };
+        return { source_code: normalized, ok: false, reason: `JSON sin campo "data" y no es array. Keys: ${Object.keys(json).join(', ')}` };
       } catch {
         // Not JSON - maybe HTML login page
         const bodyPreview = text.substring(0, 120).replace(/\s+/g, ' ').trim();
