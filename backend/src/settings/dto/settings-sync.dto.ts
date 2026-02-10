@@ -1,7 +1,6 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
-  IsDateString,
   IsEnum,
   IsNotEmpty,
   IsOptional,
@@ -14,10 +13,6 @@ export class UpsertSourceSessionDto {
   @IsString()
   @IsNotEmpty()
   cookie_text!: string;
-
-  @IsOptional()
-  @IsDateString()
-  expires_at?: string;
 }
 
 export class RunSettingsSyncDto {

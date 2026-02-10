@@ -63,35 +63,35 @@ const SOURCE_DEFINITIONS: Array<{
   login_url: string | null;
   validate_path: string;
 }> = [
-  {
-    code: 'MATRICULA',
-    name: 'Matricula',
-    base_url: 'https://matricula.autonomadeica.edu.pe',
-    login_url: null,
-    validate_path: '/admin/campus/get',
-  },
-  {
-    code: 'DOCENTE',
-    name: 'Docente',
-    base_url: 'https://docente.autonomadeica.edu.pe',
-    login_url: null,
-    validate_path: '/admin/cursos/get?length=1',
-  },
-  {
-    code: 'INTRANET',
-    name: 'Intranet',
-    base_url: 'https://intranet.autonomadeica.edu.pe',
-    login_url: null,
-    validate_path: '/admin/docentes/get?length=1',
-  },
-  {
-    code: 'AULAVIRTUAL',
-    name: 'Aula Virtual',
-    base_url: 'https://aulavirtual2.autonomadeica.edu.pe',
-    login_url: 'https://aulavirtual2.autonomadeica.edu.pe/account/login?ReturnUrl=%2F',
-    validate_path: '/web/conference/aulas/listar?length=1',
-  },
-];
+    {
+      code: 'MATRICULA',
+      name: 'Matricula',
+      base_url: 'https://matricula.autonomadeica.edu.pe',
+      login_url: null,
+      validate_path: '/admin/campus/get?length=1',
+    },
+    {
+      code: 'DOCENTE',
+      name: 'Docente',
+      base_url: 'https://docente.autonomadeica.edu.pe',
+      login_url: null,
+      validate_path: '/admin/cursos/get?length=1',
+    },
+    {
+      code: 'INTRANET',
+      name: 'Intranet',
+      base_url: 'https://intranet.autonomadeica.edu.pe',
+      login_url: null,
+      validate_path: '/admin/docentes/get?length=1',
+    },
+    {
+      code: 'AULAVIRTUAL',
+      name: 'Aula Virtual',
+      base_url: 'https://aulavirtual2.autonomadeica.edu.pe',
+      login_url: 'https://aulavirtual2.autonomadeica.edu.pe/account/login?ReturnUrl=%2F',
+      validate_path: '/web/conference/aulas/listar?length=1',
+    },
+  ];
 
 const RESOURCE_DEFINITIONS: Array<{
   code: ResourceCode;
@@ -103,153 +103,155 @@ const RESOURCE_DEFINITIONS: Array<{
   module_order: number;
   resource_order: number;
 }> = [
-  {
-    code: 'semesters',
-    label: 'Semestres',
-    source: 'MATRICULA',
-    module_code: 'CALENDAR',
-    module_label: 'Calendario Academico',
-    module_description: 'Estructura temporal del periodo academico.',
-    module_order: 10,
-    resource_order: 10,
-  },
-  {
-    code: 'campuses',
-    label: 'Sedes / Campus',
-    source: 'MATRICULA',
-    module_code: 'ACADEMIC_STRUCTURE',
-    module_label: 'Estructura Academica',
-    module_description: 'Facultades, programas, sedes, planes y secciones base.',
-    module_order: 20,
-    resource_order: 10,
-  },
-  {
-    code: 'faculties',
-    label: 'Facultades',
-    source: 'MATRICULA',
-    module_code: 'ACADEMIC_STRUCTURE',
-    module_label: 'Estructura Academica',
-    module_description: 'Facultades, programas, sedes, planes y secciones base.',
-    module_order: 20,
-    resource_order: 20,
-  },
-  {
-    code: 'academic_programs',
-    label: 'Programas Academicos',
-    source: 'MATRICULA',
-    module_code: 'ACADEMIC_STRUCTURE',
-    module_label: 'Estructura Academica',
-    module_description: 'Facultades, programas, sedes, planes y secciones base.',
-    module_order: 20,
-    resource_order: 30,
-  },
-  {
-    code: 'academic_program_campuses',
-    label: 'Relacion Programa-Campus',
-    source: 'MATRICULA',
-    module_code: 'ACADEMIC_STRUCTURE',
-    module_label: 'Estructura Academica',
-    module_description: 'Facultades, programas, sedes, planes y secciones base.',
-    module_order: 20,
-    resource_order: 40,
-  },
-  {
-    code: 'study_plans',
-    label: 'Planes de Estudio',
-    source: 'INTRANET',
-    module_code: 'ACADEMIC_STRUCTURE',
-    module_label: 'Estructura Academica',
-    module_description: 'Facultades, programas, sedes, planes y secciones base.',
-    module_order: 20,
-    resource_order: 50,
-  },
-  {
-    code: 'sections',
-    label: 'Secciones',
-    source: 'MATRICULA',
-    module_code: 'ACADEMIC_STRUCTURE',
-    module_label: 'Estructura Academica',
-    module_description: 'Facultades, programas, sedes, planes y secciones base.',
-    module_order: 20,
-    resource_order: 60,
-  },
-  {
-    code: 'courses',
-    label: 'Cursos',
-    source: 'DOCENTE',
-    module_code: 'ACADEMIC_CATALOG',
-    module_label: 'Catalogo Academico',
-    module_description: 'Catalogos curriculares para planificacion.',
-    module_order: 30,
-    resource_order: 10,
-  },
-  {
-    code: 'course_sections',
-    label: 'Secciones por Curso',
-    source: 'AULAVIRTUAL',
-    module_code: 'ACADEMIC_CATALOG',
-    module_label: 'Catalogo Academico',
-    module_description: 'Catalogos curriculares para planificacion.',
-    module_order: 30,
-    resource_order: 20,
-  },
-  {
-    code: 'teachers',
-    label: 'Docentes',
-    source: 'INTRANET',
-    module_code: 'ACADEMIC_STAFF',
-    module_label: 'Personal Academico',
-    module_description: 'Personas y cuentas necesarias para el dictado.',
-    module_order: 40,
-    resource_order: 10,
-  },
-  {
-    code: 'zoom_users',
-    label: 'Usuarios Zoom',
-    source: 'AULAVIRTUAL',
-    module_code: 'ACADEMIC_STAFF',
-    module_label: 'Personal Academico',
-    module_description: 'Personas y cuentas necesarias para el dictado.',
-    module_order: 40,
-    resource_order: 20,
-  },
-  {
-    code: 'classroom_types',
-    label: 'Tipos de Aula',
-    source: 'MATRICULA',
-    module_code: 'INFRASTRUCTURE',
-    module_label: 'Infraestructura',
-    module_description: 'Ambientes fisicos y tipologias.',
-    module_order: 50,
-    resource_order: 10,
-  },
-  {
-    code: 'buildings',
-    label: 'Pabellones',
-    source: 'MATRICULA',
-    module_code: 'INFRASTRUCTURE',
-    module_label: 'Infraestructura',
-    module_description: 'Ambientes fisicos y tipologias.',
-    module_order: 50,
-    resource_order: 20,
-  },
-  {
-    code: 'classrooms',
-    label: 'Aulas',
-    source: 'MATRICULA',
-    module_code: 'INFRASTRUCTURE',
-    module_label: 'Infraestructura',
-    module_description: 'Ambientes fisicos y tipologias.',
-    module_order: 50,
-    resource_order: 30,
-  },
-];
+    {
+      code: 'semesters',
+      label: 'Semestres',
+      source: 'MATRICULA',
+      module_code: 'CALENDAR',
+      module_label: 'Calendario Academico',
+      module_description: 'Estructura temporal del periodo academico.',
+      module_order: 10,
+      resource_order: 10,
+    },
+    {
+      code: 'campuses',
+      label: 'Sedes / Campus',
+      source: 'MATRICULA',
+      module_code: 'ACADEMIC_STRUCTURE',
+      module_label: 'Estructura Academica',
+      module_description: 'Facultades, programas, sedes, planes y secciones base.',
+      module_order: 20,
+      resource_order: 10,
+    },
+    {
+      code: 'faculties',
+      label: 'Facultades',
+      source: 'MATRICULA',
+      module_code: 'ACADEMIC_STRUCTURE',
+      module_label: 'Estructura Academica',
+      module_description: 'Facultades, programas, sedes, planes y secciones base.',
+      module_order: 20,
+      resource_order: 20,
+    },
+    {
+      code: 'academic_programs',
+      label: 'Programas Academicos',
+      source: 'MATRICULA',
+      module_code: 'ACADEMIC_STRUCTURE',
+      module_label: 'Estructura Academica',
+      module_description: 'Facultades, programas, sedes, planes y secciones base.',
+      module_order: 20,
+      resource_order: 30,
+    },
+    {
+      code: 'academic_program_campuses',
+      label: 'Relacion Programa-Campus',
+      source: 'MATRICULA',
+      module_code: 'ACADEMIC_STRUCTURE',
+      module_label: 'Estructura Academica',
+      module_description: 'Facultades, programas, sedes, planes y secciones base.',
+      module_order: 20,
+      resource_order: 40,
+    },
+    {
+      code: 'study_plans',
+      label: 'Planes de Estudio',
+      source: 'INTRANET',
+      module_code: 'ACADEMIC_STRUCTURE',
+      module_label: 'Estructura Academica',
+      module_description: 'Facultades, programas, sedes, planes y secciones base.',
+      module_order: 20,
+      resource_order: 50,
+    },
+    {
+      code: 'sections',
+      label: 'Secciones',
+      source: 'MATRICULA',
+      module_code: 'ACADEMIC_STRUCTURE',
+      module_label: 'Estructura Academica',
+      module_description: 'Facultades, programas, sedes, planes y secciones base.',
+      module_order: 20,
+      resource_order: 60,
+    },
+    {
+      code: 'courses',
+      label: 'Cursos',
+      source: 'DOCENTE',
+      module_code: 'ACADEMIC_CATALOG',
+      module_label: 'Catalogo Academico',
+      module_description: 'Catalogos curriculares para planificacion.',
+      module_order: 30,
+      resource_order: 10,
+    },
+    {
+      code: 'course_sections',
+      label: 'Secciones por Curso',
+      source: 'AULAVIRTUAL',
+      module_code: 'ACADEMIC_CATALOG',
+      module_label: 'Catalogo Academico',
+      module_description: 'Catalogos curriculares para planificacion.',
+      module_order: 30,
+      resource_order: 20,
+    },
+    {
+      code: 'teachers',
+      label: 'Docentes',
+      source: 'INTRANET',
+      module_code: 'ACADEMIC_STAFF',
+      module_label: 'Personal Academico',
+      module_description: 'Personas y cuentas necesarias para el dictado.',
+      module_order: 40,
+      resource_order: 10,
+    },
+    {
+      code: 'zoom_users',
+      label: 'Usuarios Zoom',
+      source: 'AULAVIRTUAL',
+      module_code: 'ACADEMIC_STAFF',
+      module_label: 'Personal Academico',
+      module_description: 'Personas y cuentas necesarias para el dictado.',
+      module_order: 40,
+      resource_order: 20,
+    },
+    {
+      code: 'classroom_types',
+      label: 'Tipos de Aula',
+      source: 'MATRICULA',
+      module_code: 'INFRASTRUCTURE',
+      module_label: 'Infraestructura',
+      module_description: 'Ambientes fisicos y tipologias.',
+      module_order: 50,
+      resource_order: 10,
+    },
+    {
+      code: 'buildings',
+      label: 'Pabellones',
+      source: 'MATRICULA',
+      module_code: 'INFRASTRUCTURE',
+      module_label: 'Infraestructura',
+      module_description: 'Ambientes fisicos y tipologias.',
+      module_order: 50,
+      resource_order: 20,
+    },
+    {
+      code: 'classrooms',
+      label: 'Aulas',
+      source: 'MATRICULA',
+      module_code: 'INFRASTRUCTURE',
+      module_label: 'Infraestructura',
+      module_description: 'Ambientes fisicos y tipologias.',
+      module_order: 50,
+      resource_order: 30,
+    },
+  ];
 
 const RESOURCE_CODES = RESOURCE_DEFINITIONS.map((item) => item.code);
 const RESOURCE_BY_CODE = new Map(RESOURCE_DEFINITIONS.map((item) => [item.code, item]));
 
 @Injectable()
 export class SettingsSyncService {
+  private readonly allowInsecureTls: boolean;
+
   constructor(
     private readonly configService: ConfigService,
     @InjectRepository(SemesterEntity)
@@ -288,7 +290,13 @@ export class SettingsSyncService {
     private readonly jobsRepo: Repository<SyncJobEntity>,
     @InjectRepository(SyncLogEntity)
     private readonly logsRepo: Repository<SyncLogEntity>,
-  ) {}
+  ) {
+    this.allowInsecureTls =
+      this.configService.get<string>('SYNC_TLS_ALLOW_INSECURE', 'true') === 'true';
+    if (this.allowInsecureTls) {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    }
+  }
 
   async listResources() {
     return RESOURCE_DEFINITIONS.map((resource) => ({
@@ -310,9 +318,7 @@ export class SettingsSyncService {
     const bySourceId = new Map(sessions.map((item) => [item.source_id, item]));
 
     if (probe) {
-      for (const source of sources) {
-        await this.probeSourceSession(source.code);
-      }
+      await Promise.allSettled(sources.map((source) => this.probeSourceSession(source.code)));
     }
 
     const refreshedSessions = await this.sessionsRepo.find();
@@ -321,9 +327,11 @@ export class SettingsSyncService {
     return sources.map((source) => {
       const session = refreshedMap.get(source.id) ?? bySourceId.get(source.id) ?? null;
       const expiresMs = session?.expires_at ? session.expires_at.getTime() - now : null;
-      const status =
-        session?.status ??
-        (session ? 'ERROR' : ('MISSING' as 'MISSING' | (typeof ExternalSessionStatusValues)[number]));
+      const sourceError = probe ? this.normalizeSourceError(session?.error_last ?? null) : null;
+      const status = probe
+        ? session?.status ??
+        (session ? 'ERROR' : ('MISSING' as 'MISSING' | (typeof ExternalSessionStatusValues)[number]))
+        : (session ? 'ACTIVE' : ('MISSING' as 'MISSING' | (typeof ExternalSessionStatusValues)[number]));
 
       return {
         id: source.id,
@@ -333,17 +341,37 @@ export class SettingsSyncService {
         login_url: source.login_url,
         is_active: source.is_active,
         session_status: status,
-        last_validated_at: session?.last_validated_at ?? null,
+        last_validated_at: probe ? (session?.last_validated_at ?? null) : null,
         expires_at: session?.expires_at ?? null,
-        error_last: session?.error_last ?? null,
+        error_last: sourceError,
         expires_in_minutes:
           expiresMs === null ? null : Math.floor(expiresMs / (1000 * 60)),
-        needs_renewal:
-          !session ||
-          status !== 'ACTIVE' ||
-          (expiresMs !== null && expiresMs <= 1000 * 60 * 15),
+        needs_renewal: probe
+          ? !session || status !== 'ACTIVE' || (expiresMs !== null && expiresMs <= 1000 * 60 * 15)
+          : !session,
       };
     });
+  }
+
+  async getSourceSessionCookie(code: string) {
+    await this.ensureDefaultSources();
+    const source = await this.findSourceOrFail(code);
+    const session = await this.sessionsRepo.findOne({ where: { source_id: source.id } });
+    if (!session) {
+      return {
+        source_code: source.code,
+        cookie_text: '',
+        has_cookie: false,
+        updated_at: null,
+      };
+    }
+
+    return {
+      source_code: source.code,
+      cookie_text: this.decryptCookieJar(session.cookie_jar_encrypted),
+      has_cookie: true,
+      updated_at: session.updated_at,
+    };
   }
 
   async upsertSourceSession(code: string, dto: UpsertSourceSessionDto) {
@@ -357,52 +385,128 @@ export class SettingsSyncService {
     const encrypted = this.encryptCookieJar(cookie);
     const now = new Date();
     const existing = await this.sessionsRepo.findOne({ where: { source_id: source.id } });
-    const expiresAt = dto.expires_at ? new Date(dto.expires_at) : null;
 
     const session = existing
       ? this.sessionsRepo.create({
-          ...existing,
-          cookie_jar_encrypted: encrypted,
-          status: 'ACTIVE',
-          expires_at: expiresAt ?? existing.expires_at,
-          error_last: null,
-          updated_at: now,
-        })
+        ...existing,
+        cookie_jar_encrypted: encrypted,
+        status: 'ACTIVE',
+        expires_at: null,
+        error_last: null,
+        updated_at: now,
+      })
       : this.sessionsRepo.create({
-          id: newId(),
-          source_id: source.id,
-          cookie_jar_encrypted: encrypted,
-          status: 'ACTIVE',
-          last_validated_at: null,
-          expires_at: expiresAt,
-          error_last: null,
-          created_at: now,
-          updated_at: now,
-        });
+        id: newId(),
+        source_id: source.id,
+        cookie_jar_encrypted: encrypted,
+        status: 'ACTIVE',
+        last_validated_at: null,
+        expires_at: null,
+        error_last: null,
+        created_at: now,
+        updated_at: now,
+      });
 
     await this.sessionsRepo.save(session);
     return {
       source_code: source.code,
       status: session.status,
-      expires_at: session.expires_at,
+      cookie_text: cookie,
       updated_at: session.updated_at,
     };
   }
 
   async validateSourceSession(code: string) {
-    await this.ensureDefaultSources();
-    const result = await this.probeSourceSession(code);
-    return {
-      source_code: result.source.code,
-      ok: result.ok,
-      reason: result.reason ?? null,
-      status_code: result.status_code ?? null,
-      final_url: result.final_url ?? null,
-    };
+    const normalized = code.trim().toUpperCase();
+    const def = SOURCE_DEFINITIONS.find((s) => s.code === normalized);
+    if (!def) {
+      return { source_code: normalized, ok: false, reason: 'Fuente no configurada.' };
+    }
+
+    const source = await this.sourcesRepo.findOne({ where: { code: normalized } });
+    if (!source) {
+      return { source_code: normalized, ok: false, reason: 'Fuente no encontrada en BD.' };
+    }
+
+    const session = await this.sessionsRepo.findOne({ where: { source_id: source.id } });
+    if (!session) {
+      return { source_code: normalized, ok: false, reason: 'No hay cookie guardada.' };
+    }
+
+    const cookie = this.decryptCookieJar(session.cookie_jar_encrypted);
+    const url = new URL(def.validate_path, def.base_url);
+    if (!url.searchParams.has('length')) {
+      url.searchParams.set('length', '1');
+    }
+    const fetchUrl = url.toString();
+
+    console.log(`[VALIDATE ${normalized}] URL: ${fetchUrl}`);
+    console.log(`[VALIDATE ${normalized}] Cookie (first 80): ${cookie.substring(0, 80)}...`);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+
+    try {
+      const res = await fetch(fetchUrl, {
+        method: 'GET',
+        headers: {
+          accept: 'application/json, text/plain, */*',
+          cookie,
+          'x-requested-with': 'XMLHttpRequest',
+        },
+        redirect: 'follow',
+        signal: controller.signal,
+      });
+
+      const text = await res.text();
+      const contentType = res.headers.get('content-type') ?? '';
+
+      console.log(`[VALIDATE ${normalized}] Status: ${res.status} | Content-Type: ${contentType}`);
+      console.log(`[VALIDATE ${normalized}] Redirected: ${res.redirected} | Final URL: ${res.url}`);
+      console.log(`[VALIDATE ${normalized}] Body preview: ${text.substring(0, 200)}`);
+
+      // If redirected to login or 401/403 → invalid
+      if (res.status === 401 || res.status === 403) {
+        return { source_code: normalized, ok: false, reason: `No autorizado (${res.status}).` };
+      }
+      if (res.redirected && /login|signin/i.test(res.url)) {
+        return { source_code: normalized, ok: false, reason: 'Redirigido a login. Cookie expirada.' };
+      }
+
+      // Try parse JSON
+      try {
+        const json = JSON.parse(text);
+        const hasData = json && (Array.isArray(json.data) || json.data !== undefined || json.recordsTotal !== undefined);
+        if (hasData) {
+          await this.sessionsRepo.update({ id: session.id }, {
+            status: 'ACTIVE',
+            last_validated_at: new Date(),
+            error_last: null,
+            updated_at: new Date(),
+          });
+          return { source_code: normalized, ok: true, reason: null };
+        }
+        return { source_code: normalized, ok: false, reason: `JSON sin campo "data". Keys: ${Object.keys(json).join(', ')}` };
+      } catch {
+        // Not JSON - maybe HTML login page
+        const bodyPreview = text.substring(0, 120).replace(/\s+/g, ' ').trim();
+        return {
+          source_code: normalized,
+          ok: false,
+          reason: `HTTP ${res.status} - No es JSON (${contentType}). Preview: ${bodyPreview}`,
+        };
+      }
+    } catch (err) {
+      const msg = err instanceof Error && err.name === 'AbortError'
+        ? 'Timeout (5s).' : (err instanceof Error ? err.message : 'Error de conexión.');
+      console.log(`[VALIDATE ${normalized}] Error: ${msg}`);
+      return { source_code: normalized, ok: false, reason: msg };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async validateAllSourceSessions() {
-    await this.ensureDefaultSources();
     const results = [];
     for (const source of SOURCE_DEFINITIONS) {
       results.push(await this.validateSourceSession(source.code));
@@ -510,9 +614,9 @@ export class SettingsSyncService {
     const logs =
       jobIds.length > 0
         ? await this.logsRepo.find({
-            where: { job_id: In(jobIds) },
-            order: { created_at: 'DESC' },
-          })
+          where: { job_id: In(jobIds) },
+          order: { created_at: 'DESC' },
+        })
         : [];
 
     const logsByJob = new Map<string, SyncLogEntity[]>();
@@ -855,13 +959,14 @@ export class SettingsSyncService {
     query?: Record<string, string>,
   ) {
     const response = await this.requestSource(source, cookie, path, query);
+    const responseError = this.normalizeErrorText(response.error);
     if (response.expired) {
-      await this.markSessionStatus(source.id, 'EXPIRED', response.error ?? 'Sesion vencida');
+      await this.markSessionStatus(source.id, 'EXPIRED', responseError ?? 'Sesion vencida');
       throw new BadRequestException(`Sesion vencida para fuente ${source.code}. Renueva cookie.`);
     }
     if (!response.ok) {
       throw new BadRequestException(
-        `Error consultando ${source.code}: ${response.status} ${response.error ?? 'sin detalle'}`,
+        `Error consultando ${source.code}: ${response.status} ${responseError ?? 'sin detalle'}`,
       );
     }
     return extractRows(response.payload);
@@ -874,34 +979,36 @@ export class SettingsSyncService {
       return { ok: false, source, session: null, reason: 'No existe cookie/sesion configurada.' };
     }
 
-    if (session.expires_at && session.expires_at.getTime() <= Date.now()) {
-      await this.markSessionStatus(source.id, 'EXPIRED', 'Expirada por fecha local (expires_at).');
-      return { ok: false, source, session, reason: 'Cookie expirada por fecha local.' };
-    }
-
     const cookie = this.decryptCookieJar(session.cookie_jar_encrypted);
     const validatePath = this.getSourceDefinition(source.code).validate_path;
-    const response = await this.requestSource(source, cookie, validatePath);
+    const response = await this.requestSource(
+      source,
+      cookie,
+      validatePath,
+      undefined,
+      this.getValidateRequestTimeoutMs(),
+    );
+    const responseError = this.normalizeErrorText(response.error);
 
     if (response.expired) {
-      await this.markSessionStatus(source.id, 'EXPIRED', response.error ?? 'Sesion vencida');
+      await this.markSessionStatus(source.id, 'EXPIRED', responseError ?? 'Sesion vencida');
       return {
         ok: false,
         source,
         session,
-        reason: response.error ?? 'Sesion vencida',
+        reason: responseError ?? 'Sesion vencida',
         status_code: response.status,
         final_url: response.final_url,
       };
     }
 
     if (!response.ok) {
-      await this.markSessionStatus(source.id, 'ERROR', response.error ?? 'Error validando sesion');
+      await this.markSessionStatus(source.id, 'ERROR', responseError ?? 'Error validando sesion');
       return {
         ok: false,
         source,
         session,
-        reason: response.error ?? `HTTP ${response.status}`,
+        reason: responseError ?? `HTTP ${response.status}`,
         status_code: response.status,
         final_url: response.final_url,
       };
@@ -934,6 +1041,7 @@ export class SettingsSyncService {
     cookie: string,
     path: string,
     query?: Record<string, string>,
+    timeoutOverrideMs?: number,
   ) {
     const url = new URL(path, source.base_url);
     if (query) {
@@ -941,6 +1049,10 @@ export class SettingsSyncService {
         url.searchParams.set(key, value);
       }
     }
+
+    const timeoutMs = timeoutOverrideMs ?? this.getSourceRequestTimeoutMs();
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(url.toString(), {
@@ -952,6 +1064,7 @@ export class SettingsSyncService {
           'user-agent': 'Mozilla/5.0 (UAI Sync)',
         },
         redirect: 'follow',
+        signal: controller.signal,
       });
 
       const contentType = response.headers.get('content-type') ?? '';
@@ -981,16 +1094,64 @@ export class SettingsSyncService {
         expires_at: expiresAt,
       };
     } catch (error) {
+      const isTimeout =
+        error instanceof Error &&
+        (error.name === 'AbortError' || /aborted|abort|timeout/i.test(error.message));
+      const rawMessage = this.toErrorMessage(error);
+      const isTlsError =
+        /certificate|ssl|tls|unable to verify|self signed|CERT_/i.test(rawMessage);
+      const detailedError = isTlsError
+        ? `Error TLS/certificado hacia ${source.code}. Activa SYNC_TLS_ALLOW_INSECURE=true en entorno local.`
+        : rawMessage;
       return {
         ok: false,
         expired: false,
         status: 0,
         payload: null,
-        error: this.toErrorMessage(error),
+        error: isTimeout
+          ? `Timeout consultando ${source.code} (${timeoutMs}ms).`
+          : detailedError,
         final_url: url.toString(),
         expires_at: null,
       };
+    } finally {
+      clearTimeout(timeoutHandle);
     }
+  }
+
+  private getSourceRequestTimeoutMs() {
+    const raw = Number(this.configService.get<string>('SYNC_REQUEST_TIMEOUT_MS', '12000'));
+    if (!Number.isFinite(raw)) {
+      return 12000;
+    }
+    return Math.max(3000, Math.min(60000, Math.trunc(raw)));
+  }
+
+  private getValidateRequestTimeoutMs() {
+    const raw = Number(this.configService.get<string>('SYNC_VALIDATE_TIMEOUT_MS', '8000'));
+    if (!Number.isFinite(raw)) {
+      return 8000;
+    }
+    return Math.max(3000, Math.min(30000, Math.trunc(raw)));
+  }
+
+  private normalizeErrorText(error: string | null | undefined) {
+    if (!error) {
+      return null;
+    }
+    const trimmed = error.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  private normalizeSourceError(error: string | null) {
+    const normalized = this.normalizeErrorText(error);
+    if (!normalized) {
+      return null;
+    }
+    if (/^fetch failed$/i.test(normalized)) {
+      return 'No se pudo conectar a la fuente. Valida la cookie de esa fuente.';
+    }
+    return normalized;
   }
 
   private async upsertById(
@@ -1257,8 +1418,23 @@ export class SettingsSyncService {
   }
 
   private toErrorMessage(error: unknown) {
-    if (error instanceof Error) {
-      return error.message;
+    if (error && typeof error === 'object') {
+      const asRecord = error as Record<string, unknown>;
+      const message =
+        typeof asRecord.message === 'string' ? asRecord.message : null;
+      const cause = asRecord.cause as Record<string, unknown> | undefined;
+      const causeCode = cause && typeof cause.code === 'string' ? cause.code : null;
+      const causeMessage = cause && typeof cause.message === 'string' ? cause.message : null;
+
+      if (message && causeCode && causeMessage) {
+        return `${message} (${causeCode}: ${causeMessage})`;
+      }
+      if (message && causeMessage) {
+        return `${message} (${causeMessage})`;
+      }
+      if (message) {
+        return message;
+      }
     }
     return String(error);
   }

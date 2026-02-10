@@ -16,6 +16,11 @@ export class SettingsSyncController {
     return this.settingsSyncService.listSources(probe === 'true' || probe === '1');
   }
 
+  @Get('sources/:code/session-cookie')
+  getSourceSessionCookie(@Param('code') code: string) {
+    return this.settingsSyncService.getSourceSessionCookie(code);
+  }
+
   @Put('sources/:code/session-cookie')
   upsertSourceSession(@Param('code') code: string, @Body() dto: UpsertSourceSessionDto) {
     return this.settingsSyncService.upsertSourceSession(code, dto);
