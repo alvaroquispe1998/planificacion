@@ -126,7 +126,7 @@ const RESOURCE_DEFINITIONS: Array<{
     {
       code: 'faculties',
       label: 'Facultades',
-      source: 'MATRICULA',
+      source: 'AULAVIRTUAL',
       module_code: 'ACADEMIC_STRUCTURE',
       module_label: 'Estructura Academica',
       module_description: 'Facultades, programas, sedes, planes y secciones base.',
@@ -136,7 +136,7 @@ const RESOURCE_DEFINITIONS: Array<{
     {
       code: 'academic_programs',
       label: 'Programas Academicos',
-      source: 'MATRICULA',
+      source: 'AULAVIRTUAL',
       module_code: 'ACADEMIC_STRUCTURE',
       module_label: 'Estructura Academica',
       module_description: 'Facultades, programas, sedes, planes y secciones base.',
@@ -176,7 +176,7 @@ const RESOURCE_DEFINITIONS: Array<{
     {
       code: 'courses',
       label: 'Cursos',
-      source: 'MATRICULA',
+      source: 'AULAVIRTUAL',
       module_code: 'ACADEMIC_CATALOG',
       module_label: 'Catalogo Academico',
       module_description: 'Catalogos curriculares para planificacion.',
@@ -638,13 +638,35 @@ export class SettingsSyncService {
       return this.fetchRows(source, cookie, '/admin/campus/get');
     }
     if (resource === 'academic_programs') {
-      return this.fetchRows(source, cookie, '/admin/carreras/get', { length: '500' });
+      const facultyIds = await this.resolveFacultyIds();
+      const rows: Record<string, unknown>[] = [];
+      for (const facultyId of facultyIds) {
+        const partial = await this.fetchRows(source, cookie, '/carreras/get', { facultyId });
+        rows.push(
+          ...partial.map((item) => ({
+            ...(item as Record<string, unknown>),
+            faculty_id: facultyId,
+          })),
+        );
+      }
+      return rows;
     }
     if (resource === 'sections') {
       return this.fetchRows(source, cookie, '/admin/codigos-de-seccion/get', { length: '500' });
     }
     if (resource === 'courses') {
-      return this.fetchRows(source, cookie, '/admin/cursos/get', { length: '500' });
+      const programIds = await this.resolveProgramIds();
+      const rows: Record<string, unknown>[] = [];
+      for (const careerId of programIds) {
+        const partial = await this.fetchRows(source, cookie, '/cursos/get', { careerId, length: '500' });
+        rows.push(
+          ...partial.map((item) => ({
+            ...(item as Record<string, unknown>),
+            career_id: careerId,
+          })),
+        );
+      }
+      return rows;
     }
     if (resource === 'classroom_types') {
       return this.fetchRows(source, cookie, '/admin/aulas/categorias/get', { length: '500' });
@@ -653,7 +675,7 @@ export class SettingsSyncService {
       return this.fetchRows(source, cookie, '/web/conference/aulas/listar', { length: '500' });
     }
     if (resource === 'faculties') {
-      return this.fetchRows(source, cookie, '/admin/facultades/get', { length: '500' });
+      return this.fetchRows(source, cookie, '/facultades/get');
     }
     if (resource === 'study_plans') {
       return this.fetchRows(source, cookie, '/admin/planes-de-estudios/get', { length: '1000' });
@@ -1384,6 +1406,16 @@ export class SettingsSyncService {
       return courseIds;
     }
     const rows = await this.coursesRepo.find({ select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
+  private async resolveFacultyIds() {
+    const rows = await this.facultiesRepo.find({ select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
+  private async resolveProgramIds() {
+    const rows = await this.programsRepo.find({ select: { id: true } });
     return rows.map((row) => row.id);
   }
 
