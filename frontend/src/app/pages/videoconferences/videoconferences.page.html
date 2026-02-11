@@ -1,0 +1,127 @@
+<div class="videoconferences-container">
+    <h1>Generación de Videoconferencias</h1>
+
+    <!-- Filtros -->
+    <div class="card filters-card">
+        <div class="card-header">
+            <h2>Filtros de Selección</h2>
+            <p>Seleccione los criterios y use Buscar para cargar el horario de secciones.</p>
+        </div>
+
+        <div class="filters-grid">
+            <div class="filter-group">
+                <label>Facultad</label>
+                <app-multi-select [options]="facultyOptions" [(selectedIds)]="selectedFaculties"
+                    (selectionChange)="onFacultyChange($event)" placeholder="Todas las facultades">
+                </app-multi-select>
+            </div>
+
+            <div class="filter-group">
+                <label>Programa Académico</label>
+                <app-multi-select [options]="programOptions" [(selectedIds)]="selectedPrograms"
+                    [disabled]="!programOptions.length" (selectionChange)="onProgramChange($event)"
+                    placeholder="Todos los programas">
+                </app-multi-select>
+            </div>
+
+            <div class="filter-group">
+                <label>Curso</label>
+                <app-multi-select [options]="courseOptions" [(selectedIds)]="selectedCourses"
+                    [disabled]="!courseOptions.length" (selectionChange)="onCourseChange($event)"
+                    placeholder="Todos los cursos">
+                </app-multi-select>
+            </div>
+
+            <div class="filter-group">
+                <label>Sección</label>
+                <app-multi-select [options]="sectionOptions" [(selectedIds)]="selectedSections"
+                    [disabled]="!sectionOptions.length" placeholder="Todas las secciones">
+                </app-multi-select>
+            </div>
+
+            <div class="filter-group small-group">
+                <label>Modalidad</label>
+                <select [(ngModel)]="selectedModality" class="form-control">
+                    <option value="">Todas</option>
+                    <option value="PRESENCIAL">Presencial</option>
+                    <option value="VIRTUAL">Virtual</option>
+                </select>
+
+                <label style="margin-top: 1rem;">Días</label>
+                <app-multi-select [options]="dayOptions" [(selectedIds)]="selectedDays" placeholder="Todos los días">
+                </app-multi-select>
+            </div>
+        </div>
+
+        <div class="card-actions">
+            <button class="btn btn-primary" (click)="onLoad()" [disabled]="loading">
+                {{ loading ? 'Buscando...' : 'Buscar horario' }}
+            </button>
+        </div>
+    </div>
+
+    <!-- Resultados -->
+    <div class="card results-card" *ngIf="previewData.length > 0">
+        <div class="card-header">
+            <h2>Horario de Secciones Seleccionadas</h2>
+            <div class="generation-toolbar">
+                <div class="date-inputs">
+                    <div class="input-group">
+                        <label>Inicio:</label>
+                        <input type="date" [(ngModel)]="startDate" class="form-control">
+                    </div>
+                    <div class="input-group">
+                        <label>Fin:</label>
+                        <input type="date" [(ngModel)]="endDate" class="form-control">
+                    </div>
+                </div>
+                <div class="toolbar-buttons">
+                    <button class="btn btn-secondary" (click)="assignZoomAuto()">Asignar Zoom Auto</button>
+                    <button class="btn btn-success" (click)="generate()" [disabled]="!startDate || !endDate">Generar
+                        Videoconferencias</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th width="40">
+                            <input type="checkbox" [checked]="allSelected" (change)="toggleAll()">
+                        </th>
+                        <th>Facultad</th>
+                        <th>Programa</th>
+                        <th>Curso</th>
+                        <th>Sección</th>
+                        <th>Día</th>
+                        <th>Horario</th>
+                        <th>Usuario Zoom</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr *ngFor="let item of previewData">
+                        <td>
+                            <input type="checkbox" [(ngModel)]="item.selected">
+                        </td>
+                        <td>{{item.faculty}}</td>
+                        <td>{{item.program}}</td>
+                        <td>{{item.course}}</td>
+                        <td><span class="badge">{{item.section}}</span></td>
+                        <td>{{item.day}}</td>
+                        <td>{{item.start_time}} - {{item.end_time}}</td>
+                        <td>
+                            <input type="text" [(ngModel)]="item.zoom_user" class="form-control form-control-sm"
+                                placeholder="Pendiente...">
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div *ngIf="!loading && previewData.length === 0" class="empty-state">
+        <p>Use los filtros y haga clic en "Buscar horario" para ver el detalle de dia y hora.</p>
+    </div>
+</div>
+

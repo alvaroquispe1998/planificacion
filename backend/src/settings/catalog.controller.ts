@@ -44,4 +44,9 @@ export class CatalogController {
     listCourseSections() {
         return this.catalogService.listCourseSections();
     }
+
+    @Get('classroom-section-schedules')
+    listClassroomSectionSchedules() {
+        return this.catalogService.listClassroomSectionSchedules();
+    }
 }

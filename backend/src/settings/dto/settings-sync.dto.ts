@@ -36,9 +36,22 @@ export class RunSettingsSyncDto {
   course_ids?: string[];
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  classroom_ids?: string[];
+
+  @IsOptional()
   @IsString()
   @MaxLength(36)
   semester_id?: string;
+
+  @IsOptional()
+  @IsString()
+  schedule_start?: string;
+
+  @IsOptional()
+  @IsString()
+  schedule_end?: string;
 
   @IsOptional()
   @Type(() => Number)

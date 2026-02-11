@@ -82,3 +82,7 @@
 
 - `GET /syllabus/matches?meeting_instance_id=`
 - `POST /syllabus/matches/run/:meetingInstanceId/:syllabusSessionId`
+
+## Settings
+
+- `GET /settings/catalog/classroom-section-schedules`

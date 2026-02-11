@@ -137,3 +137,6 @@ npm test -- --watch=false
 
 Se implemento solo funcionalidad mapeable a tablas del archivo `Project UAI Academic Scheduling.txt`.
 No se agregaron tablas nuevas ni logica con IA pagada.
+
+docker compose up -d --build mysql
+docker compose up -d mysql

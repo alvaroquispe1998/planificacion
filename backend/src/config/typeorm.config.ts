@@ -31,6 +31,7 @@ import {
   AcademicProgramEntity,
   BuildingEntity,
   CampusEntity,
+  ClassroomSectionScheduleEntity,
   ClassroomEntity,
   ClassroomTypeEntity,
   CourseEntity,
@@ -46,7 +47,22 @@ import {
   TeacherEntity,
 } from '../entities/catalog-sync.entities';
 
+import {
+  VideoconferenceEntity,
+  VcPeriodEntity,
+  VcFacultyEntity,
+  VcAcademicProgramEntity,
+  VcCourseEntity,
+  VcSectionEntity,
+} from '../videoconference/videoconference.entity';
+
 export const appEntities = [
+  VideoconferenceEntity,
+  VcPeriodEntity,
+  VcFacultyEntity,
+  VcAcademicProgramEntity,
+  VcCourseEntity,
+  VcSectionEntity,
   ClassOfferingEntity,
   ClassGroupEntity,
   ClassMeetingEntity,
@@ -78,6 +94,7 @@ export const appEntities = [
   ClassroomTypeEntity,
   BuildingEntity,
   ClassroomEntity,
+  ClassroomSectionScheduleEntity,
   AcademicProgramCampusEntity,
   CourseSectionEntity,
   ExternalSourceEntity,

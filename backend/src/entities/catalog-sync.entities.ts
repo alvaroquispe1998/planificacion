@@ -4,6 +4,15 @@ export const ExternalSessionStatusValues = ['ACTIVE', 'EXPIRED', 'ERROR'] as con
 export const SyncJobModeValues = ['FULL', 'INCREMENTAL'] as const;
 export const SyncJobStatusValues = ['PENDING', 'RUNNING', 'DONE', 'FAILED'] as const;
 export const SyncLogLevelValues = ['INFO', 'WARN', 'ERROR'] as const;
+export const DayOfWeekValues = [
+  'LUNES',
+  'MARTES',
+  'MIERCOLES',
+  'JUEVES',
+  'VIERNES',
+  'SABADO',
+  'DOMINGO',
+] as const;
 
 @Entity({ name: 'semesters' })
 export class SemesterEntity {
@@ -316,6 +325,49 @@ export class CourseSectionEntity {
 
   @Column({ type: 'varchar', length: 36, nullable: true })
   semester_id!: string | null;
+}
+
+@Entity({ name: 'classroom_section_schedules' })
+@Index(['classroom_id'])
+@Index(['source_section_id'])
+@Index(['course_section_id'])
+@Index(['day_of_week', 'start_time'])
+export class ClassroomSectionScheduleEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  classroom_id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  source_section_id!: string;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  course_section_id!: string | null;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  section_name!: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  course_code!: string | null;
+
+  @Column({ type: 'enum', enum: DayOfWeekValues })
+  day_of_week!: (typeof DayOfWeekValues)[number];
+
+  @Column({ type: 'time' })
+  start_time!: string;
+
+  @Column({ type: 'time' })
+  end_time!: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  title!: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  description!: string | null;
+
+  @Column({ type: 'boolean', default: false })
+  all_day!: boolean;
 }
 
 @Entity({ name: 'external_sources' })

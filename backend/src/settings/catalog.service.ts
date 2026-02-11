@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import {
     AcademicProgramEntity,
     CampusEntity,
+    ClassroomSectionScheduleEntity,
     ClassroomEntity,
     CourseEntity,
     CourseSectionEntity,
@@ -31,6 +32,8 @@ export class CatalogService {
         private readonly studyPlansRepo: Repository<StudyPlanEntity>,
         @InjectRepository(CourseSectionEntity)
         private readonly courseSectionsRepo: Repository<CourseSectionEntity>,
+        @InjectRepository(ClassroomSectionScheduleEntity)
+        private readonly classroomSectionSchedulesRepo: Repository<ClassroomSectionScheduleEntity>,
     ) { }
 
     async listSemesters() {
@@ -72,5 +75,12 @@ export class CatalogService {
 
     async listCourseSections() {
         return this.courseSectionsRepo.find({ take: 3000 });
+    }
+
+    async listClassroomSectionSchedules() {
+        return this.classroomSectionSchedulesRepo.find({
+            order: { day_of_week: 'ASC', start_time: 'ASC' },
+            take: 10000,
+        });
     }
 }

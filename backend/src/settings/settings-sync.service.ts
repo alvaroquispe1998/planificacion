@@ -10,10 +10,12 @@ import {
   AcademicProgramEntity,
   BuildingEntity,
   CampusEntity,
+  ClassroomSectionScheduleEntity,
   ClassroomEntity,
   ClassroomTypeEntity,
   CourseEntity,
   CourseSectionEntity,
+  DayOfWeekValues,
   ExternalSessionEntity,
   ExternalSessionStatusValues,
   ExternalSourceEntity,
@@ -27,6 +29,13 @@ import {
   SyncLogEntity,
   TeacherEntity,
 } from '../entities/catalog-sync.entities';
+import {
+  VcAcademicProgramEntity,
+  VcCourseEntity,
+  VcFacultyEntity,
+  VcPeriodEntity,
+  VcSectionEntity,
+} from '../videoconference/videoconference.entity';
 import { RunSettingsSyncDto, UpsertSourceSessionDto } from './dto/settings-sync.dto';
 
 type SourceCode = 'MATRICULA' | 'DOCENTE' | 'INTRANET' | 'AULAVIRTUAL';
@@ -43,8 +52,15 @@ type ResourceCode =
   | 'teachers'
   | 'buildings'
   | 'classrooms'
+  | 'classroom_section_schedules'
   | 'academic_program_campuses'
-  | 'course_sections';
+  | 'academic_program_campuses'
+  | 'course_sections'
+  | 'vc_periods'
+  | 'vc_faculties'
+  | 'vc_academic_programs'
+  | 'vc_courses'
+  | 'vc_sections';
 
 type SourceProbeResult = {
   ok: boolean;
@@ -243,6 +259,66 @@ const RESOURCE_DEFINITIONS: Array<{
       module_order: 50,
       resource_order: 30,
     },
+    {
+      code: 'classroom_section_schedules',
+      label: 'Horarios por Aula',
+      source: 'INTRANET',
+      module_code: 'INFRASTRUCTURE',
+      module_label: 'Infraestructura',
+      module_description: 'Horarios por aula vinculados a secciones de curso.',
+      module_order: 50,
+      resource_order: 40,
+    },
+    {
+      code: 'vc_periods',
+      label: 'VC: Periodos',
+      source: 'AULAVIRTUAL',
+      module_code: 'VIDEOCONFERENCE',
+      module_label: 'Videoconferencia',
+      module_description: 'Recursos para videoconferencias.',
+      module_order: 60,
+      resource_order: 10,
+    },
+    {
+      code: 'vc_faculties',
+      label: 'VC: Facultades',
+      source: 'AULAVIRTUAL',
+      module_code: 'VIDEOCONFERENCE',
+      module_label: 'Videoconferencia',
+      module_description: 'Recursos para videoconferencias.',
+      module_order: 60,
+      resource_order: 20,
+    },
+    {
+      code: 'vc_academic_programs',
+      label: 'VC: Programas',
+      source: 'AULAVIRTUAL',
+      module_code: 'VIDEOCONFERENCE',
+      module_label: 'Videoconferencia',
+      module_description: 'Recursos para videoconferencias.',
+      module_order: 60,
+      resource_order: 30,
+    },
+    {
+      code: 'vc_courses',
+      label: 'VC: Cursos',
+      source: 'AULAVIRTUAL',
+      module_code: 'VIDEOCONFERENCE',
+      module_label: 'Videoconferencia',
+      module_description: 'Recursos para videoconferencias.',
+      module_order: 60,
+      resource_order: 40,
+    },
+    {
+      code: 'vc_sections',
+      label: 'VC: Secciones',
+      source: 'AULAVIRTUAL',
+      module_code: 'VIDEOCONFERENCE',
+      module_label: 'Videoconferencia',
+      module_description: 'Recursos para videoconferencias.',
+      module_order: 60,
+      resource_order: 50,
+    },
   ];
 
 const RESOURCE_CODES = RESOURCE_DEFINITIONS.map((item) => item.code);
@@ -278,6 +354,8 @@ export class SettingsSyncService {
     private readonly buildingsRepo: Repository<BuildingEntity>,
     @InjectRepository(ClassroomEntity)
     private readonly classroomsRepo: Repository<ClassroomEntity>,
+    @InjectRepository(ClassroomSectionScheduleEntity)
+    private readonly classroomSectionSchedulesRepo: Repository<ClassroomSectionScheduleEntity>,
     @InjectRepository(AcademicProgramCampusEntity)
     private readonly programCampusesRepo: Repository<AcademicProgramCampusEntity>,
     @InjectRepository(CourseSectionEntity)
@@ -290,6 +368,16 @@ export class SettingsSyncService {
     private readonly jobsRepo: Repository<SyncJobEntity>,
     @InjectRepository(SyncLogEntity)
     private readonly logsRepo: Repository<SyncLogEntity>,
+    @InjectRepository(VcPeriodEntity)
+    private readonly vcPeriodsRepo: Repository<VcPeriodEntity>,
+    @InjectRepository(VcFacultyEntity)
+    private readonly vcFacultiesRepo: Repository<VcFacultyEntity>,
+    @InjectRepository(VcAcademicProgramEntity)
+    private readonly vcProgramsRepo: Repository<VcAcademicProgramEntity>,
+    @InjectRepository(VcCourseEntity)
+    private readonly vcCoursesRepo: Repository<VcCourseEntity>,
+    @InjectRepository(VcSectionEntity)
+    private readonly vcSectionsRepo: Repository<VcSectionEntity>,
   ) {
     this.allowInsecureTls =
       this.configService.get<string>('SYNC_TLS_ALLOW_INSECURE', 'true') === 'true';
@@ -540,7 +628,10 @@ export class SettingsSyncService {
         resources: dto.resources ?? null,
         campus_ids: dto.campus_ids ?? null,
         course_ids: dto.course_ids ?? null,
+        classroom_ids: dto.classroom_ids ?? null,
         semester_id: dto.semester_id ?? null,
+        schedule_start: dto.schedule_start ?? null,
+        schedule_end: dto.schedule_end ?? null,
       });
 
       if (!sourceResult.ok || !sourceResult.cookie) {
@@ -689,6 +780,30 @@ export class SettingsSyncService {
     if (resource === 'classrooms') {
       return this.fetchRows(source, cookie, '/admin/aulas/get', { length: '1000' });
     }
+    if (resource === 'classroom_section_schedules') {
+      const classroomIds = await this.resolveClassroomIds(dto.classroom_ids);
+      const scheduleWindow = await this.resolveScheduleWindow(dto);
+      const rows: Record<string, unknown>[] = [];
+      for (const classroomId of classroomIds) {
+        const partial = await this.fetchRows(
+          source,
+          cookie,
+          `/admin/horarioaulas/${classroomId}/get`,
+          {
+            start: scheduleWindow.start,
+            end: scheduleWindow.end,
+            _: `${Date.now()}`,
+          },
+        );
+        rows.push(
+          ...partial.map((item) => ({
+            ...(item as Record<string, unknown>),
+            __classroom_id: classroomId,
+          })),
+        );
+      }
+      return rows;
+    }
     if (resource === 'buildings') {
       const campusIds = await this.resolveCampusIds(dto.campus_ids);
       const rows: Record<string, unknown>[] = [];
@@ -730,6 +845,67 @@ export class SettingsSyncService {
         const partial = await this.fetchRows(source, cookie, '/secciones/get', {
           courseId,
         });
+        rows.push(
+          ...partial.map((item) => ({
+            ...(item as Record<string, unknown>),
+            __course_id: courseId,
+          })),
+        );
+      }
+      return rows;
+    }
+
+    // --- NUEVOS RECURSOS VC ---
+    if (resource === 'vc_periods') {
+      // https://aulavirtual2.autonomadeica.edu.pe/periodos-academicos/get
+      return this.fetchRows(source, cookie, '/periodos-academicos/get');
+    }
+
+    if (resource === 'vc_faculties') {
+      // https://aulavirtual2.autonomadeica.edu.pe/facultades/get
+      return this.fetchRows(source, cookie, '/facultades/get');
+    }
+
+    if (resource === 'vc_academic_programs') {
+      // https://aulavirtual2.autonomadeica.edu.pe/carreras/get?facultyId=...
+      // Iteramos sobre TODAS las facultades que tengamos, o resolvemos IDs
+      const facultyIds = await this.resolveVcFacultyIds();
+      const rows: Record<string, unknown>[] = [];
+      for (const facultyId of facultyIds) {
+        const partial = await this.fetchRows(source, cookie, '/carreras/get', { facultyId });
+        rows.push(
+          ...partial.map((item) => ({
+            ...(item as Record<string, unknown>),
+            __faculty_id: facultyId,
+          })),
+        );
+      }
+      return rows;
+    }
+
+    if (resource === 'vc_courses') {
+      // https://aulavirtual2.autonomadeica.edu.pe/cursos/get?careerId=...
+      const programIds = await this.resolveVcProgramIds();
+      const rows: Record<string, unknown>[] = [];
+      for (const careerId of programIds) {
+        const partial = await this.fetchRows(source, cookie, '/cursos/get', { careerId, length: '1000' });
+        rows.push(
+          ...partial.map((item) => ({
+            ...(item as Record<string, unknown>),
+            __program_id: careerId,
+          })),
+        );
+      }
+      return rows;
+    }
+
+    if (resource === 'vc_sections') {
+      // https://aulavirtual2.autonomadeica.edu.pe/secciones/get?courseId=...
+      const courseIds = await this.resolveVcCourseIds();
+      const rows: Record<string, unknown>[] = [];
+      // Lógica por lotes o 1 a 1. Si son muchos cursos, demora.
+      for (const courseId of courseIds) {
+        const partial = await this.fetchRows(source, cookie, '/secciones/get', { courseId });
         rows.push(
           ...partial.map((item) => ({
             ...(item as Record<string, unknown>),
@@ -932,6 +1108,10 @@ export class SettingsSyncService {
       );
     }
 
+    if (resource === 'classroom_section_schedules') {
+      return this.persistClassroomSectionSchedules(rows);
+    }
+
     if (resource === 'academic_program_campuses') {
       return this.upsertById(
         this.programCampusesRepo,
@@ -960,6 +1140,66 @@ export class SettingsSyncService {
           text: asNullableString(pick(row, 'text', 'description', 'name')),
           teacher_id: asNullableString(pick(row, 'teacher_id', 'teacherId')),
           semester_id: asNullableString(pick(row, 'semester_id', 'semested_id', 'semesterId')),
+        })),
+      );
+    }
+
+    // --- PERSIST VC RESOURCES ---
+    if (resource === 'vc_periods') {
+      return this.upsertById(
+        this.vcPeriodsRepo,
+        rows.map((row) => ({
+          id: asString(pick(row, 'id')),
+          text: asNullableString(pick(row, 'text', 'name')),
+          selected: asBoolean(pick(row, 'selected'), false),
+          is_active: true,
+        })),
+      );
+    }
+
+    if (resource === 'vc_faculties') {
+      return this.upsertById(
+        this.vcFacultiesRepo,
+        rows.map((row) => ({
+          id: asString(pick(row, 'id')),
+          name: asString(pick(row, 'text', 'name')),
+        })),
+      );
+    }
+
+    if (resource === 'vc_academic_programs') {
+      // facultyId viene de fetchRows injected param (__faculty_id) o respuesta directa
+      // La API no devuelve facultyId en el objeto, pero nosotros lo inyectamos en fetchRows
+      return this.upsertById(
+        this.vcProgramsRepo,
+        rows.map((row) => ({
+          id: asString(pick(row, 'id')),
+          name: asString(pick(row, 'text', 'name')),
+          faculty_id: asString(pick(row, '__faculty_id', 'facultyId')),
+        })),
+      );
+    }
+
+    if (resource === 'vc_courses') {
+      return this.upsertById(
+        this.vcCoursesRepo,
+        rows.map((row) => ({
+          id: asString(pick(row, 'id')),
+          code: asNullableString(pick(row, 'code')),
+          name: asString(pick(row, 'text', 'name')),
+          program_id: asString(pick(row, '__program_id', 'careerId', 'programId')),
+        })),
+      );
+    }
+
+    if (resource === 'vc_sections') {
+      return this.upsertById(
+        this.vcSectionsRepo,
+        rows.map((row) => ({
+          id: asString(pick(row, 'id')),
+          name: asString(pick(row, 'text', 'name')),
+          course_id: asString(pick(row, '__course_id', 'courseId')),
+          teachers_json: (row.teachers as Record<string, unknown>[]) ?? [],
         })),
       );
     }
@@ -1167,6 +1407,166 @@ export class SettingsSyncService {
       return 'No se pudo conectar a la fuente. Valida la cookie de esa fuente.';
     }
     return normalized;
+  }
+
+  private async persistClassroomSectionSchedules(rows: Record<string, unknown>[]) {
+    const received = rows.length;
+    if (received === 0) {
+      return { received, processed: 0, created: 0, updated: 0, skipped: 0, deduplicated: 0 };
+    }
+
+    let skippedInvalidShape = 0;
+    const parsedRows: ClassroomSectionScheduleEntity[] = [];
+    for (const row of rows) {
+      const classroomId = asNullableString(pick(row, '__classroom_id', 'classroom_id'));
+      const sourceSectionId = asNullableString(pick(row, 'id', 'section_id', 'sectionId'));
+      const start = parseDateTimeParts(asNullableString(pick(row, 'start')));
+      const end = parseDateTimeParts(asNullableString(pick(row, 'end')));
+      if (!classroomId || !sourceSectionId || !start || !end) {
+        skippedInvalidShape += 1;
+        continue;
+      }
+      const dayOfWeek = mapDayOfWeek(start);
+      if (!dayOfWeek) {
+        skippedInvalidShape += 1;
+        continue;
+      }
+
+      const title = asNullableString(pick(row, 'title'));
+      const parsedTitle = parseScheduleTitle(title);
+      const startTime = toTimeValue(start);
+      const endTime = toTimeValue(end);
+      parsedRows.push({
+        id: stableId(classroomId, `${sourceSectionId}|${dayOfWeek}|${startTime}|${endTime}`),
+        classroom_id: classroomId,
+        source_section_id: sourceSectionId,
+        course_section_id: null,
+        section_name: parsedTitle.section_name,
+        course_code: parsedTitle.course_code,
+        day_of_week: dayOfWeek,
+        start_time: startTime,
+        end_time: endTime,
+        title,
+        description: asNullableString(pick(row, 'description')),
+        all_day: asBoolean(pick(row, 'allDay', 'all_day'), false),
+      });
+    }
+
+    const deduplicatedMap = new Map<string, ClassroomSectionScheduleEntity>();
+    for (const row of parsedRows) {
+      deduplicatedMap.set(row.id, row);
+    }
+    const deduplicatedRows = [...deduplicatedMap.values()];
+    const deduplicated = parsedRows.length - deduplicatedRows.length;
+    let skipped = skippedInvalidShape;
+
+    const sourceSectionIds = [...new Set(deduplicatedRows.map((row) => row.source_section_id))];
+    let mappedById = 0;
+    if (sourceSectionIds.length > 0) {
+      const existingCourseSections = await this.courseSectionsRepo.find({
+        where: { id: In(sourceSectionIds) },
+        select: { id: true },
+      });
+      const existingVcSections = await this.vcSectionsRepo.find({
+        where: { id: In(sourceSectionIds) },
+        select: { id: true },
+      });
+      const existingSections = await this.sectionsRepo.find({
+        where: { id: In(sourceSectionIds) },
+        select: { id: true },
+      });
+      const validSectionIds = new Set([
+        ...existingCourseSections.map((row) => row.id),
+        ...existingVcSections.map((row) => row.id),
+        ...existingSections.map((row) => row.id),
+      ]);
+      for (const row of deduplicatedRows) {
+        if (validSectionIds.has(row.source_section_id)) {
+          row.course_section_id = row.source_section_id;
+          mappedById += 1;
+        }
+      }
+    }
+
+    let mappedByTitle = 0;
+    const rowsToMapByTitle = deduplicatedRows.filter(
+      (row) => !row.course_section_id && row.course_code && row.section_name,
+    );
+    if (rowsToMapByTitle.length > 0) {
+      const vcCourses = await this.vcCoursesRepo.find({
+        select: { id: true, code: true },
+      });
+      const codeToCourseIds = new Map<string, string[]>();
+      for (const course of vcCourses) {
+        const normalizedCode = normalizeCourseCode(course.code);
+        if (!normalizedCode) {
+          continue;
+        }
+        if (!codeToCourseIds.has(normalizedCode)) {
+          codeToCourseIds.set(normalizedCode, []);
+        }
+        (codeToCourseIds.get(normalizedCode) as string[]).push(course.id);
+      }
+
+      const candidateCourseIds = [
+        ...new Set(
+          rowsToMapByTitle.flatMap((row) => codeToCourseIds.get(normalizeCourseCode(row.course_code)) ?? []),
+        ),
+      ];
+      if (candidateCourseIds.length > 0) {
+        const vcSections = await this.vcSectionsRepo.find({
+          where: { course_id: In(candidateCourseIds) },
+          select: { id: true, course_id: true, name: true },
+        });
+        const sectionByCourseAndName = new Map<string, string>();
+        for (const section of vcSections) {
+          const key = `${section.course_id}::${normalizeSectionName(section.name)}`;
+          if (!sectionByCourseAndName.has(key)) {
+            sectionByCourseAndName.set(key, section.id);
+          }
+        }
+
+        for (const row of rowsToMapByTitle) {
+          const normalizedCode = normalizeCourseCode(row.course_code);
+          const normalizedSectionName = normalizeSectionName(row.section_name);
+          const relatedCourseIds = codeToCourseIds.get(normalizedCode) ?? [];
+          for (const courseId of relatedCourseIds) {
+            const mappedSectionId = sectionByCourseAndName.get(
+              `${courseId}::${normalizedSectionName}`,
+            );
+            if (mappedSectionId) {
+              row.course_section_id = mappedSectionId;
+              mappedByTitle += 1;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    const unresolvedSectionRefs = deduplicatedRows.filter((row) => !row.course_section_id).length;
+    const ids = deduplicatedRows.map((row) => row.id);
+    const existing = await this.classroomSectionSchedulesRepo.find({
+      where: { id: In(ids) },
+      select: { id: true },
+    });
+    const existingIds = new Set(existing.map((row) => row.id));
+    await this.classroomSectionSchedulesRepo.save(deduplicatedRows);
+
+    const updated = deduplicatedRows.filter((row) => existingIds.has(row.id)).length;
+    const created = deduplicatedRows.length - updated;
+    return {
+      received,
+      processed: deduplicatedRows.length,
+      created,
+      updated,
+      skipped,
+      deduplicated,
+      mapped_by_id: mappedById,
+      mapped_by_title: mappedByTitle,
+      unresolved_section_refs: unresolvedSectionRefs,
+      skipped_invalid_shape: skippedInvalidShape,
+    };
   }
 
   private async upsertById(
@@ -1412,6 +1812,58 @@ export class SettingsSyncService {
     return rows.map((row) => row.id);
   }
 
+  private async resolveClassroomIds(classroomIds?: string[]) {
+    if (classroomIds?.length) {
+      return classroomIds;
+    }
+    const rows = await this.classroomsRepo.find({ select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
+  private async resolveScheduleWindow(dto: RunSettingsSyncDto) {
+    const explicitStart = normalizeScheduleBoundary(dto.schedule_start, '00:00:00');
+    const explicitEnd = normalizeScheduleBoundary(dto.schedule_end, '00:00:00');
+    if (explicitStart && explicitEnd) {
+      return { start: explicitStart, end: explicitEnd };
+    }
+
+    if (explicitStart) {
+      const startDate = parseDateTimeParts(explicitStart);
+      if (startDate) {
+        return {
+          start: explicitStart,
+          end: formatDateTimeForSource(addDays(startDate, 7), '00:00:00'),
+        };
+      }
+    }
+
+    if (dto.semester_id) {
+      const semester = await this.semestersRepo.findOne({
+        where: { id: dto.semester_id },
+        select: { class_start_date: true, start_date: true },
+      });
+      const semesterStart = normalizeScheduleBoundary(
+        semester?.class_start_date ?? semester?.start_date ?? null,
+        '00:00:00',
+      );
+      if (semesterStart) {
+        const semesterStartDate = parseDateTimeParts(semesterStart);
+        if (semesterStartDate) {
+          return {
+            start: semesterStart,
+            end: formatDateTimeForSource(addDays(semesterStartDate, 7), '00:00:00'),
+          };
+        }
+      }
+    }
+
+    const monday = startOfWeekMonday(new Date());
+    return {
+      start: formatDateTimeForSource(monday, '00:00:00'),
+      end: formatDateTimeForSource(addDays(monday, 7), '00:00:00'),
+    };
+  }
+
   private async resolveFacultyIds() {
     const rows = await this.facultiesRepo.find({ select: { id: true } });
     return rows.map((row) => row.id);
@@ -1419,6 +1871,26 @@ export class SettingsSyncService {
 
   private async resolveProgramIds() {
     const rows = await this.programsRepo.find({ select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
+  private async resolveVcFacultyIds() {
+    const rows = await this.vcFacultiesRepo.find({ select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
+  private async resolveVcProgramIds() {
+    const rows = await this.vcProgramsRepo.find({ select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
+  private async resolveVcCourseIds() {
+    const rows = await this.vcCoursesRepo.find({ select: { id: true } });
+    return rows.map((row) => row.id);
+  }
+
+  private async resolveVcCourseIdsByProgram(programId: string) {
+    const rows = await this.vcCoursesRepo.find({ where: { program_id: programId }, select: { id: true } });
     return rows.map((row) => row.id);
   }
 
@@ -1587,6 +2059,154 @@ function asDateOnly(value: unknown) {
     return null;
   }
   return date.toISOString().slice(0, 10);
+}
+
+type DateTimeParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+function parseDateTimeParts(value: string | null) {
+  if (!value) {
+    return null;
+  }
+  const raw = value.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (iso) {
+    return {
+      year: Number(iso[1]),
+      month: Number(iso[2]),
+      day: Number(iso[3]),
+      hour: Number(iso[4] ?? '0'),
+      minute: Number(iso[5] ?? '0'),
+      second: Number(iso[6] ?? '0'),
+    };
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return {
+    year: parsed.getUTCFullYear(),
+    month: parsed.getUTCMonth() + 1,
+    day: parsed.getUTCDate(),
+    hour: parsed.getUTCHours(),
+    minute: parsed.getUTCMinutes(),
+    second: parsed.getUTCSeconds(),
+  };
+}
+
+function toTimeValue(parts: DateTimeParts) {
+  const hour = `${parts.hour}`.padStart(2, '0');
+  const minute = `${parts.minute}`.padStart(2, '0');
+  const second = `${parts.second}`.padStart(2, '0');
+  return `${hour}:${minute}:${second}`;
+}
+
+function mapDayOfWeek(parts: DateTimeParts): (typeof DayOfWeekValues)[number] | null {
+  const dayIndex = new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+  const dayMap: Record<number, (typeof DayOfWeekValues)[number]> = {
+    0: 'DOMINGO',
+    1: 'LUNES',
+    2: 'MARTES',
+    3: 'MIERCOLES',
+    4: 'JUEVES',
+    5: 'VIERNES',
+    6: 'SABADO',
+  };
+  return dayMap[dayIndex] ?? null;
+}
+
+function normalizeScheduleBoundary(value: string | null | undefined, fallbackTime: string) {
+  if (!value) {
+    return null;
+  }
+  const raw = value.trim();
+  if (!raw) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return `${raw}T${fallbackTime}`;
+  }
+
+  const parsed = parseDateTimeParts(raw);
+  if (!parsed) {
+    return null;
+  }
+
+  const year = `${parsed.year}`.padStart(4, '0');
+  const month = `${parsed.month}`.padStart(2, '0');
+  const day = `${parsed.day}`.padStart(2, '0');
+  return `${year}-${month}-${day}T${toTimeValue(parsed)}`;
+}
+
+function addDays(dateInput: Date | DateTimeParts, days: number) {
+  const baseDate =
+    dateInput instanceof Date
+      ? new Date(dateInput.getTime())
+      : new Date(Date.UTC(dateInput.year, dateInput.month - 1, dateInput.day));
+  baseDate.setUTCDate(baseDate.getUTCDate() + days);
+  return baseDate;
+}
+
+function startOfWeekMonday(value: Date) {
+  const date = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  const day = date.getUTCDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date;
+}
+
+function formatDateTimeForSource(value: Date, time: string) {
+  const year = `${value.getUTCFullYear()}`.padStart(4, '0');
+  const month = `${value.getUTCMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getUTCDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}T${time}`;
+}
+
+function normalizeCourseCode(value: string | null | undefined) {
+  return `${value ?? ''}`.trim().toUpperCase();
+}
+
+function normalizeSectionName(value: string | null | undefined) {
+  return `${value ?? ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s*-\s*/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function parseScheduleTitle(title: string | null) {
+  if (!title) {
+    return { course_code: null, section_name: null };
+  }
+
+  const sectionMatch = title.match(/\(([^()]+)\)\s*$/);
+  const sectionName = sectionMatch ? sectionMatch[1].trim() : null;
+
+  const explicitCodeMatch = title.match(/^([^-]+)-([^-]+)-([^-]+)-/);
+  const fullCourseCode = explicitCodeMatch
+    ? `${explicitCodeMatch[1]}-${explicitCodeMatch[2]}-${explicitCodeMatch[3]}`.trim()
+    : null;
+  const fallbackCodeMatch = title.match(/\b[A-Z]{1,6}\d{2,8}[A-Z0-9]*\b/);
+  const courseCode = fullCourseCode ?? fallbackCodeMatch?.[0]?.trim() ?? null;
+
+  return {
+    course_code: courseCode,
+    section_name: sectionName,
+  };
 }
 
 function deduplicateRows(rows: Array<Record<string, unknown>>) {

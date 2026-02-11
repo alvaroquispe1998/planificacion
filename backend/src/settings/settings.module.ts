@@ -2,10 +2,18 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ZoomUserEntity } from '../entities/audit.entities';
 import {
+  VcPeriodEntity,
+  VcFacultyEntity,
+  VcAcademicProgramEntity,
+  VcCourseEntity,
+  VcSectionEntity,
+} from '../videoconference/videoconference.entity';
+import {
   AcademicProgramCampusEntity,
   AcademicProgramEntity,
   BuildingEntity,
   CampusEntity,
+  ClassroomSectionScheduleEntity,
   ClassroomEntity,
   ClassroomTypeEntity,
   CourseEntity,
@@ -40,12 +48,18 @@ import { SettingsSyncService } from './settings-sync.service';
       TeacherEntity,
       BuildingEntity,
       ClassroomEntity,
+      ClassroomSectionScheduleEntity,
       AcademicProgramCampusEntity,
       CourseSectionEntity,
       ExternalSourceEntity,
       ExternalSessionEntity,
       SyncJobEntity,
       SyncLogEntity,
+      VcPeriodEntity,
+      VcFacultyEntity,
+      VcAcademicProgramEntity,
+      VcCourseEntity,
+      VcSectionEntity,
     ]),
   ],
   controllers: [SettingsSyncController, CatalogController],
