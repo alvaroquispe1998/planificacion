@@ -35,6 +35,11 @@ export class CatalogController {
         return this.catalogService.listClassrooms();
     }
 
+    @Get('buildings')
+    listBuildings() {
+        return this.catalogService.listBuildings();
+    }
+
     @Get('study-plans')
     listStudyPlans() {
         return this.catalogService.listStudyPlans();

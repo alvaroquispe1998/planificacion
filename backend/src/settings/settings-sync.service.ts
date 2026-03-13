@@ -22,6 +22,8 @@ import {
   FacultyEntity,
   SectionEntity,
   SemesterEntity,
+  StudyPlanCourseDetailEntity,
+  StudyPlanCourseEntity,
   StudyPlanEntity,
   SyncJobEntity,
   SyncJobModeValues,
@@ -142,7 +144,7 @@ const RESOURCE_DEFINITIONS: Array<{
     {
       code: 'faculties',
       label: 'Facultades',
-      source: 'AULAVIRTUAL',
+      source: 'MATRICULA',
       module_code: 'ACADEMIC_STRUCTURE',
       module_label: 'Estructura Academica',
       module_description: 'Facultades, programas, sedes, planes y secciones base.',
@@ -152,7 +154,7 @@ const RESOURCE_DEFINITIONS: Array<{
     {
       code: 'academic_programs',
       label: 'Programas Academicos',
-      source: 'AULAVIRTUAL',
+      source: 'MATRICULA',
       module_code: 'ACADEMIC_STRUCTURE',
       module_label: 'Estructura Academica',
       module_description: 'Facultades, programas, sedes, planes y secciones base.',
@@ -172,7 +174,7 @@ const RESOURCE_DEFINITIONS: Array<{
     {
       code: 'study_plans',
       label: 'Planes de Estudio',
-      source: 'INTRANET',
+      source: 'DOCENTE',
       module_code: 'ACADEMIC_STRUCTURE',
       module_label: 'Estructura Academica',
       module_description: 'Facultades, programas, sedes, planes y secciones base.',
@@ -348,6 +350,10 @@ export class SettingsSyncService {
     private readonly zoomUsersRepo: Repository<ZoomUserEntity>,
     @InjectRepository(StudyPlanEntity)
     private readonly studyPlansRepo: Repository<StudyPlanEntity>,
+    @InjectRepository(StudyPlanCourseEntity)
+    private readonly studyPlanCoursesRepo: Repository<StudyPlanCourseEntity>,
+    @InjectRepository(StudyPlanCourseDetailEntity)
+    private readonly studyPlanCourseDetailsRepo: Repository<StudyPlanCourseDetailEntity>,
     @InjectRepository(TeacherEntity)
     private readonly teachersRepo: Repository<TeacherEntity>,
     @InjectRepository(BuildingEntity)
@@ -732,18 +738,7 @@ export class SettingsSyncService {
       return this.fetchRows(source, cookie, '/admin/campus/get');
     }
     if (resource === 'academic_programs') {
-      const facultyIds = await this.resolveFacultyIds();
-      const rows: Record<string, unknown>[] = [];
-      for (const facultyId of facultyIds) {
-        const partial = await this.fetchRows(source, cookie, '/carreras/get', { facultyId });
-        rows.push(
-          ...partial.map((item) => ({
-            ...(item as Record<string, unknown>),
-            faculty_id: facultyId,
-          })),
-        );
-      }
-      return rows;
+      return this.fetchRows(source, cookie, '/admin/carreras/get');
     }
     if (resource === 'sections') {
       return this.fetchRows(source, cookie, '/admin/codigos-de-seccion/get', { length: '500' });
@@ -769,10 +764,10 @@ export class SettingsSyncService {
       return this.fetchRows(source, cookie, '/web/conference/aulas/listar', { length: '500' });
     }
     if (resource === 'faculties') {
-      return this.fetchRows(source, cookie, '/facultades/get');
+      return this.fetchRows(source, cookie, '/admin/facultades/get');
     }
     if (resource === 'study_plans') {
-      return this.fetchRows(source, cookie, '/admin/planes-de-estudios/get', { length: '1000' });
+      return this.fetchStudyPlanSyncRows(source, cookie);
     }
     if (resource === 'teachers') {
       return this.fetchRows(source, cookie, '/admin/docentes/get', { length: '1000' });
@@ -1043,20 +1038,7 @@ export class SettingsSyncService {
     }
 
     if (resource === 'study_plans') {
-      return this.upsertById(
-        this.studyPlansRepo,
-        rows.map((row) => ({
-          id: asString(pick(row, 'id')),
-          name: asNullableString(pick(row, 'name')),
-          curriculum: asNullableString(pick(row, 'curriculum')),
-          curriculum_code: asNullableString(pick(row, 'curriculum_code', 'curriculumCode', 'code')),
-          faculty_id: asNullableString(pick(row, 'faculty_id', 'facultyId')),
-          academic_program_id: asNullableString(
-            pick(row, 'academic_program_id', 'academicProgramId', 'careerId'),
-          ),
-          is_active: asBoolean(pick(row, 'is_active', 'isActive', 'status'), true),
-        })),
-      );
+      return this.persistStudyPlanSyncRows(rows);
     }
 
     if (resource === 'teachers') {
@@ -1207,7 +1189,284 @@ export class SettingsSyncService {
     return { received: 0, processed: 0, created: 0, updated: 0, skipped: 0, deduplicated: 0 };
   }
 
-  private async fetchRows(
+  private async fetchStudyPlanSyncRows(
+    source: ExternalSourceEntity,
+    cookie: string,
+  ): Promise<Record<string, unknown>[]> {
+    const plans = await this.fetchRows(source, cookie, '/admin/plan-estudios/get', { length: '1000' });
+    const rows: Record<string, unknown>[] = [];
+    const validPlans = plans
+      .map((plan) => ({
+        study_plan_id: asString(pick(plan, 'id')),
+        plan,
+      }))
+      .filter((item) => item.study_plan_id !== '');
+
+    console.log(`[SYNC study_plans] Plans received: ${validPlans.length}`);
+
+    for (const { plan } of validPlans) {
+      rows.push({
+        ...plan,
+        __kind: 'study_plan',
+      });
+    }
+
+    const planCourses = await runWithConcurrency(validPlans, 4, async ({ study_plan_id, plan }) => {
+      const courses = await this.fetchRows(
+        source,
+        cookie,
+        `/admin/plan-estudios/${study_plan_id}/cursos/get`,
+      );
+
+      return { study_plan_id, plan, courses };
+    });
+
+    const detailTargets: Array<{ study_plan_id: string; study_plan_course_id: string }> = [];
+    for (const { study_plan_id, courses } of planCourses) {
+      for (const course of courses) {
+        const studyPlanCourseId = asString(pick(course, 'id'));
+        if (!studyPlanCourseId) {
+          continue;
+        }
+
+        rows.push({
+          ...course,
+          __kind: 'study_plan_course',
+          __study_plan_id: study_plan_id,
+        });
+
+        detailTargets.push({
+          study_plan_id,
+          study_plan_course_id: studyPlanCourseId,
+        });
+      }
+    }
+
+    console.log(`[SYNC study_plans] Course detail requests queued: ${detailTargets.length}`);
+
+    let completedDetails = 0;
+    const detailRows = await runWithConcurrency(detailTargets, 8, async (target) => {
+      const detail = await this.fetchPayload(
+        source,
+        cookie,
+        '/admin/plan-estudios/get-plan-estudio-curso',
+        { academicYerCourseId: target.study_plan_course_id },
+      );
+
+      completedDetails += 1;
+      if (completedDetails % 50 === 0 || completedDetails === detailTargets.length) {
+        console.log(
+          `[SYNC study_plans] Detail progress: ${completedDetails}/${detailTargets.length}`,
+        );
+      }
+
+      if (!detail || typeof detail !== 'object' || Array.isArray(detail)) {
+        return null;
+      }
+
+      return {
+        ...(detail as Record<string, unknown>),
+        __kind: 'study_plan_course_detail',
+        __study_plan_id: target.study_plan_id,
+        __study_plan_course_id: target.study_plan_course_id,
+      };
+    });
+
+    for (const detailRow of detailRows) {
+      if (detailRow) {
+        rows.push(detailRow as Record<string, unknown>);
+      }
+    }
+
+    return rows;
+  }
+
+  private async persistStudyPlanSyncRows(rows: Record<string, unknown>[]) {
+    const planRows = rows.filter((row) => row.__kind === 'study_plan');
+    const courseRows = rows.filter((row) => row.__kind === 'study_plan_course');
+    const detailRows = rows.filter((row) => row.__kind === 'study_plan_course_detail');
+
+    const faculties = await this.facultiesRepo.find();
+    const programs = await this.programsRepo.find();
+    const facultyIdByName = new Map(
+      faculties
+        .filter((faculty) => faculty.name)
+        .map((faculty) => [normalizeLookupKey(faculty.name), faculty.id]),
+    );
+    const programsByName = new Map<string, AcademicProgramEntity[]>();
+    for (const program of programs) {
+      const normalizedProgramName = normalizeLookupKey(program.name);
+      if (!normalizedProgramName) {
+        continue;
+      }
+      const bucket = programsByName.get(normalizedProgramName) ?? [];
+      bucket.push(program);
+      programsByName.set(normalizedProgramName, bucket);
+    }
+
+    const planStats = await this.upsertById(
+      this.studyPlansRepo,
+      planRows.map((row) => {
+        const faculty = asNullableString(pick(row, 'faculty'));
+        const career = asNullableString(pick(row, 'career'));
+        const academicProgram = asNullableString(pick(row, 'academicProgram', 'academic_program'));
+        const year = asNullableString(pick(row, 'year'));
+        const normalizedFaculty = normalizeLookupKey(faculty);
+        const normalizedCareer = normalizeLookupKey(career ?? academicProgram);
+        const resolvedFacultyId =
+          asNullableString(pick(row, 'facultyId', 'faculty_id')) ??
+          (faculty ? facultyIdByName.get(normalizedFaculty) ?? null : null);
+        const resolvedProgramId = resolveProgramIdFromCatalog(
+          programsByName,
+          career ?? academicProgram,
+          resolvedFacultyId,
+          faculty,
+        );
+        return {
+          id: asString(pick(row, 'id')),
+          name: buildStudyPlanDisplayName(career, year),
+          faculty,
+          career,
+          academic_program: academicProgram ?? career,
+          year,
+          creation_resolution: asNullableString(
+            pick(row, 'creationresolution', 'creationResolution'),
+          ),
+          approve_resolution: asNullableString(pick(row, 'aproberesolution', 'approveResolution')),
+          faculty_id: resolvedFacultyId,
+          academic_program_id: resolvedProgramId,
+          is_active: asBoolean(pick(row, 'isActive', 'is_active'), true),
+          is_new: asBoolean(pick(row, 'isNew', 'is_new'), false),
+          is_unique: asBoolean(pick(row, 'isUnique', 'is_unique'), false),
+        };
+      }),
+    );
+
+    const courseStats = await this.upsertById(
+      this.studyPlanCoursesRepo,
+      courseRows.map((row) => ({
+        id: asString(pick(row, 'id')),
+        study_plan_id: asString(pick(row, '__study_plan_id', 'study_plan_id')),
+        order: asNullableInt(pick(row, 'order')),
+        year_credits: asNullableString(pick(row, 'yearCredits', 'year_credits')),
+        year_label: asNullableString(pick(row, 'year', 'yearLabel', 'year_label')),
+        course_code: asNullableString(pick(row, 'code', 'courseCode')),
+        course_name: asNullableString(pick(row, 'course', 'courseName', 'name')),
+        academic_program: asNullableString(pick(row, 'academicProgram', 'academic_program')),
+        credits: asNullableNumber(pick(row, 'credits')),
+        required_credits: asNullableNumber(pick(row, 'requiredCredits', 'required_credits')),
+        is_elective: asBoolean(pick(row, 'isElective', 'is_elective'), false),
+        requisites: asNullableString(pick(row, 'requisites')),
+        certificates: asJsonArray(pick(row, 'certificates')),
+        requisites_ids: asStringArray(pick(row, 'requisitesIds', 'requisites_ids')),
+        optional_requisites_ids: asStringArray(
+          pick(row, 'optionalRequisitesIds', 'optional_requisites_ids'),
+        ),
+        requisite1: asNullableString(pick(row, 'requisite1')),
+        requisite2: asNullableString(pick(row, 'requisite2')),
+        requisite3: asNullableString(pick(row, 'requisite3')),
+        count: asNullableInt(pick(row, 'count')),
+        competencie_id: asNullableString(pick(row, 'competencieId', 'competencie_id')),
+        competencie: asNullableString(pick(row, 'competencie')),
+        is_exonerable: asBoolean(pick(row, 'isExonerable', 'is_exonerable'), false),
+      })),
+    );
+
+    const detailStats = await this.upsertByKey(
+      this.studyPlanCourseDetailsRepo,
+      detailRows.map((row) => ({
+        study_plan_course_id: asString(
+          pick(row, '__study_plan_course_id', 'study_plan_course_id', 'id'),
+        ),
+        short_code: asNullableString(pick(row, 'shortCode', 'short_code')),
+        name: asNullableString(pick(row, 'name')),
+        practical_hours: asNullableInt(pick(row, 'practicalHours', 'practical_hours')),
+        theoretical_hours: asNullableInt(pick(row, 'theoreticalHours', 'theoretical_hours')),
+        virtual_hours: asNullableInt(pick(row, 'virtualHours', 'virtual_hours')),
+        seminar_hours: asNullableInt(pick(row, 'seminarHours', 'seminar_hours')),
+        credits: asNullableNumber(pick(row, 'credits')),
+        required_credits: asNullableNumber(pick(row, 'requiredCredits', 'required_credits')),
+        academic_year: asNullableInt(pick(row, 'academicYear', 'academic_year')),
+        course_type_id: asNullableString(pick(row, 'courseTypeId', 'course_type_id')),
+        is_elective: asBoolean(pick(row, 'isElective', 'is_elective'), false),
+        area_id: asNullableString(pick(row, 'areaId', 'area_id')),
+        course_component_id: asNullableString(
+          pick(row, 'courseComponentId', 'course_component_id'),
+        ),
+        academic_program_id: asNullableString(
+          pick(row, 'academicProgramId', 'academic_program_id'),
+        ),
+        any_course_term: asBoolean(pick(row, 'anyCourseTerm', 'any_course_term'), false),
+      })),
+      'study_plan_course_id',
+    );
+
+    const syncedPlanIds = uniqueIds(planRows.map((row) => asString(pick(row, 'id'))));
+    let deletedCourses = 0;
+    let deletedDetails = 0;
+
+    for (const studyPlanId of syncedPlanIds) {
+      const currentCourseIds = uniqueIds(
+        courseRows
+          .filter((row) => asString(pick(row, '__study_plan_id', 'study_plan_id')) === studyPlanId)
+          .map((row) => asString(pick(row, 'id'))),
+      );
+      const currentDetailIds = new Set(
+        detailRows
+          .filter((row) => asString(pick(row, '__study_plan_id', 'study_plan_id')) === studyPlanId)
+          .map((row) => asString(pick(row, '__study_plan_course_id', 'study_plan_course_id', 'id'))),
+      );
+
+      const existingCourses = await this.studyPlanCoursesRepo.find({
+        where: { study_plan_id: studyPlanId },
+      });
+      const staleCourseIds = existingCourses
+        .map((course) => course.id)
+        .filter((courseId) => !currentCourseIds.includes(courseId));
+
+      if (staleCourseIds.length > 0) {
+        const deletedCourseDetails = await this.studyPlanCourseDetailsRepo.delete({
+          study_plan_course_id: In(staleCourseIds),
+        });
+        const deletedPlanCourses = await this.studyPlanCoursesRepo.delete({ id: In(staleCourseIds) });
+        deletedCourses += deletedPlanCourses.affected ?? 0;
+        deletedDetails += deletedCourseDetails.affected ?? 0;
+      }
+
+      if (currentCourseIds.length > 0) {
+        const existingDetails = await this.studyPlanCourseDetailsRepo.find({
+          where: { study_plan_course_id: In(currentCourseIds) },
+        });
+        const staleDetailIds = existingDetails
+          .map((detail) => detail.study_plan_course_id)
+          .filter((detailId) => !currentDetailIds.has(detailId));
+
+        if (staleDetailIds.length > 0) {
+          const deleted = await this.studyPlanCourseDetailsRepo.delete({
+            study_plan_course_id: In(staleDetailIds),
+          });
+          deletedDetails += deleted.affected ?? 0;
+        }
+      }
+    }
+
+    return {
+      received: rows.length,
+      processed: planStats.processed + courseStats.processed + detailStats.processed,
+      created: planStats.created + courseStats.created + detailStats.created,
+      updated: planStats.updated + courseStats.updated + detailStats.updated,
+      skipped: planStats.skipped + courseStats.skipped + detailStats.skipped,
+      deduplicated:
+        planStats.deduplicated + courseStats.deduplicated + detailStats.deduplicated,
+      plans: planStats,
+      study_plan_courses: courseStats,
+      study_plan_course_details: detailStats,
+      deleted_courses: deletedCourses,
+      deleted_details: deletedDetails,
+    };
+  }
+
+  private async fetchPayload(
     source: ExternalSourceEntity,
     cookie: string,
     path: string,
@@ -1224,7 +1483,17 @@ export class SettingsSyncService {
         `Error consultando ${source.code}: ${response.status} ${responseError ?? 'sin detalle'}`,
       );
     }
-    return extractRows(response.payload);
+    return response.payload;
+  }
+
+  private async fetchRows(
+    source: ExternalSourceEntity,
+    cookie: string,
+    path: string,
+    query?: Record<string, string>,
+  ) {
+    const payload = await this.fetchPayload(source, cookie, path, query);
+    return extractRows(payload);
   }
 
   private async probeSourceSession(code: string): Promise<SourceProbeResult> {
@@ -1594,6 +1863,52 @@ export class SettingsSyncService {
     await repo.save(validRows);
 
     const updated = validRows.filter((row) => existingIds.has(row.id as string)).length;
+    const created = validRows.length - updated;
+    return {
+      received,
+      processed: validRows.length,
+      created,
+      updated,
+      skipped,
+      deduplicated: received - deduplicatedRows.length,
+    };
+  }
+
+  private async upsertByKey(
+    repo: Repository<any>,
+    rows: Array<Record<string, unknown>>,
+    key: string,
+  ): Promise<{
+    received: number;
+    processed: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    deduplicated: number;
+  }> {
+    const received = rows.length;
+    const deduplicatedMap = new Map<string, Record<string, unknown>>();
+    for (const row of rows) {
+      const keyValue = asString(row[key]);
+      if (!keyValue) {
+        continue;
+      }
+      deduplicatedMap.set(keyValue, row);
+    }
+
+    const deduplicatedRows = [...deduplicatedMap.values()];
+    const validRows = deduplicatedRows.filter((row) => typeof row[key] === 'string' && asString(row[key]) !== '');
+    const skipped = received - validRows.length;
+    if (validRows.length === 0) {
+      return { received, processed: 0, created: 0, updated: 0, skipped, deduplicated: received };
+    }
+
+    const ids = validRows.map((row) => asString(row[key]));
+    const existing = await repo.find({ where: { [key]: In(ids) } });
+    const existingIds = new Set(existing.map((row: Record<string, unknown>) => asString(row[key])));
+    await repo.save(validRows);
+
+    const updated = validRows.filter((row) => existingIds.has(asString(row[key]))).length;
     const created = validRows.length - updated;
     return {
       received,
@@ -2031,6 +2346,83 @@ function asNullableInt(value: unknown) {
   return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
 }
 
+function asNullableNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function asStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value
+    .map((item) => asString(item))
+    .filter((item) => item !== '');
+}
+
+function asJsonArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value;
+}
+
+function buildStudyPlanDisplayName(career: string | null, year: string | null) {
+  const parts = [career, year].filter((item) => item && item.trim() !== '');
+  return parts.length > 0 ? parts.join(' - ') : null;
+}
+
+function normalizeLookupKey(value: string | null | undefined) {
+  return `${value ?? ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function resolveProgramIdFromCatalog(
+  programsByName: Map<string, AcademicProgramEntity[]>,
+  programName: string | null,
+  facultyId: string | null,
+  facultyName: string | null,
+) {
+  const normalizedProgramName = normalizeLookupKey(programName);
+  if (!normalizedProgramName) {
+    return null;
+  }
+
+  const matches = programsByName.get(normalizedProgramName) ?? [];
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length === 1) {
+    return matches[0].id;
+  }
+
+  if (facultyId) {
+    const byFacultyId = matches.find((item) => item.faculty_id === facultyId);
+    if (byFacultyId) {
+      return byFacultyId.id;
+    }
+  }
+
+  const normalizedFacultyName = normalizeLookupKey(facultyName);
+  if (normalizedFacultyName) {
+    const byFacultyName = matches.find(
+      (item) => normalizeLookupKey(item.faculty) === normalizedFacultyName,
+    );
+    if (byFacultyName) {
+      return byFacultyName.id;
+    }
+  }
+
+  return matches[0].id;
+}
+
 function asDateOnly(value: unknown) {
   if (value === null || value === undefined || value === '') {
     return null;
@@ -2219,6 +2611,35 @@ function deduplicateRows(rows: Array<Record<string, unknown>>) {
     map.set(id, row);
   }
   return [...map.values()];
+}
+
+function uniqueIds(ids: Array<string | null | undefined>) {
+  return [...new Set(ids.filter((item): item is string => Boolean(item)))];
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+) {
+  if (items.length === 0) {
+    return [] as R[];
+  }
+
+  const safeConcurrency = Math.max(1, Math.min(concurrency, items.length));
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const runners = Array.from({ length: safeConcurrency }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
 }
 
 function stableId(partA: string, partB: string) {

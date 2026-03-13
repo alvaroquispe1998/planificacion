@@ -36,6 +36,10 @@ export class ApiService {
     return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/classrooms`);
   }
 
+  listBuildings() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/buildings`);
+  }
+
   listStudyPlans() {
     return this.http.get<any[]>(`${this.baseUrl}/settings/catalog/study-plans`);
   }
@@ -80,8 +84,165 @@ export class ApiService {
   }
 
   // --- Planning ---
-  listClassOfferings() {
-    return this.http.get<any[]>(`${this.baseUrl}/planning/class-offerings`);
+  listClassOfferings(semesterId?: string) {
+    const params = semesterId ? new HttpParams().set('semester_id', semesterId) : undefined;
+    return this.http.get<any[]>(`${this.baseUrl}/planning/class-offerings`, { params });
+  }
+
+  getPlanningCatalogFilters() {
+    return this.http.get<any>(`${this.baseUrl}/planning/catalog/filters`);
+  }
+
+  listPlanningPlanRules(semesterId?: string, campusId?: string, academicProgramId?: string) {
+    let params = new HttpParams();
+    if (semesterId) {
+      params = params.set('semester_id', semesterId);
+    }
+    if (campusId) {
+      params = params.set('campus_id', campusId);
+    }
+    if (academicProgramId) {
+      params = params.set('academic_program_id', academicProgramId);
+    }
+    return this.http.get<any[]>(`${this.baseUrl}/planning/plan-rules`, { params });
+  }
+
+  listPlanningConfiguredCycles(filters: Record<string, string>) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) {
+        params = params.set(key, value);
+      }
+    });
+    return this.http.get<any[]>(`${this.baseUrl}/planning/configured-cycles`, { params });
+  }
+
+  createPlanningPlanRule(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/plan-rules`, payload);
+  }
+
+  updatePlanningPlanRule(id: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/plan-rules/${id}`, payload);
+  }
+
+  deletePlanningPlanRule(id: string) {
+    return this.http.delete<any>(`${this.baseUrl}/planning/plan-rules/${id}`);
+  }
+
+  listPlanningCourseCandidates(filters: Record<string, string>) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) {
+        params = params.set(key, value);
+      }
+    });
+    return this.http.get<any>(`${this.baseUrl}/planning/course-candidates`, { params });
+  }
+
+  listPlanningOffers(filters: Record<string, string>) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) {
+        params = params.set(key, value);
+      }
+    });
+    return this.http.get<any[]>(`${this.baseUrl}/planning/offers`, { params });
+  }
+
+  createPlanningOffer(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/offers`, payload);
+  }
+
+  getPlanningOffer(id: string) {
+    return this.http.get<any>(`${this.baseUrl}/planning/offers/${id}`);
+  }
+
+  updatePlanningOffer(id: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/offers/${id}`, payload);
+  }
+
+  createPlanningSection(offerId: string, payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/offers/${offerId}/sections`, payload);
+  }
+
+  getPlanningSection(id: string) {
+    return this.http.get<any>(`${this.baseUrl}/planning/sections/${id}`);
+  }
+
+  updatePlanningSection(id: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/sections/${id}`, payload);
+  }
+
+  createPlanningSubsection(sectionId: string, payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/sections/${sectionId}/subsections`, payload);
+  }
+
+  getPlanningSubsection(id: string) {
+    return this.http.get<any>(`${this.baseUrl}/planning/subsections/${id}`);
+  }
+
+  updatePlanningSubsection(id: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/subsections/${id}`, payload);
+  }
+
+  createPlanningSubsectionSchedule(subsectionId: string, payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/subsections/${subsectionId}/schedules`, payload);
+  }
+
+  updatePlanningSubsectionSchedule(id: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/subsection-schedules/${id}`, payload);
+  }
+
+  deletePlanningSubsectionSchedule(id: string) {
+    return this.http.delete<any>(`${this.baseUrl}/planning/subsection-schedules/${id}`);
+  }
+
+  listPlanningConflicts(semesterId?: string, offerId?: string) {
+    let params = new HttpParams();
+    if (semesterId) {
+      params = params.set('semester_id', semesterId);
+    }
+    if (offerId) {
+      params = params.set('offer_id', offerId);
+    }
+    return this.http.get<any[]>(`${this.baseUrl}/planning/conflicts`, { params });
+  }
+
+  listPlanningChangeLog(entityType?: string, entityId?: string) {
+    let params = new HttpParams();
+    if (entityType) {
+      params = params.set('entity_type', entityType);
+    }
+    if (entityId) {
+      params = params.set('entity_id', entityId);
+    }
+    return this.http.get<any[]>(`${this.baseUrl}/planning/change-log`, { params });
+  }
+
+  getPlanningWorkspace(filters: Record<string, string>) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) {
+        params = params.set(key, value);
+      }
+    });
+    return this.http.get<any>(`${this.baseUrl}/planning/workspace`, { params });
+  }
+
+  updatePlanningWorkspaceRow(rowId: string, payload: Record<string, unknown>) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/workspace/rows/${encodeURIComponent(rowId)}`, payload);
+  }
+
+  bulkAssignPlanningTeacher(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/workspace/bulk-assign-teacher`, payload);
+  }
+
+  bulkAssignPlanningClassroom(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/workspace/bulk-assign-classroom`, payload);
+  }
+
+  bulkDuplicatePlanning(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/workspace/bulk-duplicate`, payload);
   }
 
   getClassOffering(id: string) {
@@ -106,6 +267,10 @@ export class ApiService {
 
   createClassMeeting(payload: any) {
     return this.http.post<any>(`${this.baseUrl}/planning/class-meetings`, payload);
+  }
+
+  deleteClassMeeting(id: string) {
+    return this.http.delete<any>(`${this.baseUrl}/planning/class-meetings/${id}`);
   }
 
   validateHours(offeringId: string) {

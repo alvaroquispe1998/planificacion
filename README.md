@@ -92,6 +92,10 @@ Flujo recomendado:
 
 ```bash
 docker compose up --build
+
+
+docker compose up -d --force-recreate mysql backend
+
 ```
 
 Servicios:

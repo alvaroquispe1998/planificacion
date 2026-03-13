@@ -1,187 +1,78 @@
-<div class="layout">
-  <!-- Sidebar: List of Offerings -->
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <h2>Planificacion</h2>
-      <div class="search-box">
-        <input type="text" placeholder="Buscar curso o codigo..." />
-      </div>
-      <div style="margin-top: 1rem;">
-        <label style="font-size: 0.75rem; color:#6b7280; margin-bottom:0.25rem">Filtros de Periodo</label>
-        <select [(ngModel)]="offeringForm.semester_id" (change)="loadOfferings()" style="width: 100%;">
-          <option *ngFor="let s of semesters" [value]="s.id">{{ s.name }}</option>
-        </select>
-      </div>
-      <button class="btn btn-primary" style="width: 100%; margin-top: 0.5rem;"
-        (click)="showCreateOffering = !showCreateOffering">
-        + Nueva Oferta
-      </button>
+<div class="planning-shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Planificacion manual</p>
+      <h1>Ciclos configurados</h1>
+    </div>
+    <button class="btn btn-primary btn-sm" (click)="openNewOffer()">+ Nueva configuracion</button>
+  </header>
 
-      <!-- Quick Create Offering Form -->
-      <div *ngIf="showCreateOffering" class="inline-form" style="margin-top: 1rem;">
-        <select [(ngModel)]="offeringForm.academic_program_id" style="margin-bottom:0.5rem">
-          <option value="">Programa...</option>
-          <option *ngFor="let p of programs" [value]="p.id">{{ p.name }}</option>
-        </select>
-        <select [(ngModel)]="offeringForm.course_id" style="margin-bottom:0.5rem">
-          <option value="">Curso...</option>
-          <option *ngFor="let c of courses" [value]="c.id">{{ c.code }} - {{ c.name }}</option>
-        </select>
-        <button class="btn btn-primary btn-sm" (click)="createOffering()">Crear</button>
-      </div>
+  <section class="filters-card">
+    <select [(ngModel)]="filters.semester_id" (ngModelChange)="loadRows()">
+      <option *ngFor="let semester of catalog.semesters" [value]="semester.id">
+        {{ semester.name }}
+      </option>
+    </select>
+    <select [(ngModel)]="filters.campus_id" (ngModelChange)="loadRows()">
+      <option value="">Todos los locales</option>
+      <option *ngFor="let campus of catalog.campuses" [value]="campus.id">
+        {{ campus.name }}
+      </option>
+    </select>
+    <select [(ngModel)]="filters.faculty_id" (ngModelChange)="onFacultyChange()">
+      <option value="">Todas las facultades</option>
+      <option *ngFor="let faculty of catalog.faculties" [value]="faculty.id">
+        {{ faculty.name }}
+      </option>
+    </select>
+    <select [(ngModel)]="filters.academic_program_id" (ngModelChange)="loadRows()">
+      <option value="">Todos los programas</option>
+      <option *ngFor="let program of filteredPrograms" [value]="program.id">
+        {{ program.name }}
+      </option>
+    </select>
+  </section>
+
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+
+  <section class="panel">
+    <div class="section-head">
+      <h2>Configuraciones guardadas <span class="count">({{ rows.length }})</span></h2>
     </div>
 
-    <div class="course-list">
-      <div *ngFor="let offering of offerings" class="course-card" [class.selected]="offering.id === selectedOfferingId"
-        (click)="selectOffering(offering.id)">
-        <span class="course-code">{{ courseMap.get(offering.course_id)?.code || '---' }}</span>
-        <h4 class="course-name">{{ courseMap.get(offering.course_id)?.name || 'Desconocido' }}</h4>
-        <div class="course-meta">
-          <span class="badge badge-cycle">Ciclo {{ courseMap.get(offering.course_id)?.cycle || '-' }}</span>
-          <span class="badge badge-program">P: {{ offering.projected_vacancies || 0 }}</span>
-        </div>
-      </div>
+    <div class="table-wrap" *ngIf="rows.length > 0; else emptyState">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Semestre</th>
+            <th>Local</th>
+            <th>Facultad</th>
+            <th>Programa</th>
+            <th>Ciclo</th>
+            <th>Plan de estudio</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of rows" class="clickable-row" (click)="openCycleDetail(row)">
+            <td>{{ row.semester?.name || '---' }}</td>
+            <td>{{ row.campus_display || 'Sin local' }}</td>
+            <td>{{ row.faculty?.name || row.study_plan?.faculty || '---' }}</td>
+            <td>{{ row.academic_program?.name || row.study_plan?.career || row.career_name || '---' }}</td>
+            <td><span class="pill-cycle">{{ row.cycle }}</span></td>
+            <td>{{ row.study_plan?.name || row.study_plan_id }}</td>
+            <td class="td-action">
+              <span class="link-action">Ver cursos →</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
-  </aside>
 
-  <!-- Main Content: Details -->
-  <main class="main-content">
-    <div *ngIf="!selectedOfferingId" class="empty-state">
-      <h3>Selecciona un curso para comenzar</h3>
-      <p>O crea una nueva oferta desde el panel lateral.</p>
-    </div>
-
-    <div *ngIf="selectedOfferingId">
-      <header class="detail-header">
-        <h1 class="detail-title">
-          {{ courseMap.get(offeringForm.course_id)?.name || 'Curso Seleccionado' }}
-        </h1>
-        <div class="detail-subtitle">
-          {{ courseMap.get(offeringForm.course_id)?.code }} &middot;
-          {{ semesterMap.get(offeringForm.semester_id)?.name }} &middot;
-          {{ offeringForm.campus_id }}
-        </div>
-      </header>
-
-      <div class="section-title">
-        <span>Secciones (Grupos)</span>
-        <button class="btn btn-primary btn-sm" (click)="showCreateGroup = true">+ Agregar Seccion</button>
+    <ng-template #emptyState>
+      <div class="empty-block">
+        <p>{{ loading ? 'Cargando configuraciones...' : 'No hay configuraciones guardadas para los filtros seleccionados.' }}</p>
       </div>
-
-      <!-- Create Group Form -->
-      <div *ngIf="showCreateGroup" class="card inline-form" style="max-width: 500px; margin-bottom: 2rem;">
-        <h4>Nueva Seccion</h4>
-        <div class="form-row">
-          <select [(ngModel)]="groupForm.group_type">
-            <option value="THEORY">Teoria</option>
-            <option value="PRACTICE">Practica</option>
-            <option value="LAB">Laboratorio</option>
-          </select>
-          <input [(ngModel)]="groupForm.code" placeholder="Codigo (A, B...)" style="width: 100px;" />
-          <input type="number" [(ngModel)]="groupForm.capacity" placeholder="Capacidad" style="width: 100px;" />
-        </div>
-        <div class="form-row">
-          <button class="btn btn-primary btn-sm" (click)="createGroup()">Guardar</button>
-          <button class="btn btn-secondary btn-sm" (click)="showCreateGroup = false">Cancelar</button>
-        </div>
-      </div>
-
-      <!-- Groups Grid -->
-      <div class="cards-grid">
-        <div *ngFor="let group of groups" class="card">
-          <div class="card-header">
-            <div>
-              <span class="card-title">Seccion {{ group.code }}</span>
-              <div style="font-size: 0.8rem; color:#6b7280">Cap: {{ group.capacity }}</div>
-            </div>
-            <span class="card-badge" [ngClass]="{
-                    'type-theory': group.group_type === 'THEORY',
-                    'type-practice': group.group_type === 'PRACTICE',
-                    'type-lab': group.group_type === 'LAB'
-                  }">
-              {{ group.group_type }}
-            </span>
-          </div>
-
-          <!-- Teachers List -->
-          <h5 style="font-size: 0.75rem; color:#9ca3af; margin:0.5rem 0; text-transform:uppercase;">Docentes</h5>
-          <div *ngFor="let gt of groupTeachers">
-            <div *ngIf="gt.class_group_id === group.id" class="teacher-row">
-              <div>
-                <div class="teacher-name">{{ teacherMap.get(gt.teacher_id)?.full_name || gt.teacher_id }}</div>
-                <div class="teacher-role">{{ gt.role }}</div>
-              </div>
-              <button class="btn btn-danger btn-sm" (click)="removeTeacher(gt.id)">x</button>
-            </div>
-          </div>
-
-          <!-- Assign Teacher Action -->
-          <div *ngIf="selectedGroupIdForTeacher !== group.id" style="margin-top: 0.5rem;">
-            <button class="btn btn-secondary btn-sm" style="width:100%" (click)="selectedGroupIdForTeacher = group.id">+
-              Asignar Docente</button>
-          </div>
-          <div *ngIf="selectedGroupIdForTeacher === group.id" class="inline-form" style="padding: 0.5rem;">
-            <select [(ngModel)]="teacherAssignmentForm.teacher_id" style="margin-bottom:0.5rem">
-              <option value="">Seleccionar...</option>
-              <option *ngFor="let t of teachers" [value]="t.id">{{ t.full_name }}</option>
-            </select>
-            <select [(ngModel)]="teacherAssignmentForm.role" style="margin-bottom:0.5rem">
-              <option value="PRIMARY">Principal</option>
-              <option value="PRACTICE_HEAD">Jefe Practica</option>
-            </select>
-            <div class="form-row">
-              <button class="btn btn-primary btn-sm" (click)="assignTeacher(group.id)">OK</button>
-              <button class="btn btn-secondary btn-sm" (click)="selectedGroupIdForTeacher = ''">X</button>
-            </div>
-          </div>
-
-          <!-- Schedule List -->
-          <h5
-            style="border-top: 1px solid #f3f4f6; margin-top:1rem; padding-top:0.5rem; font-size: 0.75rem; color:#9ca3af; text-transform:uppercase;">
-            Horario</h5>
-          <table class="mini-table">
-            <tr *ngFor="let meeting of meetings">
-              <ng-container *ngIf="meeting.class_group_id === group.id">
-                <td>{{ meeting.day_of_week.substring(0,3) }}</td>
-                <td>{{ meeting.start_time.substring(0,5) }} - {{ meeting.end_time.substring(0,5) }}</td>
-                <td>{{ classroomMap.get(meeting.classroom_id)?.code || '---' }}</td>
-              </ng-container>
-            </tr>
-          </table>
-
-          <!-- Add Meeting Action -->
-          <div *ngIf="meetingForm.class_group_id !== group.id" style="margin-top: 0.5rem;">
-            <button class="btn btn-secondary btn-sm" style="width:100%" (click)="prepareMeetingForm(group.id)">+ Agregar
-              Horario</button>
-          </div>
-          <div *ngIf="meetingForm.class_group_id === group.id && showCreateMeeting" class="inline-form"
-            style="padding: 0.5rem;">
-            <select [(ngModel)]="meetingForm.day_of_week" style="margin-bottom:0.5rem">
-              <option>LUNES</option>
-              <option>MARTES</option>
-              <option>MIERCOLES</option>
-              <option>JUEVES</option>
-              <option>VIERNES</option>
-              <option>SABADO</option>
-            </select>
-            <div class="form-row">
-              <input type="time" [(ngModel)]="meetingForm.start_time" />
-              <input type="time" [(ngModel)]="meetingForm.end_time" />
-            </div>
-            <select [(ngModel)]="meetingForm.classroom_id" style="margin-bottom:0.5rem">
-              <option *ngFor="let r of classrooms" [value]="r.id">{{ r.name }}</option>
-            </select>
-            <div class="form-row">
-              <button class="btn btn-primary btn-sm" (click)="createMeeting()">OK</button>
-              <button class="btn btn-secondary btn-sm"
-                (click)="showCreateMeeting = false; meetingForm.class_group_id = ''">X</button>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      <div style="height: 100px;"></div> <!-- Spacing -->
-    </div>
-  </main>
+    </ng-template>
+  </section>
 </div>

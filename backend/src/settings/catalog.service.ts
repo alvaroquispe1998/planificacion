@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
     AcademicProgramEntity,
+    BuildingEntity,
     CampusEntity,
     ClassroomSectionScheduleEntity,
     ClassroomEntity,
@@ -26,6 +27,8 @@ export class CatalogService {
         private readonly coursesRepo: Repository<CourseEntity>,
         @InjectRepository(TeacherEntity)
         private readonly teachersRepo: Repository<TeacherEntity>,
+        @InjectRepository(BuildingEntity)
+        private readonly buildingsRepo: Repository<BuildingEntity>,
         @InjectRepository(ClassroomEntity)
         private readonly classroomsRepo: Repository<ClassroomEntity>,
         @InjectRepository(StudyPlanEntity)
@@ -67,6 +70,10 @@ export class CatalogService {
 
     async listClassrooms() {
         return this.classroomsRepo.find({ order: { name: 'ASC' } });
+    }
+
+    async listBuildings() {
+        return this.buildingsRepo.find({ order: { name: 'ASC' } });
     }
 
     async listStudyPlans() {

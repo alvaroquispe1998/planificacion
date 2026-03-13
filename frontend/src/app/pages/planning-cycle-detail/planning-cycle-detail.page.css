@@ -1,0 +1,106 @@
+.planning-shell {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.hero,
+.context-card,
+.panel {
+  background: #fff;
+  border-radius: 1.75rem;
+  padding: 1.5rem;
+}
+
+.hero,
+.section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.78rem;
+  color: #aa5a10;
+  font-weight: 700;
+}
+
+.subtle {
+  color: #5b6d8a;
+}
+
+.context-card {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.context-item {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.context-item span {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6d7d95;
+}
+
+.context-item strong {
+  color: #0d2c62;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  padding: 1rem 0.75rem;
+  border-bottom: 1px solid #e6ebf2;
+  text-align: left;
+}
+
+.data-table th {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+  color: #516783;
+}
+
+.pill {
+  background: #eef3fb;
+  color: #1e3a68;
+  border-radius: 999px;
+  padding: 0.4rem 0.8rem;
+  font-weight: 700;
+}
+
+.empty-block {
+  background: #f6f8fc;
+  border-radius: 1.25rem;
+  padding: 2rem;
+  text-align: center;
+  color: #5b6d8a;
+}
+
+.flash.error {
+  background: #fff1f1;
+  color: #8d1d1d;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+}

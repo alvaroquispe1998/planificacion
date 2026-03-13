@@ -26,6 +26,15 @@ export const ConflictTypeValues = [
   'SECTION_OVERLAP',
 ] as const;
 export const ConflictSeverityValues = ['INFO', 'WARNING', 'CRITICAL'] as const;
+export const PlanningOfferStatusValues = ['DRAFT', 'ACTIVE', 'OBSERVED', 'CLOSED'] as const;
+export const PlanningSubsectionKindValues = ['THEORY', 'PRACTICE', 'MIXED'] as const;
+export const PlanningV2ConflictTypeValues = [
+  'TEACHER_OVERLAP',
+  'CLASSROOM_OVERLAP',
+  'SUBSECTION_OVERLAP',
+  'SECTION_OVERLAP',
+] as const;
+export const PlanningChangeActionValues = ['CREATE', 'UPDATE', 'DELETE'] as const;
 
 @Entity({ name: 'class_offerings' })
 export class ClassOfferingEntity {
@@ -249,4 +258,365 @@ export class ScheduleConflictEntity {
 
   @Column({ type: 'datetime' })
   created_at!: Date;
+}
+
+@Entity({ name: 'study_types' })
+@Index(['code'], { unique: true })
+export class StudyTypeEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 40 })
+  code!: string;
+
+  @Column({ type: 'varchar', length: 120 })
+  name!: string;
+
+  @Column({ type: 'boolean', default: true })
+  is_active!: boolean;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'course_modalities' })
+@Index(['code'], { unique: true })
+export class CourseModalityEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 40 })
+  code!: string;
+
+  @Column({ type: 'varchar', length: 120 })
+  name!: string;
+
+  @Column({ type: 'boolean', default: true })
+  is_active!: boolean;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_cycle_plan_rules' })
+@Index(['semester_id', 'academic_program_id', 'cycle'])
+export class PlanningCyclePlanRuleEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  semester_id!: string;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  campus_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36 })
+  academic_program_id!: string;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  faculty_id!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  career_name!: string | null;
+
+  @Column({ type: 'int' })
+  cycle!: number;
+
+  @Column({ type: 'varchar', length: 36 })
+  study_plan_id!: string;
+
+  @Column({ type: 'boolean', default: true })
+  is_active!: boolean;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_offers' })
+@Index(['semester_id', 'campus_id', 'study_plan_course_id'], { unique: true })
+@Index(['semester_id', 'academic_program_id', 'cycle'])
+export class PlanningOfferEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  semester_id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  campus_id!: string;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  faculty_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  academic_program_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36 })
+  study_plan_id!: string;
+
+  @Column({ type: 'int' })
+  cycle!: number;
+
+  @Column({ type: 'varchar', length: 36 })
+  study_plan_course_id!: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  course_code!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  course_name!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  study_type_id!: string | null;
+
+  @Column({ type: 'varchar', length: 30 })
+  course_type!: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  theoretical_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  practical_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  total_hours!: number;
+
+  @Column({ type: 'enum', enum: PlanningOfferStatusValues, default: 'DRAFT' })
+  status!: (typeof PlanningOfferStatusValues)[number];
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_sections' })
+@Index(['planning_offer_id', 'code'], { unique: true })
+export class PlanningSectionEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  planning_offer_id!: string;
+
+  @Column({ type: 'varchar', length: 20 })
+  code!: string;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  teacher_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  course_modality_id!: string | null;
+
+  @Column({ type: 'boolean', default: false })
+  has_subsections!: boolean;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  default_theoretical_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  default_practical_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  default_virtual_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  default_seminar_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  default_total_hours!: number;
+
+  @Column({ type: 'enum', enum: PlanningOfferStatusValues, default: 'DRAFT' })
+  status!: (typeof PlanningOfferStatusValues)[number];
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_subsections' })
+@Index(['planning_section_id', 'code'], { unique: true })
+export class PlanningSubsectionEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  planning_section_id!: string;
+
+  @Column({ type: 'varchar', length: 20 })
+  code!: string;
+
+  @Column({ type: 'enum', enum: PlanningSubsectionKindValues })
+  kind!: (typeof PlanningSubsectionKindValues)[number];
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  responsible_teacher_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  building_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  classroom_id!: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  capacity_snapshot!: number | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  shift!: string | null;
+
+  @Column({ type: 'varchar', length: 30 })
+  course_type!: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  assigned_theoretical_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  assigned_practical_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  assigned_virtual_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  assigned_seminar_hours!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  assigned_total_hours!: number;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  denomination!: string | null;
+
+  @Column({ type: 'enum', enum: PlanningOfferStatusValues, default: 'DRAFT' })
+  status!: (typeof PlanningOfferStatusValues)[number];
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_subsection_schedules' })
+@Index(['planning_subsection_id', 'day_of_week'])
+export class PlanningSubsectionScheduleEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  planning_subsection_id!: string;
+
+  @Column({ type: 'enum', enum: DayOfWeekValues })
+  day_of_week!: (typeof DayOfWeekValues)[number];
+
+  @Column({ type: 'time' })
+  start_time!: string;
+
+  @Column({ type: 'time' })
+  end_time!: string;
+
+  @Column({ type: 'int' })
+  duration_minutes!: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  academic_hours!: number;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_schedule_conflicts_v2' })
+@Index(['semester_id', 'conflict_type'])
+@Index(['planning_subsection_id'])
+@Index(['teacher_id'])
+@Index(['classroom_id'])
+export class PlanningScheduleConflictV2Entity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  semester_id!: string;
+
+  @Column({ type: 'enum', enum: PlanningV2ConflictTypeValues })
+  conflict_type!: (typeof PlanningV2ConflictTypeValues)[number];
+
+  @Column({ type: 'enum', enum: ConflictSeverityValues })
+  severity!: (typeof ConflictSeverityValues)[number];
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  planning_offer_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  planning_section_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  planning_subsection_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  teacher_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  classroom_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36 })
+  schedule_a_id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  schedule_b_id!: string;
+
+  @Column({ type: 'int', default: 0 })
+  overlap_minutes!: number;
+
+  @Column({ type: 'json', nullable: true })
+  detail_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'datetime' })
+  detected_at!: Date;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+}
+
+@Entity({ name: 'planning_change_logs' })
+@Index(['entity_type', 'entity_id', 'changed_at'])
+export class PlanningChangeLogEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 50 })
+  entity_type!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  entity_id!: string;
+
+  @Column({ type: 'enum', enum: PlanningChangeActionValues })
+  action!: (typeof PlanningChangeActionValues)[number];
+
+  @Column({ type: 'json', nullable: true })
+  before_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  after_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  changed_by!: string | null;
+
+  @Column({ type: 'json', nullable: true })
+  context_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'datetime' })
+  changed_at!: Date;
 }

@@ -1,5 +1,7 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
@@ -16,6 +18,9 @@ import {
   ConflictSeverityValues,
   ConflictTypeValues,
   CourseFormatValues,
+  PlanningChangeActionValues,
+  PlanningOfferStatusValues,
+  PlanningSubsectionKindValues,
   DayOfWeekValues,
   GroupTypeValues,
 } from '../../entities/planning.entities';
@@ -399,4 +404,417 @@ export class CreateScheduleConflictDto {
   @IsInt()
   @Min(0)
   overlap_minutes!: number;
+}
+
+export class UpdatePlanningWorkspaceRowDto {
+  @IsOptional()
+  @IsEnum(DayOfWeekValues)
+  day_of_week?: (typeof DayOfWeekValues)[number];
+
+  @IsOptional()
+  @IsString()
+  start_time?: string;
+
+  @IsOptional()
+  @IsString()
+  end_time?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  minutes?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  academic_hours?: number;
+
+  @IsOptional()
+  @IsString()
+  classroom_id?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  clear_classroom?: boolean;
+
+  @IsOptional()
+  @IsString()
+  teacher_id?: string;
+
+  @IsOptional()
+  @IsEnum(ClassGroupTeacherRoleValues)
+  teacher_role?: (typeof ClassGroupTeacherRoleValues)[number];
+
+  @IsOptional()
+  @IsBoolean()
+  clear_teacher?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  capacity?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  group_code?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  group_note?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  projected_vacancies?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  offering_status?: boolean;
+}
+
+export class BulkAssignTeacherDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  row_ids!: string[];
+
+  @IsString()
+  teacher_id!: string;
+
+  @IsOptional()
+  @IsEnum(ClassGroupTeacherRoleValues)
+  role?: (typeof ClassGroupTeacherRoleValues)[number];
+
+  @IsOptional()
+  @IsBoolean()
+  is_primary?: boolean;
+}
+
+export class BulkAssignClassroomDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  row_ids!: string[];
+
+  @IsOptional()
+  @IsString()
+  classroom_id?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  clear_classroom?: boolean;
+}
+
+export class BulkDuplicateDto {
+  @IsOptional()
+  @IsString()
+  source_row_id?: string;
+
+  @IsOptional()
+  @IsString()
+  source_group_id?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  target_group_ids?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  duplicate_group?: boolean;
+}
+
+export class CreatePlanningCyclePlanRuleDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsString()
+  semester_id!: string;
+
+  @IsString()
+  campus_id!: string;
+
+  @IsString()
+  academic_program_id!: string;
+
+  @IsOptional()
+  @IsString()
+  faculty_id?: string;
+
+  @IsOptional()
+  @IsString()
+  career_name?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cycle!: number;
+
+  @IsString()
+  study_plan_id!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
+}
+
+export class UpdatePlanningCyclePlanRuleDto {
+  @IsOptional()
+  @IsString()
+  semester_id?: string;
+
+  @IsOptional()
+  @IsString()
+  campus_id?: string;
+
+  @IsOptional()
+  @IsString()
+  academic_program_id?: string;
+
+  @IsOptional()
+  @IsString()
+  faculty_id?: string;
+
+  @IsOptional()
+  @IsString()
+  career_name?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cycle?: number;
+
+  @IsOptional()
+  @IsString()
+  study_plan_id?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
+}
+
+export class CreatePlanningOfferDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsString()
+  semester_id!: string;
+
+  @IsString()
+  campus_id!: string;
+
+  @IsOptional()
+  @IsString()
+  faculty_id?: string;
+
+  @IsOptional()
+  @IsString()
+  academic_program_id?: string;
+
+  @IsString()
+  study_plan_id!: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cycle!: number;
+
+  @IsString()
+  study_plan_course_id!: string;
+
+  @IsOptional()
+  @IsString()
+  study_type_id?: string;
+
+  @IsOptional()
+  @IsEnum(PlanningOfferStatusValues)
+  status?: (typeof PlanningOfferStatusValues)[number];
+}
+
+export class UpdatePlanningOfferDto {
+  @IsOptional()
+  @IsString()
+  study_type_id?: string;
+
+  @IsOptional()
+  @IsEnum(PlanningOfferStatusValues)
+  status?: (typeof PlanningOfferStatusValues)[number];
+}
+
+export class CreatePlanningSectionDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsString()
+  teacher_id?: string;
+
+  @IsOptional()
+  @IsString()
+  course_modality_id?: string;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  subsection_count!: number;
+}
+
+export class UpdatePlanningSectionDto {
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  @IsOptional()
+  @IsString()
+  teacher_id?: string;
+
+  @IsOptional()
+  @IsString()
+  course_modality_id?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  has_subsections?: boolean;
+
+  @IsOptional()
+  @IsEnum(PlanningOfferStatusValues)
+  status?: (typeof PlanningOfferStatusValues)[number];
+}
+
+export class CreatePlanningSubsectionDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  @IsEnum(PlanningSubsectionKindValues)
+  kind!: (typeof PlanningSubsectionKindValues)[number];
+
+  @IsOptional()
+  @IsString()
+  responsible_teacher_id?: string;
+
+  @IsOptional()
+  @IsString()
+  building_id?: string;
+
+  @IsOptional()
+  @IsString()
+  classroom_id?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  capacity_snapshot?: number;
+
+  @IsOptional()
+  @IsString()
+  shift?: string;
+
+  @IsOptional()
+  @IsString()
+  denomination?: string;
+}
+
+export class UpdatePlanningSubsectionDto {
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  @IsOptional()
+  @IsEnum(PlanningSubsectionKindValues)
+  kind?: (typeof PlanningSubsectionKindValues)[number];
+
+  @IsOptional()
+  @IsString()
+  responsible_teacher_id?: string;
+
+  @IsOptional()
+  @IsString()
+  building_id?: string;
+
+  @IsOptional()
+  @IsString()
+  classroom_id?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  capacity_snapshot?: number;
+
+  @IsOptional()
+  @IsString()
+  shift?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  assigned_theoretical_hours?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  assigned_practical_hours?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  assigned_virtual_hours?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  assigned_seminar_hours?: number;
+
+  @IsOptional()
+  @IsString()
+  denomination?: string;
+
+  @IsOptional()
+  @IsEnum(PlanningOfferStatusValues)
+  status?: (typeof PlanningOfferStatusValues)[number];
+}
+
+export class CreatePlanningSubsectionScheduleDto {
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsEnum(DayOfWeekValues)
+  day_of_week!: (typeof DayOfWeekValues)[number];
+
+  @IsString()
+  start_time!: string;
+
+  @IsString()
+  end_time!: string;
+}
+
+export class UpdatePlanningSubsectionScheduleDto {
+  @IsOptional()
+  @IsEnum(DayOfWeekValues)
+  day_of_week?: (typeof DayOfWeekValues)[number];
+
+  @IsOptional()
+  @IsString()
+  start_time?: string;
+
+  @IsOptional()
+  @IsString()
+  end_time?: string;
 }

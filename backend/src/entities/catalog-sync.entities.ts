@@ -130,14 +130,26 @@ export class StudyPlanEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;
 
-  @Column({ type: 'varchar', length: 150, nullable: true })
+  @Column({ type: 'varchar', length: 200, nullable: true })
   name!: string | null;
 
-  @Column({ type: 'varchar', length: 50, nullable: true })
-  curriculum!: string | null;
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  faculty!: string | null;
 
-  @Column({ type: 'varchar', length: 20, nullable: true })
-  curriculum_code!: string | null;
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  career!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  academic_program!: string | null;
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  year!: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  creation_resolution!: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  approve_resolution!: string | null;
 
   @Column({ type: 'varchar', length: 36, nullable: true })
   faculty_id!: string | null;
@@ -147,6 +159,133 @@ export class StudyPlanEntity {
 
   @Column({ type: 'boolean', default: true })
   is_active!: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  is_new!: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  is_unique!: boolean;
+}
+
+@Entity({ name: 'study_plan_courses' })
+@Index(['study_plan_id'])
+export class StudyPlanCourseEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  study_plan_id!: string;
+
+  @Column({ type: 'int', nullable: true })
+  order!: number | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  year_credits!: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  year_label!: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  course_code!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  course_name!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  academic_program!: string | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  credits!: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  required_credits!: number | null;
+
+  @Column({ type: 'boolean', default: false })
+  is_elective!: boolean;
+
+  @Column({ type: 'text', nullable: true })
+  requisites!: string | null;
+
+  @Column({ type: 'json', nullable: true })
+  certificates!: unknown[] | null;
+
+  @Column({ type: 'json', nullable: true })
+  requisites_ids!: string[] | null;
+
+  @Column({ type: 'json', nullable: true })
+  optional_requisites_ids!: string[] | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  requisite1!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  requisite2!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  requisite3!: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  count!: number | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  competencie_id!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  competencie!: string | null;
+
+  @Column({ type: 'boolean', default: false })
+  is_exonerable!: boolean;
+}
+
+@Entity({ name: 'study_plan_course_details' })
+export class StudyPlanCourseDetailEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  study_plan_course_id!: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  short_code!: string | null;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  name!: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  practical_hours!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  theoretical_hours!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  virtual_hours!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  seminar_hours!: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  credits!: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  required_credits!: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  academic_year!: number | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  course_type_id!: string | null;
+
+  @Column({ type: 'boolean', default: false })
+  is_elective!: boolean;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  area_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  course_component_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  academic_program_id!: string | null;
+
+  @Column({ type: 'boolean', default: false })
+  any_course_term!: boolean;
 }
 
 @Entity({ name: 'sections' })

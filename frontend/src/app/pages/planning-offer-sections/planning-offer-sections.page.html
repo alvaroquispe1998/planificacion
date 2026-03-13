@@ -1,0 +1,240 @@
+<div class="planning-shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Configuracion por oferta</p>
+      <h1>Secciones y subsecciones</h1>
+      <p class="subtle">
+        Administra las secciones creadas para el curso y configura sus subsecciones base.
+      </p>
+    </div>
+    <div class="hero-actions">
+      <button class="btn btn-secondary" (click)="goBack()">Volver al editor</button>
+      <button class="btn btn-primary" (click)="openCreateSectionModal()" [disabled]="!canCreateSection">
+        Crear seccion
+      </button>
+    </div>
+  </header>
+
+  <p *ngIf="message" class="flash success">{{ message }}</p>
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+  <p *ngIf="supportDataLoading && offer" class="flash">
+    Cargando catalogos auxiliares. Ya puedes crear la primera seccion.
+  </p>
+
+  <section *ngIf="offer" class="context-card">
+    <div class="context-item">
+      <span>Periodo</span>
+      <strong>{{ semesterLabel }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Sede</span>
+      <strong>{{ campusLabel }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Facultad</span>
+      <strong>{{ facultyLabel }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Programa</span>
+      <strong>{{ programLabel }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Ciclo</span>
+      <strong>{{ offer.cycle }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Plan de estudio</span>
+      <strong>{{ studyPlanLabel }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Curso</span>
+      <strong>{{ offer.course_code }} - {{ offer.course_name }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Tipo</span>
+      <strong>{{ offer.course_type }}</strong>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Registradas</p>
+        <h2>Secciones creadas</h2>
+      </div>
+      <span class="pill neutral">{{ offer?.sections?.length || 0 }} secciones</span>
+    </div>
+
+    <div *ngIf="loading" class="empty-block">
+      <h3>Cargando oferta...</h3>
+    </div>
+
+    <div *ngIf="!loading && offer?.sections?.length === 0" class="empty-block">
+      <h3>No hay secciones creadas</h3>
+      <p>Crea la primera seccion para esta oferta y el sistema generara sus subsecciones.</p>
+    </div>
+
+    <div *ngIf="!loading && (offer?.sections?.length || 0) > 0" class="sections-grid">
+      <article *ngFor="let section of offer.sections" class="section-card">
+        <div class="section-card-head">
+          <div>
+            <p class="eyebrow">Seccion</p>
+            <h3>{{ section.code }}</h3>
+          </div>
+          <span class="pill neutral">{{ section.subsections?.length || 0 }} subsecciones</span>
+        </div>
+
+        <label class="field">
+          <span>Docente de seccion</span>
+          <select
+            [(ngModel)]="section.teacher_id"
+            (ngModelChange)="updateSectionTeacher(section, $event)"
+            [disabled]="saving">
+            <option value="">Sin docente</option>
+            <option *ngFor="let teacher of teachers" [value]="teacher.id">
+              {{ teacherDisplay(teacher) }}
+            </option>
+          </select>
+        </label>
+
+        <div class="subsections-grid">
+          <article *ngFor="let subsection of section.subsections" class="subsection-card">
+            <div class="subsection-head">
+              <div>
+                <strong>{{ subsection.code }}</strong>
+              </div>
+              <span class="pill" [ngClass]="subsectionKindClass(subsection.kind)">
+                {{ subsectionKindLabel(subsection.kind) }}
+              </span>
+            </div>
+
+            <div class="subsection-fields">
+              <label class="field">
+                <span>Jefe de practica</span>
+                <select
+                  [(ngModel)]="subsection.responsible_teacher_id"
+                  (ngModelChange)="onSubsectionTeacherChange(subsection, $event)"
+                  [disabled]="saving">
+                  <option value="">Sin asignar</option>
+                  <option *ngFor="let teacher of teachers" [value]="teacher.id">
+                    {{ teacherDisplay(teacher) }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Pabellon</span>
+                <select
+                  [(ngModel)]="subsection.building_id"
+                  (ngModelChange)="onSubsectionBuildingChange(subsection, $event)"
+                  [disabled]="saving">
+                  <option value="">Sin pabellon</option>
+                  <option *ngFor="let building of buildings" [value]="building.id">
+                    {{ building.name }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Aula / Laboratorio</span>
+                <select
+                  [(ngModel)]="subsection.classroom_id"
+                  (ngModelChange)="onSubsectionClassroomChange(subsection, $event)"
+                  [disabled]="saving || !subsection.building_id">
+                  <option value="">Sin aula</option>
+                  <option *ngFor="let classroom of classroomsForBuilding(subsection.building_id)" [value]="classroom.id">
+                    {{ classroom.name }}{{ classroom.capacity ? ' - Aforo ' + classroom.capacity : '' }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Turno</span>
+                <select
+                  [(ngModel)]="subsection.shift"
+                  (ngModelChange)="onSubsectionShiftChange(subsection, $event)"
+                  [disabled]="saving">
+                  <option value="">Sin turno</option>
+                  <option *ngFor="let shift of shiftOptions" [value]="shift.value">
+                    {{ shift.label }}
+                  </option>
+                </select>
+              </label>
+            </div>
+          </article>
+        </div>
+      </article>
+    </div>
+  </section>
+</div>
+
+<div *ngIf="showCreateModal" class="modal-backdrop" (click)="closeCreateSectionModal()">
+  <section class="modal-card" (click)="$event.stopPropagation()">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Nueva seccion</p>
+        <h3>Crear seccion para la oferta</h3>
+      </div>
+      <button class="btn btn-ghost" (click)="closeCreateSectionModal()">Cerrar</button>
+    </div>
+
+    <div class="modal-body">
+      <label class="field">
+        <span>Tipo de creacion</span>
+        <select [(ngModel)]="createSectionForm.mode" (ngModelChange)="onCreateSectionModeChange()">
+          <option value="SINGLE">Seccion unica</option>
+          <option value="MULTIPLE">Con subsecciones</option>
+        </select>
+      </label>
+
+      <label class="field" *ngIf="createSectionForm.mode === 'MULTIPLE'">
+        <span>Cantidad de subsecciones</span>
+        <input
+          type="number"
+          min="2"
+          [(ngModel)]="createSectionForm.subsection_count" />
+      </label>
+
+      <label class="field">
+        <span>Docente de seccion</span>
+        <div class="search-select">
+          <input
+            type="text"
+            [ngModel]="createTeacherQuery"
+            (ngModelChange)="onCreateTeacherQueryChange($event)"
+            (focus)="onCreateTeacherFocus()"
+            (blur)="onCreateTeacherBlur()"
+            [disabled]="saving"
+            placeholder="Buscar por DNI o nombre" />
+
+          <div *ngIf="showCreateTeacherOptions" class="search-select-menu">
+            <button type="button" class="search-select-option" (mousedown)="selectCreateTeacher(null)">
+              Sin docente
+            </button>
+
+            <button
+              type="button"
+              class="search-select-option"
+              *ngFor="let teacher of filteredTeachers"
+              (mousedown)="selectCreateTeacher(teacher)">
+              {{ teacherDisplay(teacher) }}
+            </button>
+
+            <div *ngIf="filteredTeachers.length === 0" class="search-select-empty">
+              No se encontraron docentes
+            </div>
+          </div>
+        </div>
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" (click)="closeCreateSectionModal()" [disabled]="saving">
+        Cancelar
+      </button>
+      <button class="btn btn-primary" (click)="createSection()" [disabled]="saving">
+        {{ saving ? 'Creando...' : 'Crear seccion' }}
+      </button>
+    </div>
+  </section>
+</div>

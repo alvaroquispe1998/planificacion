@@ -1,0 +1,89 @@
+<div class="planning-shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Cursos guardados</p>
+      <h1>Detalle del ciclo configurado</h1>
+      <p class="subtle">
+        Esta vista muestra solo la configuracion guardada para el periodo, sede, programa y ciclo
+        seleccionados.
+      </p>
+    </div>
+    <div class="hero-actions">
+      <button class="btn btn-secondary" (click)="goBack()">Volver al resumen</button>
+      <button class="btn btn-primary" (click)="editCycle()">Editar configuracion</button>
+    </div>
+  </header>
+
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+
+  <section class="context-card">
+    <div class="context-item">
+      <span>Periodo</span>
+      <strong>{{ semesterLabel }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Sede</span>
+      <strong>{{ campusLabel }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Facultad</span>
+      <strong>{{ facultyLabel }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Programa</span>
+      <strong>{{ programLabel }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Ciclo</span>
+      <strong>{{ filters.cycle }}</strong>
+    </div>
+    <div class="context-item">
+      <span>Plan de estudio</span>
+      <strong>{{ studyPlanLabel }}</strong>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Configurados</p>
+        <h2>Cursos guardados</h2>
+      </div>
+      <span class="pill">{{ offers.length }} registros</span>
+    </div>
+
+    <div class="table-wrap" *ngIf="offers.length > 0; else emptyState">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Codigo</th>
+            <th>Curso</th>
+            <th>HT</th>
+            <th>HP</th>
+            <th>Total</th>
+            <th>Tipo</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let offer of offers">
+            <td>{{ offer.course_code || '---' }}</td>
+            <td>{{ offer.course_name || 'Curso sin nombre' }}</td>
+            <td>{{ offer.theoretical_hours }}</td>
+            <td>{{ offer.practical_hours }}</td>
+            <td>{{ offer.total_hours }}</td>
+            <td>{{ formatCourseType(offer.course_type) }}</td>
+            <td>{{ offer.status }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ng-template #emptyState>
+      <div class="empty-block">
+        <h3>{{ loading ? 'Cargando cursos guardados...' : 'No hay cursos guardados' }}</h3>
+        <p>Cuando registres ofertas para este ciclo, apareceran listadas aqui.</p>
+      </div>
+    </ng-template>
+  </section>
+</div>

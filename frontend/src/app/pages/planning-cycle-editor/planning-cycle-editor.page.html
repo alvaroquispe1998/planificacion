@@ -1,0 +1,157 @@
+<div class="planning-shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Planificacion manual</p>
+      <h1>Editor por ciclo</h1>
+    </div>
+    <div class="hero-actions">
+      <button class="btn btn-secondary btn-sm" (click)="goBackToSummary()">← Volver al resumen</button>
+      <button class="btn btn-primary btn-sm" (click)="reloadPlanningView()" [disabled]="saving || loading">
+        {{ saving ? 'Procesando...' : loading ? 'Cargando...' : 'Actualizar' }}
+      </button>
+    </div>
+  </header>
+
+  <section class="filters-card">
+    <select [(ngModel)]="filters.semester_id" (ngModelChange)="onSemesterChange()" [disabled]="canManageOffers">
+      <option value="">Selecciona semestre</option>
+      <option *ngFor="let semester of catalog.semesters" [value]="semester.id">
+        {{ semester.name }}
+      </option>
+    </select>
+    <select [(ngModel)]="filters.campus_id" (ngModelChange)="onCampusChange()" [disabled]="canManageOffers">
+      <option value="">Selecciona local</option>
+      <option *ngFor="let campus of catalog.campuses" [value]="campus.id">
+        {{ campus.name }}
+      </option>
+    </select>
+    <select [(ngModel)]="filters.faculty_id" (ngModelChange)="onFacultyChange()" [disabled]="canManageOffers">
+      <option value="">Selecciona facultad</option>
+      <option *ngFor="let faculty of catalog.faculties" [value]="faculty.id">
+        {{ faculty.name }}
+      </option>
+    </select>
+    <select
+      [(ngModel)]="filters.academic_program_id"
+      (ngModelChange)="onAcademicProgramChange()"
+      [disabled]="!canSelectProgram || canManageOffers">
+      <option value="">Selecciona programa</option>
+      <option *ngFor="let program of filteredPrograms" [value]="program.id">
+        {{ program.name }}
+      </option>
+    </select>
+    <select [(ngModel)]="filters.cycle" (ngModelChange)="onCycleChange()" [disabled]="!canSelectCycle || canManageOffers">
+      <option value="">Selecciona ciclo</option>
+      <option *ngFor="let cycle of availableCycles" [value]="cycle.value">
+        {{ cycle.label }}
+      </option>
+    </select>
+  </section>
+
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+
+  <section *ngIf="hasRequiredContext" class="rules-card">
+    <div class="rule-form-inline">
+      <div class="rule-context">
+        <span class="pill neutral">{{ selectedProgram?.name || 'Programa' }}</span>
+        <span class="pill neutral">{{ selectedCycleLabel }}</span>
+      </div>
+      <select
+        [(ngModel)]="ruleForm.study_plan_id"
+        (ngModelChange)="onStudyPlanChange()"
+        [disabled]="!canSelectStudyPlan">
+        <option value="">Plan de estudio</option>
+        <option *ngFor="let plan of availableStudyPlans" [value]="plan.id">
+          {{ plan.name }}
+        </option>
+      </select>
+      <button
+        class="btn btn-primary btn-sm"
+        (click)="createPlanRule()"
+        [disabled]="saving || !hasRequiredContext || !ruleForm.study_plan_id">
+        Crear plan
+      </button>
+    </div>
+
+    <div class="rule-list" *ngIf="visiblePlanRules.length > 0">
+      <article *ngFor="let rule of visiblePlanRules" class="rule-item">
+        <div>
+          <strong>Ciclo {{ formatRuleCycle(rule) }}</strong>
+          &middot;
+          <span class="rule-plan-name">{{ rule.study_plan?.name || rule.study_plan_id }}</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" (click)="deletePlanRule(rule.id)">Eliminar</button>
+      </article>
+    </div>
+  </section>
+
+  <section class="panel candidates-panel">
+    <div class="section-head">
+      <h2>Cursos del ciclo <span class="candidates-count" *ngIf="candidates.length > 0">({{ candidates.length }})</span></h2>
+      <span class="pill neutral" *ngIf="!canManageOffers && hasRequiredContext">Primero guarda el plan</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table" *ngIf="candidates.length > 0; else emptyCandidates">
+        <thead>
+          <tr>
+            <th>Codigo</th>
+            <th>Curso</th>
+            <th>Cred.</th>
+            <th>HT</th>
+            <th>HP</th>
+            <th>Total</th>
+            <th>Tipo</th>
+            <th>Estado</th>
+            <th>Accion</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let candidate of candidates">
+            <td>{{ candidate.course_code || '---' }}</td>
+            <td>{{ candidate.course_name || 'Curso sin nombre' }}</td>
+            <td>{{ candidate.credits }}</td>
+            <td>{{ candidate.theoretical_hours }}</td>
+            <td>{{ candidate.practical_hours }}</td>
+            <td>{{ candidate.total_hours }}</td>
+            <td>{{ formatCourseType(candidate.course_type) }}</td>
+            <td>
+              <span class="pill" [ngClass]="trackOfferStatusClass(candidate.offer_status || 'DRAFT')">
+                {{ candidate.offer_status || 'SIN_OFERTA' }}
+              </span>
+            </td>
+            <td>
+              <button
+                *ngIf="!candidate.has_offer"
+                class="btn btn-primary btn-sm"
+                [disabled]="!canManageOffers || !hasRequiredContext || saving"
+                (click)="createOffer(candidate)">
+                Guardar oferta
+              </button>
+              <button
+                *ngIf="candidate.has_offer"
+                class="btn btn-secondary btn-sm"
+                [disabled]="!canManageOffers || !hasRequiredContext"
+                (click)="openOffer(candidate.offer_id)">
+                Configurar secciones
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ng-template #emptyCandidates>
+      <div class="empty-block">
+        <h3>{{ loading ? 'Cargando cursos...' : 'Sin cursos para esta seleccion' }}</h3>
+        <p>
+          {{
+            hasRequiredContext
+              ? 'Selecciona un plan de estudio valido para revisar y guardar los cursos del ciclo.'
+              : 'Selecciona semestre, local, facultad, programa y ciclo para revisar los cursos del ciclo.'
+          }}
+        </p>
+      </div>
+    </ng-template>
+  </section>
+</div>
