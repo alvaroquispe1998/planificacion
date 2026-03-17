@@ -1,0 +1,30 @@
+.security-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.hero {
+  border: 1px solid #d8e3ef;
+  border-radius: 1.25rem;
+  padding: 1rem 1.1rem;
+  background:
+    linear-gradient(120deg, rgba(224, 243, 255, 0.92), rgba(255, 238, 212, 0.92));
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  color: #b15a0f;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+.hero h1 {
+  margin: 0;
+  color: #173558;
+}
+
+.hero p:last-child {
+  margin: 0.4rem 0 0;
+  color: #49627d;
+}

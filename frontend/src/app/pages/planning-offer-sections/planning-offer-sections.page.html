@@ -75,97 +75,386 @@
     </div>
 
     <div *ngIf="!loading && (offer?.sections?.length || 0) > 0" class="sections-grid">
-      <article *ngFor="let section of offer.sections" class="section-card">
-        <div class="section-card-head">
-          <div>
-            <p class="eyebrow">Seccion</p>
-            <h3>{{ section.code }}</h3>
-          </div>
-          <span class="pill neutral">{{ section.subsections?.length || 0 }} subsecciones</span>
-        </div>
-
-        <label class="field">
-          <span>Docente de seccion</span>
-          <select
-            [(ngModel)]="section.teacher_id"
-            (ngModelChange)="updateSectionTeacher(section, $event)"
-            [disabled]="saving">
-            <option value="">Sin docente</option>
-            <option *ngFor="let teacher of teachers" [value]="teacher.id">
-              {{ teacherDisplay(teacher) }}
-            </option>
-          </select>
-        </label>
-
-        <div class="subsections-grid">
-          <article *ngFor="let subsection of section.subsections" class="subsection-card">
-            <div class="subsection-head">
-              <div>
-                <strong>{{ subsection.code }}</strong>
+      <article *ngFor="let section of offer.sections" class="section-accordion" [class.is-expanded]="isSectionExpanded(section.id)">
+        <button type="button" class="section-summary" (click)="toggleSection(section.id)">
+          <div class="section-summary-main">
+            <div class="section-summary-top">
+              <div class="section-summary-title">
+                <p class="eyebrow">Seccion</p>
+                <h3>{{ section.code }}</h3>
               </div>
-              <span class="pill" [ngClass]="subsectionKindClass(subsection.kind)">
-                {{ subsectionKindLabel(subsection.kind) }}
-              </span>
+              <div class="section-summary-pills">
+                <span class="pill neutral">{{ section.subsections?.length || 0 }} subsecciones</span>
+                <span class="pill" [ngClass]="sectionStatusClass(section)">
+                  {{ sectionStatusLabel(section) }}
+                </span>
+              </div>
             </div>
 
-            <div class="subsection-fields">
-              <label class="field">
-                <span>Jefe de practica</span>
-                <select
-                  [(ngModel)]="subsection.responsible_teacher_id"
-                  (ngModelChange)="onSubsectionTeacherChange(subsection, $event)"
-                  [disabled]="saving">
-                  <option value="">Sin asignar</option>
-                  <option *ngFor="let teacher of teachers" [value]="teacher.id">
+            <div class="section-summary-grid">
+              <div class="summary-stat">
+                <span>Docente</span>
+                <strong>{{ sectionTeacherSummary(section) }}</strong>
+              </div>
+              <div class="summary-stat">
+                <span>Vacantes</span>
+                <strong>{{ section.projected_vacancies }}</strong>
+              </div>
+              <div class="summary-stat">
+                <span>Horario</span>
+                <strong>{{ sectionScheduleSummary(section) }}</strong>
+              </div>
+              <div class="summary-stat">
+                <span>Cruces</span>
+                <strong>{{ sectionConflictCount(section) || 'Sin cruces' }}</strong>
+              </div>
+            </div>
+          </div>
+
+          <span class="section-summary-action">
+            {{ isSectionExpanded(section.id) ? 'Ocultar' : 'Expandir' }}
+          </span>
+        </button>
+
+        <div *ngIf="isSectionExpanded(section.id)" class="section-detail">
+          <div class="section-teacher-bar">
+            <div class="section-teacher-label">
+              <span class="field-kicker">Docente de seccion</span>
+            </div>
+            <label class="field field-inline">
+              <div class="search-select">
+                <input
+                  type="text"
+                  [ngModel]="sectionTeacherQuery(section.id)"
+                  (ngModelChange)="onSectionTeacherQueryChange(section.id, $event)"
+                  (focus)="onSectionTeacherFocus(section.id)"
+                  (blur)="onSectionTeacherBlur(section.id)"
+                  [disabled]="saving"
+                  placeholder="Buscar por DNI o nombre" />
+
+                <div *ngIf="sectionTeacherMenuOpenById[section.id]" class="search-select-menu">
+                  <button
+                    type="button"
+                    class="search-select-option"
+                    (mousedown)="selectSectionTeacher(section, null)">
+                    Sin docente
+                  </button>
+
+                  <button
+                    type="button"
+                    class="search-select-option"
+                    *ngFor="let teacher of filteredSectionTeachers(section.id)"
+                    (mousedown)="selectSectionTeacher(section, teacher)">
                     {{ teacherDisplay(teacher) }}
-                  </option>
-                </select>
-              </label>
+                  </button>
 
-              <label class="field">
-                <span>Pabellon</span>
-                <select
-                  [(ngModel)]="subsection.building_id"
-                  (ngModelChange)="onSubsectionBuildingChange(subsection, $event)"
-                  [disabled]="saving">
-                  <option value="">Sin pabellon</option>
-                  <option *ngFor="let building of buildings" [value]="building.id">
-                    {{ building.name }}
-                  </option>
-                </select>
-              </label>
+                  <div *ngIf="filteredSectionTeachers(section.id).length === 0" class="search-select-empty">
+                    No se encontraron docentes
+                  </div>
+                </div>
+              </div>
+            </label>
+            <label class="field section-vacancies-field">
+              <span>Vacantes de seccion</span>
+              <input
+                type="number"
+                min="0"
+                [ngModel]="section.projected_vacancies"
+                (change)="updateSectionVacancies(section, $any($event.target).value)"
+                [disabled]="saving" />
+            </label>
+          </div>
 
-              <label class="field">
-                <span>Aula / Laboratorio</span>
-                <select
-                  [(ngModel)]="subsection.classroom_id"
-                  (ngModelChange)="onSubsectionClassroomChange(subsection, $event)"
-                  [disabled]="saving || !subsection.building_id">
-                  <option value="">Sin aula</option>
-                  <option *ngFor="let classroom of classroomsForBuilding(subsection.building_id)" [value]="classroom.id">
-                    {{ classroom.name }}{{ classroom.capacity ? ' - Aforo ' + classroom.capacity : '' }}
-                  </option>
-                </select>
-              </label>
-
-              <label class="field">
-                <span>Turno</span>
-                <select
-                  [(ngModel)]="subsection.shift"
-                  (ngModelChange)="onSubsectionShiftChange(subsection, $event)"
-                  [disabled]="saving">
-                  <option value="">Sin turno</option>
-                  <option *ngFor="let shift of shiftOptions" [value]="shift.value">
-                    {{ shift.label }}
-                  </option>
-                </select>
-              </label>
-            </div>
-          </article>
+          <div class="subsections-table-wrap">
+            <table class="subsections-table">
+              <thead>
+                <tr>
+                  <th>Codigo</th>
+                  <th>Responsable</th>
+                  <th>Turno</th>
+                  <th>Modalidad</th>
+                  <th>Vacantes</th>
+                  <th>Ubicacion</th>
+                  <th>Horario</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let subsection of section.subsections" [class.row-conflict]="(subsection.conflicts?.length || 0) > 0">
+                  <td>
+                    <div class="table-code-cell">
+                      <strong>{{ subsection.code }}</strong>
+                      <span class="pill" [ngClass]="subsectionKindClass(subsection.kind)">
+                        {{ subsectionKindLabel(subsection.kind) }}
+                      </span>
+                    </div>
+                  </td>
+                  <td>{{ subsectionTeacherQuery(subsection.id) || 'Sin responsable' }}</td>
+                  <td>{{ subsection.shift || 'Sin turno' }}</td>
+                  <td>{{ subsectionModalityLabel(subsection) }}</td>
+                  <td>{{ subsection.projected_vacancies }}</td>
+                  <td>{{ subsectionLocationSummary(subsection) }}</td>
+                  <td>{{ scheduleSummary(subsection) }}</td>
+                  <td>
+                    <span class="pill" [ngClass]="subsectionStatusClass(subsection)">
+                      {{ subsectionStatusLabel(subsection) }}
+                    </span>
+                  </td>
+                  <td class="table-action">
+                    <button type="button" class="btn btn-secondary btn-sm" (click)="openSubsectionDrawer(section, subsection)">
+                      Editar
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </article>
     </div>
   </section>
+</div>
+
+<div *ngIf="drawerOpen && activeSubsection as activeSubsection" class="drawer-backdrop" (click)="closeSubsectionDrawer()">
+  <aside class="subsection-drawer" (click)="$event.stopPropagation()">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">Subseccion</p>
+        <h3>{{ activeSubsection.code }}</h3>
+        <p class="drawer-subtitle">
+          {{ activeSection?.code || 'Seccion' }} - {{ subsectionStatusLabel(activeSubsection) }}
+        </p>
+      </div>
+      <button class="btn btn-ghost" (click)="closeSubsectionDrawer()">Cerrar</button>
+    </div>
+
+    <div class="drawer-content">
+      <div class="drawer-overview">
+        <span class="pill" [ngClass]="subsectionKindClass(activeSubsection.kind)">
+          {{ subsectionKindLabel(activeSubsection.kind) }}
+        </span>
+        <span class="pill" [ngClass]="subsectionStatusClass(activeSubsection)">
+          {{ subsectionStatusLabel(activeSubsection) }}
+        </span>
+        <span *ngIf="activeSubsection.conflicts?.length" class="pill status-observed">
+          {{ activeSubsection.conflicts.length }} cruces
+        </span>
+      </div>
+
+      <section class="drawer-block">
+        <div class="drawer-block-head">
+          <span class="field-kicker">Responsable</span>
+        </div>
+        <div class="drawer-grid drawer-grid-two">
+          <label class="field field-emphasis">
+            <span>Jefe de practica</span>
+            <div class="search-select">
+              <input
+                type="text"
+                [ngModel]="subsectionTeacherQuery(activeSubsection.id)"
+                (ngModelChange)="onSubsectionTeacherQueryChange(activeSubsection.id, $event)"
+                (focus)="onSubsectionTeacherFocus(activeSubsection.id)"
+                (blur)="onSubsectionTeacherBlur(activeSubsection.id)"
+                [disabled]="saving"
+                placeholder="Buscar por DNI o nombre" />
+
+              <div *ngIf="subsectionTeacherMenuOpenById[activeSubsection.id]" class="search-select-menu">
+                <button
+                  type="button"
+                  class="search-select-option"
+                  (mousedown)="selectSubsectionTeacher(activeSubsection, null)">
+                  Sin asignar
+                </button>
+
+                <button
+                  type="button"
+                  class="search-select-option"
+                  *ngFor="let teacher of filteredSubsectionTeachers(activeSubsection.id)"
+                  (mousedown)="selectSubsectionTeacher(activeSubsection, teacher)">
+                  {{ teacherDisplay(teacher) }}
+                </button>
+
+                <div *ngIf="filteredSubsectionTeachers(activeSubsection.id).length === 0" class="search-select-empty">
+                  No se encontraron docentes
+                </div>
+              </div>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Turno</span>
+            <select
+              [(ngModel)]="activeSubsection.shift"
+              (ngModelChange)="onSubsectionShiftChange(activeSubsection, $event)"
+              [disabled]="saving">
+              <option value="">Sin turno</option>
+              <option *ngFor="let shift of shiftOptions" [value]="shift.value">
+                {{ shift.label }}
+              </option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="drawer-block">
+        <div class="drawer-block-head">
+          <span class="field-kicker">Configuracion</span>
+        </div>
+        <div class="drawer-grid drawer-grid-two">
+          <label class="field">
+            <span>Vacantes</span>
+            <input
+              type="number"
+              min="0"
+              [ngModel]="activeSubsection.projected_vacancies"
+              (change)="updateSubsectionVacancies(activeSubsection, $any($event.target).value)"
+              [disabled]="saving" />
+          </label>
+
+          <label class="field">
+            <span>Modalidad</span>
+            <select
+              [(ngModel)]="activeSubsection.course_modality_id"
+              (ngModelChange)="onSubsectionModalityChange(activeSubsection, $event)"
+              [disabled]="saving">
+              <option value="">Sin modalidad</option>
+              <option *ngFor="let modality of subsectionModalityOptions" [value]="modality.id">
+                {{ modality.name }}
+              </option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="drawer-block">
+        <div class="drawer-block-head">
+          <span class="field-kicker">Ubicacion</span>
+        </div>
+        <div class="drawer-grid drawer-grid-two">
+          <label class="field">
+            <span>Pabellon</span>
+            <select
+              [(ngModel)]="activeSubsection.building_id"
+              (ngModelChange)="onSubsectionBuildingChange(activeSubsection, $event)"
+              [disabled]="saving">
+              <option value="">Sin pabellon</option>
+              <option *ngFor="let building of buildings" [value]="building.id">
+                {{ building.name }}
+              </option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Aula / Laboratorio</span>
+            <select
+              [(ngModel)]="activeSubsection.classroom_id"
+              (ngModelChange)="onSubsectionClassroomChange(activeSubsection, $event)"
+              [disabled]="saving || !activeSubsection.building_id">
+              <option value="">Sin aula</option>
+              <option *ngFor="let classroom of classroomsForBuilding(activeSubsection.building_id)" [value]="classroom.id">
+                {{ classroomOptionLabel(classroom) }}
+              </option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="drawer-block">
+        <div class="drawer-block-head">
+          <span class="field-kicker">Horario</span>
+        </div>
+
+        <div *ngIf="activeSubsection.conflicts?.length" class="schedule-conflicts">
+          <span class="pill status-observed">{{ activeSubsection.conflicts.length }} cruces</span>
+          <span *ngFor="let label of scheduleConflictLabels(activeSubsection)" class="conflict-chip">
+            {{ label }}
+          </span>
+        </div>
+
+        <div *ngIf="(activeSubsection.schedules?.length || 0) > 0" class="schedule-list">
+          <article *ngFor="let schedule of activeSubsection.schedules" class="schedule-item">
+            <div class="schedule-item-main">
+              <strong>{{ dayLabel(schedule.day_of_week) }}</strong>
+              <span>{{ timeLabel(schedule.start_time) }} - {{ timeLabel(schedule.end_time) }}</span>
+            </div>
+            <div class="schedule-item-side">
+              <span>{{ formatAcademicHours(schedule.academic_hours) }} h acad.</span>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                (click)="deleteSchedule(activeSubsection, schedule.id)"
+                [disabled]="saving">
+                Eliminar
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <p *ngIf="!activeSubsection.schedules?.length" class="schedule-empty">
+          Sin horarios configurados.
+        </p>
+
+        <div class="schedule-form drawer-schedule-form">
+          <div class="schedule-form-note">
+            Solo se permite un horario por subseccion, entre 07:40 y 23:30, en bloques de 50 minutos.
+          </div>
+
+          <label class="field">
+            <span>Dia</span>
+            <select
+              [(ngModel)]="scheduleDraftsBySubsectionId[activeSubsection.id].day_of_week"
+              [disabled]="saving">
+              <option *ngFor="let day of dayOptions" [value]="day.value">
+                {{ day.label }}
+              </option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Hora inicio</span>
+            <select
+              [ngModel]="scheduleDraftsBySubsectionId[activeSubsection.id].start_time"
+              (ngModelChange)="onScheduleStartTimeChange(activeSubsection.id, $event)"
+              [disabled]="saving">
+              <option *ngFor="let option of scheduleTimeOptions" [value]="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Hora fin</span>
+            <select
+              [(ngModel)]="scheduleDraftsBySubsectionId[activeSubsection.id].end_time"
+              [disabled]="saving">
+              <option *ngFor="let option of availableEndTimeOptions(activeSubsection.id)" [value]="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Horas academicas</span>
+            <div class="readonly-field">{{ previewAcademicHours(activeSubsection.id) }}</div>
+          </label>
+
+          <div class="schedule-actions">
+            <button
+              type="button"
+              class="btn btn-primary btn-sm"
+              (click)="saveSchedule(activeSubsection)"
+              [disabled]="saving || !canCreateSchedule(activeSubsection.id)">
+              {{ (activeSubsection.schedules?.length || 0) > 0 ? 'Actualizar horario' : 'Guardar horario' }}
+            </button>
+            <span *ngIf="scheduleDraftInvalid(activeSubsection.id)" class="schedule-helper error-text">
+              Usa horas alineadas a la malla de 50 minutos.
+            </span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </aside>
 </div>
 
 <div *ngIf="showCreateModal" class="modal-backdrop" (click)="closeCreateSectionModal()">
@@ -192,7 +481,13 @@
         <input
           type="number"
           min="2"
-          [(ngModel)]="createSectionForm.subsection_count" />
+          [ngModel]="createSectionForm.subsection_count"
+          (ngModelChange)="onCreateSubsectionCountChange($event)" />
+      </label>
+
+      <label class="field">
+        <span>Vacantes de seccion</span>
+        <input type="number" min="0" [(ngModel)]="createSectionForm.projected_vacancies" />
       </label>
 
       <label class="field">
@@ -215,12 +510,12 @@
             <button
               type="button"
               class="search-select-option"
-              *ngFor="let teacher of filteredTeachers"
+              *ngFor="let teacher of filteredCreateTeachers"
               (mousedown)="selectCreateTeacher(teacher)">
               {{ teacherDisplay(teacher) }}
             </button>
 
-            <div *ngIf="filteredTeachers.length === 0" class="search-select-empty">
+            <div *ngIf="filteredCreateTeachers.length === 0" class="search-select-empty">
               No se encontraron docentes
             </div>
           </div>

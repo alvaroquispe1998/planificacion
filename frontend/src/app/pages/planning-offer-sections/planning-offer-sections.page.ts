@@ -1,0 +1,1102 @@
+import { CommonModule, NgClass } from '@angular/common';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
+import { catchError, finalize, forkJoin, of } from 'rxjs';
+import { ApiService } from '../../core/api.service';
+
+type CreateSectionMode = 'SINGLE' | 'MULTIPLE';
+
+type ScheduleDraft = {
+  day_of_week: string;
+  start_time: string;
+  end_time: string;
+};
+
+@Component({
+  selector: 'app-planning-offer-sections-page',
+  standalone: true,
+  imports: [CommonModule, FormsModule, NgClass],
+  templateUrl: './planning-offer-sections.page.html',
+  styleUrl: './planning-offer-sections.page.css',
+})
+export class PlanningOfferSectionsPageComponent implements OnInit {
+  private readonly scheduleGridStartMinutes = 7 * 60 + 40;
+  private readonly scheduleGridEndMinutes = 23 * 60 + 30;
+
+  loading = true;
+  supportDataLoading = false;
+  saving = false;
+  error = '';
+  message = '';
+  showCreateModal = false;
+  showCreateTeacherOptions = false;
+  offerId = '';
+  createTeacherQuery = '';
+
+  offer: any = null;
+  catalog: any = this.emptyCatalog();
+  teachers: any[] = [];
+  buildings: any[] = [];
+  classrooms: any[] = [];
+
+  sectionTeacherQueryById: Record<string, string> = {};
+  sectionTeacherMenuOpenById: Record<string, boolean> = {};
+  subsectionTeacherQueryById: Record<string, string> = {};
+  subsectionTeacherMenuOpenById: Record<string, boolean> = {};
+  scheduleDraftsBySubsectionId: Record<string, ScheduleDraft> = {};
+  expandedSectionId = '';
+  drawerOpen = false;
+  activeSectionId = '';
+  activeSubsectionId = '';
+
+  createSectionForm = {
+    mode: 'SINGLE' as CreateSectionMode,
+    subsection_count: 3,
+    teacher_id: '',
+    projected_vacancies: 0,
+  };
+
+  readonly shiftOptions = [
+    { value: 'MANANA', label: 'Ma\u00f1ana' },
+    { value: 'TARDE', label: 'Tarde' },
+    { value: 'NOCHE', label: 'Noche' },
+  ];
+
+  readonly dayOptions = [
+    { value: 'LUNES', label: 'Lunes' },
+    { value: 'MARTES', label: 'Martes' },
+    { value: 'MIERCOLES', label: 'Mi\u00e9rcoles' },
+    { value: 'JUEVES', label: 'Jueves' },
+    { value: 'VIERNES', label: 'Viernes' },
+    { value: 'SABADO', label: 'S\u00e1bado' },
+    { value: 'DOMINGO', label: 'Domingo' },
+  ];
+
+  readonly scheduleTimeOptions = this.buildScheduleTimeOptions();
+
+  private readonly dayOrder: Record<string, number> = {
+    LUNES: 1,
+    MARTES: 2,
+    MIERCOLES: 3,
+    JUEVES: 4,
+    VIERNES: 5,
+    SABADO: 6,
+    DOMINGO: 7,
+  };
+
+  constructor(
+    private readonly api: ApiService,
+    private readonly route: ActivatedRoute,
+    private readonly router: Router,
+    private readonly cdr: ChangeDetectorRef,
+  ) {}
+
+  ngOnInit(): void {
+    this.offerId = this.route.snapshot.paramMap.get('offerId') ?? '';
+    this.loadPage();
+  }
+
+  get semesterLabel() {
+    return this.catalog.semesters.find((item: any) => item.id === this.offer?.semester_id)?.name ?? '---';
+  }
+
+  get campusLabel() {
+    return this.catalog.campuses.find((item: any) => item.id === this.offer?.campus_id)?.name ?? '---';
+  }
+
+  get facultyLabel() {
+    return this.catalog.faculties.find((item: any) => item.id === this.offer?.faculty_id)?.name ?? '---';
+  }
+
+  get programLabel() {
+    return (
+      this.catalog.academic_programs.find((item: any) => item.id === this.offer?.academic_program_id)?.name ??
+      '---'
+    );
+  }
+
+  get studyPlanLabel() {
+    return this.catalog.study_plans.find((item: any) => item.id === this.offer?.study_plan_id)?.name ?? '---';
+  }
+
+  get canCreateSection() {
+    return Boolean(this.offer) && !this.saving;
+  }
+
+  get activeSection() {
+    if (!this.activeSectionId) {
+      return null;
+    }
+    return this.findSection(this.activeSectionId);
+  }
+
+  get activeSubsection() {
+    if (!this.activeSubsectionId) {
+      return null;
+    }
+    return this.findSubsection(this.activeSubsectionId);
+  }
+
+  get filteredCreateTeachers() {
+    return this.filterTeachers(this.createTeacherQuery);
+  }
+
+  get subsectionModalityOptions() {
+    const preferredCodes = new Set([
+      'HIBRIDO_VIRTUAL',
+      'HIBRIDO_PRESENCIAL',
+      'VIRTUAL',
+      'PRESENCIAL',
+    ]);
+    const items = this.catalog.course_modalities ?? [];
+    const filtered = items.filter((item: any) => preferredCodes.has(item.code));
+    return filtered.length > 0 ? filtered : items;
+  }
+
+  loadPage() {
+    if (!this.offerId) {
+      this.error = 'No se encontro la oferta para configurar secciones.';
+      this.loading = false;
+      this.supportDataLoading = false;
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.loading = true;
+    this.supportDataLoading = true;
+    this.error = '';
+    this.api.getPlanningOffer(this.offerId).subscribe({
+      next: (offer) => {
+        this.offer = this.normalizeOffer(offer);
+        this.syncUiStateFromOffer();
+        this.loading = false;
+        this.cdr.detectChanges();
+        this.loadSupportData();
+      },
+      error: () => {
+        this.error = 'No se pudo cargar la oferta para configurar secciones.';
+        this.loading = false;
+        this.supportDataLoading = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  reloadOffer() {
+    if (!this.offerId) {
+      return;
+    }
+    this.api.getPlanningOffer(this.offerId).subscribe({
+      next: (offer) => {
+        this.offer = this.normalizeOffer(offer);
+        this.syncUiStateFromOffer();
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.error = 'No se pudo refrescar la oferta.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  goBack() {
+    if (!this.offer) {
+      this.router.navigate(['/planning']);
+      return;
+    }
+    this.router.navigate(['/planning/cycle-editor'], {
+      queryParams: {
+        semester_id: this.offer.semester_id,
+        campus_id: this.offer.campus_id,
+        faculty_id: this.offer.faculty_id,
+        academic_program_id: this.offer.academic_program_id,
+        cycle: String(this.offer.cycle ?? ''),
+        study_plan_id: this.offer.study_plan_id,
+      },
+    });
+  }
+
+  openCreateSectionModal() {
+    this.createSectionForm = {
+      mode: 'SINGLE',
+      subsection_count: 3,
+      teacher_id: '',
+      projected_vacancies: 0,
+    };
+    this.createTeacherQuery = '';
+    this.showCreateTeacherOptions = false;
+    this.showCreateModal = true;
+  }
+
+  closeCreateSectionModal() {
+    this.showCreateModal = false;
+    this.showCreateTeacherOptions = false;
+    this.createTeacherQuery = '';
+  }
+
+  isSectionExpanded(sectionId: string) {
+    return this.expandedSectionId === sectionId;
+  }
+
+  toggleSection(sectionId: string) {
+    const nextExpanded = this.expandedSectionId === sectionId ? '' : sectionId;
+    this.expandedSectionId = nextExpanded;
+    if (!nextExpanded && this.activeSectionId === sectionId) {
+      this.closeSubsectionDrawer();
+    }
+  }
+
+  openSubsectionDrawer(section: any, subsection: any) {
+    this.expandedSectionId = section.id;
+    this.activeSectionId = section.id;
+    this.activeSubsectionId = subsection.id;
+    this.drawerOpen = true;
+  }
+
+  closeSubsectionDrawer() {
+    this.drawerOpen = false;
+    this.activeSectionId = '';
+    this.activeSubsectionId = '';
+  }
+
+  onCreateSectionModeChange() {
+    if (this.createSectionForm.mode === 'SINGLE') {
+      this.createSectionForm.subsection_count = 1;
+      return;
+    }
+    this.createSectionForm.subsection_count =
+      this.createSectionForm.subsection_count <= 1
+        ? 3
+        : Math.max(2, Math.trunc(this.createSectionForm.subsection_count || 3));
+  }
+
+  onCreateSubsectionCountChange(value: number | string) {
+    const numericValue = Math.trunc(Number(value || 0));
+    this.createSectionForm.subsection_count = numericValue <= 1 ? 2 : numericValue;
+  }
+
+  onCreateTeacherFocus() {
+    this.showCreateTeacherOptions = true;
+  }
+
+  onCreateTeacherBlur() {
+    setTimeout(() => {
+      this.showCreateTeacherOptions = false;
+      this.restoreCreateTeacherQuery();
+      this.cdr.detectChanges();
+    }, 150);
+  }
+
+  onCreateTeacherQueryChange(value: string) {
+    this.createTeacherQuery = value;
+    this.createSectionForm.teacher_id = '';
+    this.showCreateTeacherOptions = true;
+  }
+
+  selectCreateTeacher(teacher: any | null) {
+    this.createSectionForm.teacher_id = teacher?.id ?? '';
+    this.createTeacherQuery = teacher ? this.teacherDisplay(teacher) : '';
+    this.showCreateTeacherOptions = false;
+  }
+
+  createSection() {
+    if (!this.offerId) {
+      return;
+    }
+    const subsectionCount =
+      this.createSectionForm.mode === 'SINGLE'
+        ? 1
+        : Math.max(2, Number(this.createSectionForm.subsection_count || 3));
+    const projectedVacancies = Math.max(0, Math.trunc(Number(this.createSectionForm.projected_vacancies || 0)));
+
+    this.saving = true;
+    this.api
+      .createPlanningSection(this.offerId, {
+        teacher_id: this.createSectionForm.teacher_id || undefined,
+        subsection_count: subsectionCount,
+        projected_vacancies: projectedVacancies,
+      })
+      .subscribe({
+        next: (section) => {
+          this.message = `Seccion ${section.code} creada.`;
+          this.error = '';
+          this.showCreateModal = false;
+          this.saving = false;
+          this.upsertSection(section);
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.error = err?.error?.message ?? 'No se pudo crear la seccion.';
+          this.saving = false;
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  sectionTeacherQuery(sectionId: string) {
+    return this.sectionTeacherQueryById[sectionId] ?? '';
+  }
+
+  subsectionTeacherQuery(subsectionId: string) {
+    return this.subsectionTeacherQueryById[subsectionId] ?? '';
+  }
+
+  filteredSectionTeachers(sectionId: string) {
+    return this.filterTeachers(this.sectionTeacherQuery(sectionId));
+  }
+
+  filteredSubsectionTeachers(subsectionId: string) {
+    return this.filterTeachers(this.subsectionTeacherQuery(subsectionId));
+  }
+
+  onSectionTeacherFocus(sectionId: string) {
+    this.sectionTeacherMenuOpenById[sectionId] = true;
+  }
+
+  onSectionTeacherBlur(sectionId: string) {
+    setTimeout(() => {
+      this.sectionTeacherMenuOpenById[sectionId] = false;
+      this.restoreSectionTeacherQuery(sectionId);
+      this.cdr.detectChanges();
+    }, 150);
+  }
+
+  onSectionTeacherQueryChange(sectionId: string, value: string) {
+    this.sectionTeacherQueryById[sectionId] = value;
+    this.sectionTeacherMenuOpenById[sectionId] = true;
+  }
+
+  selectSectionTeacher(section: any, teacher: any | null) {
+    this.sectionTeacherQueryById[section.id] = teacher ? this.teacherDisplay(teacher) : '';
+    this.sectionTeacherMenuOpenById[section.id] = false;
+    if ((section.teacher_id ?? '') === (teacher?.id ?? '')) {
+      return;
+    }
+    this.updateSectionTeacher(section, teacher?.id ?? '');
+  }
+
+  onSubsectionTeacherFocus(subsectionId: string) {
+    this.subsectionTeacherMenuOpenById[subsectionId] = true;
+  }
+
+  onSubsectionTeacherBlur(subsectionId: string) {
+    setTimeout(() => {
+      this.subsectionTeacherMenuOpenById[subsectionId] = false;
+      this.restoreSubsectionTeacherQuery(subsectionId);
+      this.cdr.detectChanges();
+    }, 150);
+  }
+
+  onSubsectionTeacherQueryChange(subsectionId: string, value: string) {
+    this.subsectionTeacherQueryById[subsectionId] = value;
+    this.subsectionTeacherMenuOpenById[subsectionId] = true;
+  }
+
+  selectSubsectionTeacher(subsection: any, teacher: any | null) {
+    this.subsectionTeacherQueryById[subsection.id] = teacher ? this.teacherDisplay(teacher) : '';
+    this.subsectionTeacherMenuOpenById[subsection.id] = false;
+    if ((subsection.responsible_teacher_id ?? '') === (teacher?.id ?? '')) {
+      return;
+    }
+    this.updateSubsectionField(
+      subsection,
+      { responsible_teacher_id: teacher?.id ?? '' },
+      `Subseccion ${subsection.code} actualizada.`,
+    );
+  }
+
+  updateSectionTeacher(section: any, teacherId: string) {
+    this.saving = true;
+    this.api
+      .updatePlanningSection(section.id, {
+        teacher_id: teacherId,
+      })
+      .subscribe({
+        next: (updatedSection) => {
+          this.message = `Seccion ${updatedSection.code} actualizada.`;
+          this.error = '';
+          this.saving = false;
+          this.upsertSection(updatedSection);
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.error = err?.error?.message ?? 'No se pudo actualizar la seccion.';
+          this.saving = false;
+          this.reloadOffer();
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  updateSectionVacancies(section: any, value: number | string) {
+    const parsed = Math.max(0, Math.trunc(Number(value || 0)));
+    if (Number(section.projected_vacancies ?? 0) === parsed) {
+      section.projected_vacancies = parsed;
+      return;
+    }
+    section.projected_vacancies = parsed;
+    this.saving = true;
+    this.api
+      .updatePlanningSection(section.id, {
+        projected_vacancies: parsed,
+      })
+      .subscribe({
+        next: (updatedSection) => {
+          this.message = `Vacantes actualizadas para la seccion ${updatedSection.code}.`;
+          this.error = '';
+          this.saving = false;
+          this.upsertSection(updatedSection);
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.error = err?.error?.message ?? 'No se pudieron actualizar las vacantes de la seccion.';
+          this.saving = false;
+          this.reloadOffer();
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  updateSubsectionVacancies(subsection: any, value: number | string) {
+    const parsed = Math.max(0, Math.trunc(Number(value || 0)));
+    if (Number(subsection.projected_vacancies ?? 0) === parsed) {
+      subsection.projected_vacancies = parsed;
+      return;
+    }
+    subsection.projected_vacancies = parsed;
+    this.updateSubsectionField(
+      subsection,
+      { projected_vacancies: parsed },
+      `Vacantes actualizadas para ${subsection.code}.`,
+    );
+  }
+
+  updateSubsectionField(subsection: any, payload: Record<string, unknown>, successMessage: string) {
+    this.saving = true;
+    this.api.updatePlanningSubsection(subsection.id, payload).subscribe({
+      next: (updatedSubsection) => {
+        this.message = successMessage;
+        this.error = '';
+        this.saving = false;
+        this.upsertSubsection(updatedSubsection);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.error = err?.error?.message ?? 'No se pudo actualizar la subseccion.';
+        this.saving = false;
+        this.reloadOffer();
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  onSubsectionBuildingChange(subsection: any, value: string) {
+    this.updateSubsectionField(
+      subsection,
+      {
+        building_id: value,
+        classroom_id: '',
+      },
+      `Pabellon actualizado para ${subsection.code}.`,
+    );
+  }
+
+  onSubsectionClassroomChange(subsection: any, value: string) {
+    const classroom = this.classrooms.find((item: any) => item.id === value) ?? null;
+    const payload: Record<string, unknown> = {
+      building_id: classroom?.building_id ?? subsection.building_id ?? '',
+      classroom_id: value,
+    };
+    if (classroom?.capacity !== null && classroom?.capacity !== undefined) {
+      payload['capacity_snapshot'] = classroom.capacity;
+    }
+    this.updateSubsectionField(subsection, payload, `Aula actualizada para ${subsection.code}.`);
+  }
+
+  onSubsectionShiftChange(subsection: any, value: string) {
+    this.updateSubsectionField(subsection, { shift: value }, `Turno actualizado para ${subsection.code}.`);
+  }
+
+  onSubsectionModalityChange(subsection: any, value: string) {
+    this.updateSubsectionField(
+      subsection,
+      { course_modality_id: value },
+      `Modalidad actualizada para ${subsection.code}.`,
+    );
+  }
+
+  classroomsForBuilding(buildingId: string | null | undefined) {
+    if (!buildingId) {
+      return [];
+    }
+    return this.classrooms.filter((item: any) => item.building_id === buildingId);
+  }
+
+  classroomOptionLabel(classroom: any) {
+    if (!classroom) {
+      return 'Sin aula';
+    }
+    return classroom.capacity ? `${classroom.name} - Aforo ${classroom.capacity}` : classroom.name;
+  }
+
+  teacherDisplay(teacher: any) {
+    if (!teacher) {
+      return 'Sin docente';
+    }
+    const name = teacher.full_name || teacher.name || 'Sin nombre';
+    return teacher.dni ? `${teacher.dni} - ${name}` : name;
+  }
+
+  scheduleSummary(subsection: any) {
+    const schedules = subsection?.schedules ?? [];
+    if (schedules.length === 0) {
+      return 'Sin horarios';
+    }
+    const first = schedules[0];
+    const summary = `${this.dayLabel(first.day_of_week)} ${this.timeLabel(first.start_time)}-${this.timeLabel(first.end_time)}`;
+    return schedules.length === 1 ? summary : `${summary} +${schedules.length - 1}`;
+  }
+
+  scheduleConflictLabels(subsection: any) {
+    const labels = new Set(
+      (subsection?.conflicts ?? []).map((item: any) => this.conflictLabel(item?.conflict_type)),
+    );
+    return [...labels].filter(Boolean);
+  }
+
+  dayLabel(value: string | null | undefined) {
+    return this.dayOptions.find((item) => item.value === value)?.label ?? value ?? '---';
+  }
+
+  timeLabel(value: string | null | undefined) {
+    if (!value) {
+      return '--:--';
+    }
+    return String(value).slice(0, 5);
+  }
+
+  formatAcademicHours(value: number | string | null | undefined) {
+    const parsed = Number(value ?? 0);
+    return Number.isFinite(parsed) ? parsed.toFixed(1) : '0.0';
+  }
+
+  subsectionKindLabel(kind: string | null | undefined) {
+    switch (kind) {
+      case 'THEORY':
+        return 'Teorico';
+      case 'PRACTICE':
+        return 'Practico';
+      case 'MIXED':
+        return 'Mixto';
+      default:
+        return kind || '---';
+    }
+  }
+
+  subsectionKindClass(kind: string | null | undefined) {
+    switch (kind) {
+      case 'THEORY':
+        return 'kind-theory';
+      case 'PRACTICE':
+        return 'kind-practice';
+      case 'MIXED':
+        return 'kind-mixed';
+      default:
+        return 'kind-default';
+    }
+  }
+
+  previewAcademicHours(subsectionId: string) {
+    const minutes = this.scheduleMinutes(subsectionId);
+    return minutes === null ? '---' : this.formatAcademicHours(minutes / 50);
+  }
+
+  scheduleDraftInvalid(subsectionId: string) {
+    const draft = this.scheduleDraftsBySubsectionId[subsectionId];
+    if (!draft?.start_time || !draft?.end_time) {
+      return false;
+    }
+    return this.scheduleMinutes(subsectionId) === null;
+  }
+
+  canCreateSchedule(subsectionId: string) {
+    const draft = this.scheduleDraftsBySubsectionId[subsectionId];
+    if (!draft?.day_of_week || !draft?.start_time || !draft?.end_time) {
+      return false;
+    }
+    return this.scheduleMinutes(subsectionId) !== null;
+  }
+
+  availableEndTimeOptions(subsectionId: string) {
+    const draft = this.scheduleDraftsBySubsectionId[subsectionId];
+    const startMinutes = this.toMinutes(draft?.start_time ?? '07:40');
+    return this.scheduleTimeOptions.filter((option) => this.toMinutes(option.value) > startMinutes);
+  }
+
+  onScheduleStartTimeChange(subsectionId: string, value: string) {
+    const draft = this.scheduleDraftsBySubsectionId[subsectionId];
+    if (!draft) {
+      return;
+    }
+    draft.start_time = value;
+    const endOptions = this.availableEndTimeOptions(subsectionId);
+    const currentEndMinutes = this.toMinutes(draft.end_time);
+    if (!endOptions.some((option) => option.value === draft.end_time) || currentEndMinutes <= this.toMinutes(value)) {
+      draft.end_time = endOptions[0]?.value ?? value;
+    }
+  }
+
+  saveSchedule(subsection: any) {
+    const draft = this.scheduleDraftsBySubsectionId[subsection.id];
+    if (!this.canCreateSchedule(subsection.id)) {
+      return;
+    }
+    const existingSchedule = subsection?.schedules?.[0] ?? null;
+    this.saving = true;
+    const request = existingSchedule
+      ? this.api.updatePlanningSubsectionSchedule(existingSchedule.id, draft)
+      : this.api.createPlanningSubsectionSchedule(subsection.id, draft);
+    request.subscribe({
+      next: (updatedSubsection) => {
+        this.message = existingSchedule
+          ? `Horario actualizado en ${subsection.code}.`
+          : `Horario agregado a ${subsection.code}.`;
+        this.error = '';
+        this.saving = false;
+        this.upsertSubsection(updatedSubsection);
+        this.scheduleDraftsBySubsectionId[subsection.id] = this.scheduleDraftFromSubsection(updatedSubsection);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.error = err?.error?.message ?? 'No se pudo guardar el horario.';
+        this.saving = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  deleteSchedule(subsection: any, scheduleId: string) {
+    if (!scheduleId) {
+      return;
+    }
+    this.saving = true;
+    this.api.deletePlanningSubsectionSchedule(scheduleId).subscribe({
+      next: (updatedSubsection) => {
+        this.message = `Horario eliminado de ${subsection.code}.`;
+        this.error = '';
+        this.saving = false;
+        this.upsertSubsection(updatedSubsection);
+        this.scheduleDraftsBySubsectionId[subsection.id] = this.scheduleDraftFromSubsection(updatedSubsection);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.error = err?.error?.message ?? 'No se pudo eliminar el horario.';
+        this.saving = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  private loadSupportData() {
+    forkJoin({
+      catalog: this.api.getPlanningCatalogFilters().pipe(catchError(() => of(this.emptyCatalog()))),
+      teachers: this.api.listTeachers().pipe(catchError(() => of([]))),
+      buildings: this.api.listBuildings().pipe(catchError(() => of([]))),
+      classrooms: this.api.listClassrooms().pipe(catchError(() => of([]))),
+    })
+      .pipe(
+        finalize(() => {
+          this.supportDataLoading = false;
+          this.cdr.detectChanges();
+        }),
+      )
+      .subscribe({
+        next: ({ catalog, teachers, buildings, classrooms }) => {
+          this.catalog = catalog;
+          this.teachers = teachers;
+          this.buildings = buildings;
+          this.classrooms = classrooms;
+          this.syncUiStateFromOffer();
+          this.restoreCreateTeacherQuery();
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  sectionTeacherSummary(section: any) {
+    return this.currentSectionTeacherLabel(section) || 'Sin docente';
+  }
+
+  sectionConflictCount(section: any) {
+    return (section?.subsections ?? []).reduce(
+      (total: number, subsection: any) => total + (subsection?.conflicts?.length || 0),
+      0,
+    );
+  }
+
+  sectionStatusLabel(section: any) {
+    const conflicts = this.sectionConflictCount(section);
+    if (conflicts > 0) {
+      return `${conflicts} cruces`;
+    }
+    const subsections = section?.subsections ?? [];
+    if (subsections.length === 0) {
+      return 'Sin subsecciones';
+    }
+    const readyCount = subsections.filter((item: any) => this.subsectionIsReady(item)).length;
+    return readyCount === subsections.length ? 'Configurada' : 'En progreso';
+  }
+
+  sectionStatusClass(section: any) {
+    return this.sectionConflictCount(section) > 0 ? 'status-observed' : 'status-ready';
+  }
+
+  sectionScheduleSummary(section: any) {
+    const subsections = section?.subsections ?? [];
+    const scheduled = subsections.filter((item: any) => (item?.schedules?.length || 0) > 0);
+    if (scheduled.length === 0) {
+      return 'Sin horarios';
+    }
+    if (scheduled.length === 1) {
+      return `${scheduled[0].code}: ${this.scheduleSummary(scheduled[0])}`;
+    }
+    return `${scheduled.length}/${subsections.length} subsecciones con horario`;
+  }
+
+  subsectionLocationSummary(subsection: any) {
+    const buildingName = subsection?.building?.name ?? '';
+    const classroomName = subsection?.classroom?.name ?? '';
+    if (buildingName && classroomName) {
+      return `${buildingName} / ${classroomName}`;
+    }
+    return buildingName || classroomName || 'Sin ubicar';
+  }
+
+  subsectionModalityLabel(subsection: any) {
+    if (subsection?.modality?.name) {
+      return subsection.modality.name;
+    }
+    return (
+      this.subsectionModalityOptions.find((item: any) => item.id === subsection?.course_modality_id)?.name ??
+      'Sin modalidad'
+    );
+  }
+
+  subsectionStatusLabel(subsection: any) {
+    if ((subsection?.conflicts?.length || 0) > 0) {
+      return 'Con cruces';
+    }
+    return this.subsectionIsReady(subsection) ? 'Lista' : 'Pendiente';
+  }
+
+  subsectionStatusClass(subsection: any) {
+    if ((subsection?.conflicts?.length || 0) > 0) {
+      return 'status-observed';
+    }
+    return this.subsectionIsReady(subsection) ? 'status-ready' : 'status-pending';
+  }
+
+  private filterTeachers(query: string) {
+    const normalizedQuery = this.normalizeSearchValue(query);
+    const pool = !normalizedQuery
+      ? this.teachers
+      : this.teachers.filter((teacher: any) =>
+          this.normalizeSearchValue(
+            [teacher?.dni, teacher?.full_name, teacher?.name].filter(Boolean).join(' '),
+          ).includes(normalizedQuery),
+        );
+    return pool.slice(0, 25);
+  }
+
+  private restoreCreateTeacherQuery() {
+    const teacher = this.teachers.find((item: any) => item.id === this.createSectionForm.teacher_id) ?? null;
+    this.createTeacherQuery = teacher ? this.teacherDisplay(teacher) : '';
+  }
+
+  private restoreSectionTeacherQuery(sectionId: string) {
+    const section = this.findSection(sectionId);
+    if (!section) {
+      return;
+    }
+    this.sectionTeacherQueryById[sectionId] = this.currentSectionTeacherLabel(section);
+  }
+
+  private restoreSubsectionTeacherQuery(subsectionId: string) {
+    const subsection = this.findSubsection(subsectionId);
+    if (!subsection) {
+      return;
+    }
+    this.subsectionTeacherQueryById[subsectionId] = this.currentSubsectionTeacherLabel(subsection);
+  }
+
+  private currentSectionTeacherLabel(section: any) {
+    if (!section?.teacher_id) {
+      return '';
+    }
+    const teacher = section.teacher ?? this.teachers.find((item: any) => item.id === section.teacher_id) ?? null;
+    return teacher ? this.teacherDisplay(teacher) : '';
+  }
+
+  private currentSubsectionTeacherLabel(subsection: any) {
+    if (!subsection?.responsible_teacher_id) {
+      return '';
+    }
+    const teacher =
+      subsection.responsible_teacher ??
+      this.teachers.find((item: any) => item.id === subsection.responsible_teacher_id) ??
+      null;
+    return teacher ? this.teacherDisplay(teacher) : '';
+  }
+
+  private findSection(sectionId: string) {
+    return this.offer?.sections?.find((item: any) => item.id === sectionId) ?? null;
+  }
+
+  private findSubsection(subsectionId: string) {
+    for (const section of this.offer?.sections ?? []) {
+      const found = section.subsections?.find((item: any) => item.id === subsectionId);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  private syncUiStateFromOffer() {
+    if (!this.offer) {
+      return;
+    }
+
+    const nextSectionQueries = { ...this.sectionTeacherQueryById };
+    const nextSubsectionQueries = { ...this.subsectionTeacherQueryById };
+    const nextScheduleDrafts = { ...this.scheduleDraftsBySubsectionId };
+
+    for (const section of this.offer.sections ?? []) {
+      if (!this.sectionTeacherMenuOpenById[section.id]) {
+        nextSectionQueries[section.id] = this.currentSectionTeacherLabel(section);
+      }
+      this.sectionTeacherMenuOpenById[section.id] = this.sectionTeacherMenuOpenById[section.id] ?? false;
+
+      for (const subsection of section.subsections ?? []) {
+        if (!this.subsectionTeacherMenuOpenById[subsection.id]) {
+          nextSubsectionQueries[subsection.id] = this.currentSubsectionTeacherLabel(subsection);
+        }
+        this.subsectionTeacherMenuOpenById[subsection.id] =
+          this.subsectionTeacherMenuOpenById[subsection.id] ?? false;
+        nextScheduleDrafts[subsection.id] =
+          nextScheduleDrafts[subsection.id] ?? this.scheduleDraftFromSubsection(subsection);
+      }
+    }
+
+    this.sectionTeacherQueryById = nextSectionQueries;
+    this.subsectionTeacherQueryById = nextSubsectionQueries;
+    this.scheduleDraftsBySubsectionId = nextScheduleDrafts;
+
+    if (this.activeSubsectionId && !this.findSubsection(this.activeSubsectionId)) {
+      this.closeSubsectionDrawer();
+    }
+    if (this.expandedSectionId && !this.findSection(this.expandedSectionId)) {
+      this.expandedSectionId = '';
+    }
+  }
+
+  private emptyCatalog() {
+    return {
+      semesters: [],
+      campuses: [],
+      faculties: [],
+      academic_programs: [],
+      study_plans: [],
+      course_modalities: [],
+    };
+  }
+
+  private normalizeOffer(offer: any) {
+    return {
+      ...offer,
+      sections: [...(offer?.sections ?? [])]
+        .map((section: any) => this.normalizeSection(section))
+        .sort((a: any, b: any) => String(a.code).localeCompare(String(b.code))),
+    };
+  }
+
+  private normalizeSection(section: any) {
+    return {
+      ...section,
+      teacher_id: section.teacher_id ?? '',
+      projected_vacancies: Number(section.projected_vacancies ?? 0),
+      teacher: section.teacher ?? null,
+      conflicts: [...(section.conflicts ?? [])],
+      subsections: [...(section.subsections ?? [])]
+        .map((subsection: any) => this.normalizeSubsection(subsection))
+        .sort((a: any, b: any) => String(a.code).localeCompare(String(b.code))),
+    };
+  }
+
+  private normalizeSubsection(subsection: any) {
+    return {
+      ...subsection,
+      responsible_teacher_id: subsection.responsible_teacher_id ?? '',
+      course_modality_id: subsection.course_modality_id ?? '',
+      building_id: subsection.building_id ?? '',
+      classroom_id: subsection.classroom_id ?? '',
+      projected_vacancies: Number(subsection.projected_vacancies ?? 0),
+      shift: subsection.shift ?? '',
+      modality: subsection.modality ?? null,
+      responsible_teacher: subsection.responsible_teacher ?? null,
+      schedules: [...(subsection.schedules ?? [])].sort((a: any, b: any) => this.compareSchedules(a, b)),
+      conflicts: [...(subsection.conflicts ?? [])],
+    };
+  }
+
+  private compareSchedules(left: any, right: any) {
+    const dayDelta = (this.dayOrder[left?.day_of_week ?? ''] ?? 99) - (this.dayOrder[right?.day_of_week ?? ''] ?? 99);
+    if (dayDelta !== 0) {
+      return dayDelta;
+    }
+    return String(left?.start_time ?? '').localeCompare(String(right?.start_time ?? ''));
+  }
+
+  private upsertSection(section: any) {
+    const currentSections = [...(this.offer?.sections ?? [])].filter((item: any) => item.id !== section.id);
+    currentSections.push(this.normalizeSection(section));
+    this.offer = {
+      ...this.offer,
+      sections: currentSections.sort((a: any, b: any) => String(a.code).localeCompare(String(b.code))),
+    };
+    this.syncUiStateFromOffer();
+  }
+
+  private upsertSubsection(subsection: any) {
+    const normalizedSubsection = this.normalizeSubsection(subsection);
+    const nextSections = [...(this.offer?.sections ?? [])].map((section: any) => {
+      if (section.id !== subsection.section?.id && section.id !== subsection.planning_section_id) {
+        return section;
+      }
+      const nextSubsections = [...(section.subsections ?? [])].filter((item: any) => item.id !== subsection.id);
+      nextSubsections.push(normalizedSubsection);
+      return {
+        ...section,
+        subsections: nextSubsections.sort((a: any, b: any) => String(a.code).localeCompare(String(b.code))),
+      };
+    });
+    this.offer = {
+      ...this.offer,
+      sections: nextSections.sort((a: any, b: any) => String(a.code).localeCompare(String(b.code))),
+    };
+    this.syncUiStateFromOffer();
+  }
+
+  private defaultScheduleDraft(): ScheduleDraft {
+    return {
+      day_of_week: 'LUNES',
+      start_time: '07:40',
+      end_time: '08:30',
+    };
+  }
+
+  private scheduleDraftFromSubsection(subsection: any): ScheduleDraft {
+    const schedule = subsection?.schedules?.[0] ?? null;
+    if (!schedule) {
+      return this.defaultScheduleDraft();
+    }
+    return {
+      day_of_week: schedule.day_of_week ?? 'LUNES',
+      start_time: schedule.start_time ?? '07:40',
+      end_time: schedule.end_time ?? '08:30',
+    };
+  }
+
+  private scheduleMinutes(subsectionId: string) {
+    const draft = this.scheduleDraftsBySubsectionId[subsectionId];
+    if (!draft?.start_time || !draft?.end_time) {
+      return null;
+    }
+    const start = this.toMinutes(draft.start_time);
+    const end = this.toMinutes(draft.end_time);
+    if (
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      end <= start ||
+      !this.isAcademicBlockAligned(start) ||
+      !this.isAcademicBlockAligned(end)
+    ) {
+      return null;
+    }
+    const duration = end - start;
+    if (duration % 50 !== 0) {
+      return null;
+    }
+    return duration;
+  }
+
+  private toMinutes(value: string) {
+    const [hours = '0', minutes = '0'] = String(value).split(':');
+    return Number(hours) * 60 + Number(minutes);
+  }
+
+  private isAcademicBlockAligned(minutes: number) {
+    return (
+      minutes >= this.scheduleGridStartMinutes &&
+      minutes <= this.scheduleGridEndMinutes &&
+      (minutes - this.scheduleGridStartMinutes) % 50 === 0
+    );
+  }
+
+  private buildScheduleTimeOptions() {
+    const options: Array<{ value: string; label: string }> = [];
+    for (
+      let minutes = this.scheduleGridStartMinutes;
+      minutes <= this.scheduleGridEndMinutes;
+      minutes += 50
+    ) {
+      const value = this.minutesToTime(minutes);
+      options.push({ value, label: value });
+    }
+    return options;
+  }
+
+  private minutesToTime(totalMinutes: number) {
+    const hours = Math.floor(totalMinutes / 60)
+      .toString()
+      .padStart(2, '0');
+    const minutes = Math.floor(totalMinutes % 60)
+      .toString()
+      .padStart(2, '0');
+    return `${hours}:${minutes}`;
+  }
+
+  private conflictLabel(type: string | null | undefined) {
+    switch (type) {
+      case 'TEACHER_OVERLAP':
+        return 'Cruce docente';
+      case 'CLASSROOM_OVERLAP':
+        return 'Cruce aula';
+      case 'SUBSECTION_OVERLAP':
+        return 'Cruce horario';
+      case 'SECTION_OVERLAP':
+        return 'Cruce seccion';
+      default:
+        return type ?? '';
+    }
+  }
+
+  private normalizeSearchValue(value: string | null | undefined) {
+    return `${value ?? ''}`
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  private subsectionIsReady(subsection: any) {
+    return Boolean(
+      subsection &&
+        subsection.responsible_teacher_id &&
+        subsection.shift &&
+        subsection.course_modality_id &&
+        (subsection.schedules?.length || 0) > 0,
+    );
+  }
+}

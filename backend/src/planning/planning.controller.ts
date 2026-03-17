@@ -8,6 +8,11 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
+import { CurrentAuthUser } from '../auth/current-auth-user.decorator';
+import { AuthService } from '../auth/auth.service';
+import { RequirePermissions } from '../auth/permissions.decorator';
+import type { AuthenticatedRequestUser } from '../auth/auth.service';
 import {
   BulkAssignClassroomDto,
   BulkAssignTeacherDto,
@@ -40,58 +45,129 @@ import { PlanningManualService } from './planning-manual.service';
 import { PlanningService } from './planning.service';
 
 @Controller('planning')
+@RequirePermissions(WINDOW_PERMISSIONS.PLANNING)
 export class PlanningController {
   constructor(
     private readonly planningService: PlanningService,
     private readonly planningManualService: PlanningManualService,
+    private readonly authService: AuthService,
   ) {}
 
   @Get('catalog/filters')
-  listCatalogFilters() {
-    return this.planningManualService.listCatalogFilters();
+  async listCatalogFilters(@CurrentAuthUser() authUser: AuthenticatedRequestUser) {
+    const result = await this.planningManualService.listCatalogFilters();
+    if (authUser.is_global) {
+      return result;
+    }
+
+    const faculties = result.faculties.filter((item: any) =>
+      this.matchesScope(authUser, item.faculty_id ?? item.id ?? null, item.academic_program_id ?? null),
+    );
+    const academicPrograms = result.academic_programs.filter((item: any) =>
+      this.matchesScope(authUser, item.faculty_id ?? null, item.id ?? item.academic_program_id ?? null),
+    );
+    const studyPlans = result.study_plans.filter((item: any) =>
+      this.matchesScope(authUser, item.faculty_id ?? null, item.academic_program_id ?? null),
+    );
+    const planRules = result.plan_rules.filter((item: any) =>
+      this.matchesScope(authUser, item.faculty_id ?? null, item.academic_program_id ?? null),
+    );
+
+    return {
+      ...result,
+      faculties,
+      academic_programs: academicPrograms,
+      study_plans: studyPlans,
+      plan_rules: planRules,
+    };
   }
 
   @Get('plan-rules')
   listPlanRules(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
     @Query('campus_id') campusId?: string,
     @Query('academic_program_id') academicProgramId?: string,
   ) {
-    return this.planningManualService.listPlanRules(semesterId, campusId, academicProgramId);
+    if (academicProgramId) {
+      this.authService.assertScopeAccess(authUser, null, academicProgramId);
+    }
+    return this.planningManualService
+      .listPlanRules(semesterId, campusId, academicProgramId)
+      .then((rows) =>
+        this.authService.filterByScope(authUser, rows, (item: any) => ({
+          faculty_id: item.faculty_id ?? null,
+          academic_program_id: item.academic_program_id ?? null,
+        })),
+      );
   }
 
   @Get('configured-cycles')
   listConfiguredCycles(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
     @Query('campus_id') campusId?: string,
     @Query('faculty_id') facultyId?: string,
     @Query('academic_program_id') academicProgramId?: string,
   ) {
+    if (facultyId || academicProgramId) {
+      this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
+    }
     return this.planningManualService.listConfiguredCycles({
       semester_id: semesterId,
       campus_id: campusId,
       faculty_id: facultyId,
       academic_program_id: academicProgramId,
-    });
+    }).then((rows) =>
+      this.authService.filterByScope(authUser, rows, (item: any) => ({
+        faculty_id: item.faculty_id ?? null,
+        academic_program_id: item.academic_program_id ?? null,
+      })),
+    );
   }
 
   @Post('plan-rules')
-  createPlanRule(@Body() dto: CreatePlanningCyclePlanRuleDto) {
+  createPlanRule(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Body() dto: CreatePlanningCyclePlanRuleDto,
+  ) {
+    this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
     return this.planningManualService.createPlanRule(dto);
   }
 
   @Patch('plan-rules/:id')
-  updatePlanRule(@Param('id') id: string, @Body() dto: UpdatePlanningCyclePlanRuleDto) {
+  async updatePlanRule(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePlanningCyclePlanRuleDto,
+  ) {
+    const current = await this.planningManualService.listPlanRules();
+    const rule = current.find((item) => item.id === id);
+    if (rule) {
+      this.authService.assertScopeAccess(authUser, rule.faculty_id ?? null, rule.academic_program_id ?? null);
+    }
+    if (dto.faculty_id || dto.academic_program_id) {
+      this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
+    }
     return this.planningManualService.updatePlanRule(id, dto);
   }
 
   @Delete('plan-rules/:id')
-  deletePlanRule(@Param('id') id: string) {
+  async deletePlanRule(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+  ) {
+    const current = await this.planningManualService.listPlanRules();
+    const rule = current.find((item) => item.id === id);
+    if (rule) {
+      this.authService.assertScopeAccess(authUser, rule.faculty_id ?? null, rule.academic_program_id ?? null);
+    }
     return this.planningManualService.deletePlanRule(id);
   }
 
   @Get('course-candidates')
   listCourseCandidates(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
     @Query('campus_id') campusId?: string,
     @Query('faculty_id') facultyId?: string,
@@ -99,6 +175,9 @@ export class PlanningController {
     @Query('cycle') cycle?: string,
     @Query('study_plan_id') studyPlanId?: string,
   ) {
+    if (facultyId || academicProgramId) {
+      this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
+    }
     return this.planningManualService.listCourseCandidates({
       semester_id: semesterId,
       campus_id: campusId,
@@ -110,12 +189,17 @@ export class PlanningController {
   }
 
   @Post('offers')
-  createOffer(@Body() dto: CreatePlanningOfferDto) {
+  createOffer(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Body() dto: CreatePlanningOfferDto,
+  ) {
+    this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
     return this.planningManualService.createOffer(dto);
   }
 
   @Get('offers')
   listOffers(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
     @Query('campus_id') campusId?: string,
     @Query('faculty_id') facultyId?: string,
@@ -123,6 +207,9 @@ export class PlanningController {
     @Query('cycle') cycle?: string,
     @Query('study_plan_id') studyPlanId?: string,
   ) {
+    if (facultyId || academicProgramId) {
+      this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
+    }
     return this.planningManualService.listOffers(
       semesterId,
       campusId,
@@ -130,76 +217,179 @@ export class PlanningController {
       academicProgramId,
       cycle ? Number(cycle) : undefined,
       studyPlanId,
+    ).then((rows) =>
+      this.authService.filterByScope(authUser, rows, (item: any) => ({
+        faculty_id: item.faculty_id ?? null,
+        academic_program_id: item.academic_program_id ?? null,
+      })),
     );
   }
 
   @Get('offers/:id')
-  getOffer(@Param('id') id: string) {
-    return this.planningManualService.getOffer(id);
+  async getOffer(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+  ) {
+    const offer = await this.planningManualService.getOffer(id);
+    this.authService.assertScopeAccess(authUser, offer.faculty_id ?? null, offer.academic_program_id ?? null);
+    return offer;
   }
 
   @Patch('offers/:id')
-  updateOffer(@Param('id') id: string, @Body() dto: UpdatePlanningOfferDto) {
+  async updateOffer(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePlanningOfferDto,
+  ) {
+    const offer = await this.planningManualService.getOffer(id);
+    this.authService.assertScopeAccess(authUser, offer.faculty_id ?? null, offer.academic_program_id ?? null);
     return this.planningManualService.updateOffer(id, dto);
   }
 
   @Post('offers/:id/sections')
-  createSection(@Param('id') id: string, @Body() dto: CreatePlanningSectionDto) {
+  async createSection(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: CreatePlanningSectionDto,
+  ) {
+    const offer = await this.planningManualService.getOffer(id);
+    this.authService.assertScopeAccess(authUser, offer.faculty_id ?? null, offer.academic_program_id ?? null);
     return this.planningManualService.createSection(id, dto);
   }
 
   @Get('sections/:id')
-  getSection(@Param('id') id: string) {
-    return this.planningManualService.getSection(id);
+  async getSection(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+  ) {
+    const section = await this.planningManualService.getSection(id);
+    this.authService.assertScopeAccess(
+      authUser,
+      section.offer?.faculty_id ?? null,
+      section.offer?.academic_program_id ?? null,
+    );
+    return section;
   }
 
   @Patch('sections/:id')
-  updateSection(@Param('id') id: string, @Body() dto: UpdatePlanningSectionDto) {
+  async updateSection(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePlanningSectionDto,
+  ) {
+    const section = await this.planningManualService.getSection(id);
+    this.authService.assertScopeAccess(
+      authUser,
+      section.offer?.faculty_id ?? null,
+      section.offer?.academic_program_id ?? null,
+    );
     return this.planningManualService.updateSection(id, dto);
   }
 
   @Post('sections/:id/subsections')
-  createSubsection(@Param('id') id: string, @Body() dto: CreatePlanningSubsectionDto) {
+  async createSubsection(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: CreatePlanningSubsectionDto,
+  ) {
+    const section = await this.planningManualService.getSection(id);
+    this.authService.assertScopeAccess(
+      authUser,
+      section.offer?.faculty_id ?? null,
+      section.offer?.academic_program_id ?? null,
+    );
     return this.planningManualService.createSubsection(id, dto);
   }
 
   @Get('subsections/:id')
-  getSubsection(@Param('id') id: string) {
-    return this.planningManualService.getSubsection(id);
+  async getSubsection(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+  ) {
+    const subsection = await this.planningManualService.getSubsection(id);
+    this.authService.assertScopeAccess(
+      authUser,
+      subsection.offer?.faculty_id ?? null,
+      subsection.offer?.academic_program_id ?? null,
+    );
+    return subsection;
   }
 
   @Patch('subsections/:id')
-  updateSubsection(@Param('id') id: string, @Body() dto: UpdatePlanningSubsectionDto) {
+  async updateSubsection(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePlanningSubsectionDto,
+  ) {
+    const subsection = await this.planningManualService.getSubsection(id);
+    this.authService.assertScopeAccess(
+      authUser,
+      subsection.offer?.faculty_id ?? null,
+      subsection.offer?.academic_program_id ?? null,
+    );
     return this.planningManualService.updateSubsection(id, dto);
   }
 
   @Post('subsections/:id/schedules')
   createSubsectionSchedule(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Param('id') id: string,
     @Body() dto: CreatePlanningSubsectionScheduleDto,
   ) {
-    return this.planningManualService.createSubsectionSchedule(id, dto);
+    return this.planningManualService.getSubsection(id).then((subsection) => {
+      this.authService.assertScopeAccess(
+        authUser,
+        subsection.offer?.faculty_id ?? null,
+        subsection.offer?.academic_program_id ?? null,
+      );
+      return this.planningManualService.createSubsectionSchedule(id, dto);
+    });
   }
 
   @Patch('subsection-schedules/:id')
   updateSubsectionSchedule(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Param('id') id: string,
     @Body() dto: UpdatePlanningSubsectionScheduleDto,
   ) {
-    return this.planningManualService.updateSubsectionSchedule(id, dto);
+    return this.planningManualService.getSubsectionBySchedule(id).then((schedule) => {
+      this.authService.assertScopeAccess(
+        authUser,
+        schedule.offer?.faculty_id ?? null,
+        schedule.offer?.academic_program_id ?? null,
+      );
+      return this.planningManualService.updateSubsectionSchedule(id, dto);
+    });
   }
 
   @Delete('subsection-schedules/:id')
-  deleteSubsectionSchedule(@Param('id') id: string) {
-    return this.planningManualService.deleteSubsectionSchedule(id);
+  deleteSubsectionSchedule(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+  ) {
+    return this.planningManualService.getSubsectionBySchedule(id).then((schedule) => {
+      this.authService.assertScopeAccess(
+        authUser,
+        schedule.offer?.faculty_id ?? null,
+        schedule.offer?.academic_program_id ?? null,
+      );
+      return this.planningManualService.deleteSubsectionSchedule(id);
+    });
   }
 
   @Get('conflicts')
+  @RequirePermissions(WINDOW_PERMISSIONS.CONFLICTS)
   listConflictsManual(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
     @Query('offer_id') offerId?: string,
   ) {
-    return this.planningManualService.listConflicts(semesterId, offerId);
+    return this.planningManualService.listConflicts(semesterId, offerId).then((rows) =>
+      this.authService.filterByScope(authUser, rows, (item: any) => ({
+        faculty_id: item.offer?.faculty_id ?? null,
+        academic_program_id: item.offer?.academic_program_id ?? null,
+      })),
+    );
   }
 
   @Get('change-log')
@@ -211,12 +401,21 @@ export class PlanningController {
   }
 
   @Get('class-offerings')
-  listClassOfferings(@Query('semester_id') semesterId?: string) {
-    return this.planningService.listClassOfferings(semesterId);
+  listClassOfferings(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Query('semester_id') semesterId?: string,
+  ) {
+    return this.planningService.listClassOfferings(semesterId).then((rows) =>
+      this.authService.filterByScope(authUser, rows, (item: any) => ({
+        faculty_id: null,
+        academic_program_id: item.academic_program_id ?? null,
+      })),
+    );
   }
 
   @Get('workspace')
   listWorkspace(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
     @Query('campus_id') campusId?: string,
     @Query('academic_program_id') academicProgramId?: string,
@@ -225,6 +424,9 @@ export class PlanningController {
     @Query('shift_id') shiftId?: string,
     @Query('search') search?: string,
   ) {
+    if (academicProgramId) {
+      this.authService.assertScopeAccess(authUser, null, academicProgramId);
+    }
     return this.planningService.listWorkspace({
       semesterId,
       campusId,
@@ -233,7 +435,17 @@ export class PlanningController {
       deliveryModalityId,
       shiftId,
       search,
-    });
+    }).then((result) => ({
+      ...result,
+      summaries: this.authService.filterByScope(authUser, result.summaries, (item: any) => ({
+        faculty_id: null,
+        academic_program_id: item.academic_program_id ?? null,
+      })),
+      rows: this.authService.filterByScope(authUser, result.rows, (item: any) => ({
+        faculty_id: null,
+        academic_program_id: item.academic_program_id ?? null,
+      })),
+    }));
   }
 
   @Patch('workspace/rows/:rowId')
@@ -257,22 +469,46 @@ export class PlanningController {
   }
 
   @Get('class-offerings/:id')
-  getClassOffering(@Param('id') id: string) {
-    return this.planningService.getClassOffering(id);
+  async getClassOffering(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+  ) {
+    const offering = await this.planningService.getClassOffering(id);
+    this.authService.assertScopeAccess(authUser, null, offering.academic_program_id ?? null);
+    return offering;
   }
 
   @Post('class-offerings')
-  createClassOffering(@Body() dto: CreateClassOfferingDto) {
+  createClassOffering(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Body() dto: CreateClassOfferingDto,
+  ) {
+    this.authService.assertScopeAccess(authUser, null, dto.academic_program_id);
     return this.planningService.createClassOffering(dto);
   }
 
   @Patch('class-offerings/:id')
-  updateClassOffering(@Param('id') id: string, @Body() dto: UpdateClassOfferingDto) {
+  async updateClassOffering(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateClassOfferingDto,
+  ) {
+    const offering = await this.planningService.getClassOffering(id);
+    this.authService.assertScopeAccess(
+      authUser,
+      null,
+      dto.academic_program_id ?? offering.academic_program_id ?? null,
+    );
     return this.planningService.updateClassOffering(id, dto);
   }
 
   @Delete('class-offerings/:id')
-  deleteClassOffering(@Param('id') id: string) {
+  async deleteClassOffering(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+  ) {
+    const offering = await this.planningService.getClassOffering(id);
+    this.authService.assertScopeAccess(authUser, null, offering.academic_program_id ?? null);
     return this.planningService.deleteClassOffering(id);
   }
 
@@ -385,12 +621,35 @@ export class PlanningController {
   }
 
   @Get('schedule-conflicts')
-  listScheduleConflicts(@Query('semester_id') semesterId?: string) {
-    return this.planningService.listConflicts(semesterId);
+  @RequirePermissions(WINDOW_PERMISSIONS.CONFLICTS)
+  listScheduleConflicts(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Query('semester_id') semesterId?: string,
+  ) {
+    return this.planningService.listConflicts(semesterId).then((rows) =>
+      this.authService.filterByScope(authUser, rows, (item: any) => ({
+        faculty_id: null,
+        academic_program_id: item.academic_program_id ?? null,
+      })),
+    );
   }
 
   @Post('schedule-conflicts/detect/:semesterId')
+  @RequirePermissions(WINDOW_PERMISSIONS.CONFLICTS)
   detectScheduleConflicts(@Param('semesterId') semesterId: string) {
     return this.planningService.detectConflicts(semesterId);
+  }
+
+  private matchesScope(
+    authUser: AuthenticatedRequestUser,
+    facultyId?: string | null,
+    academicProgramId?: string | null,
+  ) {
+    try {
+      this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

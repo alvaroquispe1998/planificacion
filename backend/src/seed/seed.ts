@@ -26,42 +26,43 @@ import {
   MeetingSyllabusMatchEntity,
 } from '../entities/syllabus.entities';
 
-const dataSource = new DataSource({
-  type: 'mysql',
-  host: process.env.DB_HOST ?? 'localhost',
-  port: Number(process.env.DB_PORT ?? '3306'),
-  username: process.env.DB_USER ?? 'root',
-  password: process.env.DB_PASSWORD ?? 'root',
-  database: process.env.DB_NAME ?? 'uai_planning',
-  entities: [
-    ClassOfferingEntity,
-    ClassGroupEntity,
-    ClassMeetingEntity,
-    ClassTeacherEntity,
-    ClassGroupTeacherEntity,
-    CourseSectionHourRequirementEntity,
-    ScheduleConflictEntity,
-    VideoConferenceEntity,
-    ClassZoomMeetingEntity,
-    MeetingInstanceEntity,
-    MeetingParticipantEntity,
-    MeetingAttendanceSegmentEntity,
-    MeetingTeacherMetricEntity,
-    MeetingRecordingEntity,
-    MeetingTranscriptEntity,
-    ClassSyllabusSessionEntity,
-    ClassSyllabusKeywordEntity,
-    MeetingSyllabusMatchEntity,
-    MeetingSummaryEntity,
-  ],
-  synchronize: false,
-  timezone: 'Z',
-});
+let dataSource: DataSource | null = null;
 
 async function bootstrap() {
   loadDotEnv();
+  dataSource = new DataSource({
+    type: 'mysql',
+    host: process.env.DB_HOST ?? 'localhost',
+    port: Number(process.env.DB_PORT ?? '3306'),
+    username: process.env.DB_USER ?? 'root',
+    password: process.env.DB_PASSWORD ?? 'root',
+    database: process.env.DB_NAME ?? 'uai_planning',
+    entities: [
+      ClassOfferingEntity,
+      ClassGroupEntity,
+      ClassMeetingEntity,
+      ClassTeacherEntity,
+      ClassGroupTeacherEntity,
+      CourseSectionHourRequirementEntity,
+      ScheduleConflictEntity,
+      VideoConferenceEntity,
+      ClassZoomMeetingEntity,
+      MeetingInstanceEntity,
+      MeetingParticipantEntity,
+      MeetingAttendanceSegmentEntity,
+      MeetingTeacherMetricEntity,
+      MeetingRecordingEntity,
+      MeetingTranscriptEntity,
+      ClassSyllabusSessionEntity,
+      ClassSyllabusKeywordEntity,
+      MeetingSyllabusMatchEntity,
+      MeetingSummaryEntity,
+    ],
+    synchronize: false,
+    timezone: 'Z',
+  });
   await dataSource.initialize();
-  await waitForTables(['class_offerings', 'meeting_instances', 'class_syllabus_sessions']);
+  await waitForTables(dataSource, ['class_offerings', 'meeting_instances', 'class_syllabus_sessions']);
 
   const now = new Date('2026-01-15T12:00:00.000Z');
 
@@ -643,7 +644,7 @@ async function bootstrap() {
   console.log('Seed completed successfully');
 }
 
-async function waitForTables(tableNames: string[]) {
+async function waitForTables(activeDataSource: DataSource, tableNames: string[]) {
   const dbName = process.env.DB_NAME ?? 'uai_planning';
   const maxRetries = 45;
 
@@ -651,7 +652,7 @@ async function waitForTables(tableNames: string[]) {
     let readyCount = 0;
 
     for (const tableName of tableNames) {
-      const rows = await dataSource.query(
+      const rows = await activeDataSource.query(
         `SELECT COUNT(*) AS qty FROM information_schema.tables WHERE table_schema = ? AND table_name = ?`,
         [dbName, tableName],
       );
@@ -704,7 +705,7 @@ bootstrap()
     process.exitCode = 1;
   })
   .finally(async () => {
-    if (dataSource.isInitialized) {
+    if (dataSource?.isInitialized) {
       await dataSource.destroy();
     }
   });

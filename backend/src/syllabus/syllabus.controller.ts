@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
+import { RequirePermissions } from '../auth/permissions.decorator';
 import {
   CreateSyllabusKeywordDto,
   CreateSyllabusSessionDto,
@@ -9,6 +11,7 @@ import {
 import { SyllabusService } from './syllabus.service';
 
 @Controller('syllabus')
+@RequirePermissions(WINDOW_PERMISSIONS.AUDIT)
 export class SyllabusController {
   constructor(private readonly syllabusService: SyllabusService) {}
 

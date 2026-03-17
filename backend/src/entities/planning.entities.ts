@@ -418,6 +418,9 @@ export class PlanningSectionEntity {
   @Column({ type: 'varchar', length: 36, nullable: true })
   course_modality_id!: string | null;
 
+  @Column({ type: 'int', nullable: true })
+  projected_vacancies!: number | null;
+
   @Column({ type: 'boolean', default: false })
   has_subsections!: boolean;
 
@@ -465,6 +468,9 @@ export class PlanningSubsectionEntity {
   responsible_teacher_id!: string | null;
 
   @Column({ type: 'varchar', length: 36, nullable: true })
+  course_modality_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
   building_id!: string | null;
 
   @Column({ type: 'varchar', length: 36, nullable: true })
@@ -475,6 +481,9 @@ export class PlanningSubsectionEntity {
 
   @Column({ type: 'varchar', length: 30, nullable: true })
   shift!: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  projected_vacancies!: number | null;
 
   @Column({ type: 'varchar', length: 30 })
   course_type!: string;

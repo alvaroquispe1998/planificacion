@@ -21,7 +21,25 @@ npm install
 npm run start:dev
 ```
 
+Si MySQL corre en `docker compose` pero el backend lo levantas fuera de Docker, usa `DB_HOST=localhost` y `DB_PORT=3307`.
+Aunque por defecto ahora el backend intenta corregir automaticamente el caso comun donde llega `DB_HOST=mysql` fuera de la red de Compose.
+
 API base: `http://localhost:3000`
+
+Acceso de prueba:
+
+- Usuario: `admin`
+- Password: `admin123`
+
+Este usuario administrador bootstrap se crea automaticamente solo si la tabla `auth_users` esta vacia al arrancar el backend.
+Si ya existen usuarios, no se vuelve a recrear.
+
+Puedes cambiar estas credenciales iniciales agregando en `backend/.env`:
+
+```env
+AUTH_BOOTSTRAP_ADMIN_USERNAME=admin
+AUTH_BOOTSTRAP_ADMIN_PASSWORD=admin123
+```
 
 Health check:
 

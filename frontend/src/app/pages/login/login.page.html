@@ -1,0 +1,30 @@
+<section class="login-shell">
+  <article class="login-card">
+    <p class="eyebrow">UAI Platform</p>
+    <h1>Ingreso al Console</h1>
+    <p class="intro">
+      Accede con tu usuario interno para cargar solo las ventanas y alcances que te correspondan.
+    </p>
+
+    <label>
+      Usuario
+      <input [(ngModel)]="username" type="text" autocomplete="username" />
+    </label>
+
+    <label>
+      Password
+      <input
+        [(ngModel)]="password"
+        type="password"
+        autocomplete="current-password"
+        (keyup.enter)="submit()"
+      />
+    </label>
+
+    <button type="button" (click)="submit()" [disabled]="isSubmitting">
+      {{ isSubmitting ? 'Ingresando...' : 'Iniciar sesion' }}
+    </button>
+
+    <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+  </article>
+</section>

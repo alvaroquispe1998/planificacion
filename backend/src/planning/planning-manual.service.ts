@@ -287,6 +287,7 @@ export class PlanningManualService {
           campus_id: rule.campus_id,
           faculty_id: rule.faculty_id,
           academic_program_id: rule.academic_program_id,
+          career_name: rule.career_name ?? null,
           study_plan_id: rule.study_plan_id,
           cycle,
           semester: semesterMap.get(rule.semester_id) ?? null,
@@ -304,7 +305,36 @@ export class PlanningManualService {
       })
       .filter((row) =>
         filters.campus_id ? row.campus_ids.includes(filters.campus_id) : true,
-      );
+      )
+      .sort((left, right) => {
+        const semesterDelta = compareCatalogLabels(left.semester?.name, right.semester?.name);
+        if (semesterDelta !== 0) {
+          return semesterDelta;
+        }
+
+        const campusDelta = compareCatalogLabels(left.campus_display, right.campus_display);
+        if (campusDelta !== 0) {
+          return campusDelta;
+        }
+
+        const facultyDelta = compareCatalogLabels(
+          left.faculty?.name ?? left.study_plan?.faculty,
+          right.faculty?.name ?? right.study_plan?.faculty,
+        );
+        if (facultyDelta !== 0) {
+          return facultyDelta;
+        }
+
+        const programDelta = compareCatalogLabels(
+          left.academic_program?.name ?? left.study_plan?.career ?? left.career_name,
+          right.academic_program?.name ?? right.study_plan?.career ?? right.career_name,
+        );
+        if (programDelta !== 0) {
+          return programDelta;
+        }
+
+        return Number(left.cycle ?? 0) - Number(right.cycle ?? 0);
+      });
   }
 
   async listPlanRules(semesterId?: string, campusId?: string, academicProgramId?: string) {
@@ -629,6 +659,8 @@ export class PlanningManualService {
     const subsectionCount = Math.max(1, Math.trunc(dto.subsection_count));
     const modalityId = dto.course_modality_id ?? (await this.defaultCourseModalityId());
     const teacherId = emptyToNull(dto.teacher_id);
+    const projectedVacancies =
+      dto.projected_vacancies !== undefined ? Math.max(0, Math.trunc(dto.projected_vacancies)) : null;
 
     const saved = await this.sectionsRepo.manager.transaction(async (manager) => {
       const existingSections = await manager.find(PlanningSectionEntity, {
@@ -642,6 +674,7 @@ export class PlanningManualService {
         code: sectionCode,
         teacher_id: teacherId,
         course_modality_id: modalityId,
+        projected_vacancies: projectedVacancies,
         has_subsections: subsectionCount > 1,
         default_theoretical_hours: offer.theoretical_hours,
         default_practical_hours: offer.practical_hours,
@@ -663,11 +696,13 @@ export class PlanningManualService {
           planning_section_id: savedSection.id,
           code: subsectionCode,
           kind,
-          responsible_teacher_id: null,
+          responsible_teacher_id: teacherId,
+          course_modality_id: modalityId,
           building_id: null,
           classroom_id: null,
           capacity_snapshot: null,
           shift: null,
+          projected_vacancies: resolveSubsectionProjectedVacancies(projectedVacancies, subsectionCount, index),
           course_type: offer.course_type,
           assigned_theoretical_hours: assigned.theoretical_hours,
           assigned_practical_hours: assigned.practical_hours,
@@ -728,7 +763,10 @@ export class PlanningManualService {
         this.teachersRepo,
         uniqueIds([section.teacher_id, ...subsections.map((item) => item.responsible_teacher_id)]),
       ),
-      this.findManyByIds(this.courseModalitiesRepo, uniqueIds([section.course_modality_id])),
+      this.findManyByIds(
+        this.courseModalitiesRepo,
+        uniqueIds([section.course_modality_id, ...subsections.map((item) => item.course_modality_id)]),
+      ),
       this.findManyByIds(this.buildingsRepo, uniqueIds(subsections.map((item) => item.building_id))),
       this.findManyByIds(this.classroomsRepo, uniqueIds(subsections.map((item) => item.classroom_id))),
     ]);
@@ -742,6 +780,7 @@ export class PlanningManualService {
         this.buildSubsectionDetail(subsection, {
           schedules,
           teachers,
+          modalities,
           buildings,
           classrooms,
           conflicts,
@@ -767,9 +806,31 @@ export class PlanningManualService {
       code: nextCode,
       teacher_id:
         dto.teacher_id !== undefined ? emptyToNull(dto.teacher_id) : current.teacher_id,
+      projected_vacancies:
+        dto.projected_vacancies !== undefined
+          ? Math.max(0, Math.trunc(dto.projected_vacancies))
+          : current.projected_vacancies,
       updated_at: new Date(),
     });
     await this.sectionsRepo.save(next);
+    if (dto.projected_vacancies !== undefined) {
+      const sectionSubsections = await this.subsectionsRepo.find({
+        where: { planning_section_id: id },
+        order: { code: 'ASC' },
+      });
+      const updatedSubsections = sectionSubsections.map((subsection, index) =>
+        this.subsectionsRepo.create({
+          ...subsection,
+          projected_vacancies: resolveSubsectionProjectedVacancies(
+            next.projected_vacancies,
+            sectionSubsections.length,
+            index,
+          ),
+          updated_at: new Date(),
+        }),
+      );
+      await this.subsectionsRepo.save(updatedSubsections);
+    }
     const saved = await this.requireEntity(this.sectionsRepo, id, 'planning_section');
     await this.logChange('planning_section', id, 'UPDATE', current, saved);
     await this.refreshOfferStatus(saved.planning_offer_id);
@@ -797,10 +858,15 @@ export class PlanningManualService {
       code,
       kind: dto.kind,
       responsible_teacher_id: emptyToNull(dto.responsible_teacher_id),
+      course_modality_id: emptyToNull(dto.course_modality_id) ?? section.course_modality_id ?? null,
       building_id: emptyToNull(dto.building_id) ?? classroom?.building_id ?? null,
       classroom_id: emptyToNull(dto.classroom_id),
       capacity_snapshot: dto.capacity_snapshot ?? classroom?.capacity ?? null,
       shift: emptyToNull(dto.shift),
+      projected_vacancies:
+        dto.projected_vacancies !== undefined
+          ? Math.max(0, Math.trunc(dto.projected_vacancies))
+          : section.projected_vacancies,
       course_type: offer.course_type,
       assigned_theoretical_hours: assigned.theoretical_hours,
       assigned_practical_hours: assigned.practical_hours,
@@ -828,7 +894,7 @@ export class PlanningManualService {
       'planning_section',
     );
     const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
-    const [schedules, conflicts, teachers, buildings, classrooms] = await Promise.all([
+    const [schedules, conflicts, teachers, modalities, buildings, classrooms] = await Promise.all([
       this.schedulesRepo.find({
         where: { planning_subsection_id: id },
         order: { day_of_week: 'ASC', start_time: 'ASC' },
@@ -838,6 +904,7 @@ export class PlanningManualService {
         order: { detected_at: 'DESC' },
       }),
       this.findManyByIds(this.teachersRepo, uniqueIds([subsection.responsible_teacher_id, section.teacher_id])),
+      this.findManyByIds(this.courseModalitiesRepo, uniqueIds([subsection.course_modality_id])),
       this.findManyByIds(this.buildingsRepo, uniqueIds([subsection.building_id])),
       this.findManyByIds(this.classroomsRepo, uniqueIds([subsection.classroom_id])),
     ]);
@@ -848,6 +915,7 @@ export class PlanningManualService {
       schedules,
       conflicts,
       teachers,
+      modalities,
       buildings,
       classrooms,
     });
@@ -886,6 +954,10 @@ export class PlanningManualService {
         dto.responsible_teacher_id !== undefined
           ? emptyToNull(dto.responsible_teacher_id)
           : current.responsible_teacher_id,
+      course_modality_id:
+        dto.course_modality_id !== undefined
+          ? emptyToNull(dto.course_modality_id)
+          : current.course_modality_id,
       building_id: classroom?.building_id ?? buildingId ?? null,
       classroom_id: classroomId,
       capacity_snapshot:
@@ -897,6 +969,10 @@ export class PlanningManualService {
               ? current.capacity_snapshot
               : null,
       shift: dto.shift !== undefined ? emptyToNull(dto.shift) : current.shift,
+      projected_vacancies:
+        dto.projected_vacancies !== undefined
+          ? Math.max(0, Math.trunc(dto.projected_vacancies))
+          : current.projected_vacancies,
       assigned_total_hours: roundToTwo(
         numberValue(dto.assigned_theoretical_hours, current.assigned_theoretical_hours) +
           numberValue(dto.assigned_practical_hours, current.assigned_practical_hours) +
@@ -918,6 +994,12 @@ export class PlanningManualService {
       subsectionId,
       'planning_subsection',
     );
+    const existingSchedules = await this.schedulesRepo.count({
+      where: { planning_subsection_id: subsectionId },
+    });
+    if (existingSchedules > 0) {
+      throw new BadRequestException('Solo se permite un horario por subseccion.');
+    }
     const now = new Date();
     const minutes = computeMinutesFromTimes(dto.start_time, dto.end_time);
     const schedule = this.schedulesRepo.create({
@@ -975,6 +1057,15 @@ export class PlanningManualService {
     );
     await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id);
     return this.getSubsection(subsection.id);
+  }
+
+  async getSubsectionBySchedule(id: string) {
+    const schedule = await this.requireEntity(
+      this.schedulesRepo,
+      id,
+      'planning_subsection_schedule',
+    );
+    return this.getSubsection(schedule.planning_subsection_id);
   }
 
   async deleteSubsectionSchedule(id: string) {
@@ -1604,11 +1695,13 @@ export class PlanningManualService {
       schedules: PlanningSubsectionScheduleEntity[];
       conflicts: PlanningScheduleConflictV2Entity[];
       teachers: TeacherEntity[];
+      modalities?: CourseModalityEntity[];
       buildings: BuildingEntity[];
       classrooms: ClassroomEntity[];
     },
   ) {
     const teacherMap = mapById(input.teachers);
+    const modalityMap = mapById(input.modalities ?? []);
     const buildingMap = mapById(input.buildings);
     const classroomMap = mapById(input.classrooms);
     const ownSchedules = input.schedules.filter((item) => item.planning_subsection_id === subsection.id);
@@ -1617,6 +1710,7 @@ export class PlanningManualService {
       section: input.section ?? null,
       offer: input.offer ?? null,
       responsible_teacher: teacherMap.get(subsection.responsible_teacher_id ?? '') ?? null,
+      modality: modalityMap.get(subsection.course_modality_id ?? '') ?? null,
       building: buildingMap.get(subsection.building_id ?? '') ?? null,
       classroom: classroomMap.get(subsection.classroom_id ?? '') ?? null,
       schedules: ownSchedules,
@@ -1993,6 +2087,36 @@ function resolveAssignedHours(kind: PlanningSubsectionKind, offer: PlanningOffer
   };
 }
 
+function resolveSubsectionProjectedVacancies(
+  sectionProjectedVacancies: number | null | undefined,
+  subsectionCount: number,
+  index: number,
+) {
+  if (sectionProjectedVacancies === null || sectionProjectedVacancies === undefined) {
+    return null;
+  }
+  const total = Math.max(0, Math.trunc(sectionProjectedVacancies));
+  const count = Math.max(1, Math.trunc(subsectionCount));
+  if (count === 1) {
+    return total;
+  }
+  if (count === 2) {
+    return splitIntegerEvenly(total, count, index);
+  }
+  if (index === 0) {
+    return total;
+  }
+  return splitIntegerEvenly(total, count - 1, index - 1);
+}
+
+function splitIntegerEvenly(total: number, parts: number, index: number) {
+  const safeParts = Math.max(1, Math.trunc(parts));
+  const safeIndex = Math.max(0, Math.trunc(index));
+  const base = Math.floor(total / safeParts);
+  const remainder = total % safeParts;
+  return base + (safeIndex < remainder ? 1 : 0);
+}
+
 function buildDenomination(
   courseCode: string | null,
   courseName: string | null,
@@ -2067,11 +2191,29 @@ function extractCycleFromLabel(value: string | null | undefined) {
 }
 
 function computeMinutesFromTimes(start: string, end: string) {
+  validateAcademicBlockTime(start);
+  validateAcademicBlockTime(end);
   const minutes = Math.max(0, toMinutes(end) - toMinutes(start));
   if (minutes <= 0) {
     throw new BadRequestException('La hora fin debe ser mayor que la hora inicio.');
   }
+  if (minutes % 50 !== 0) {
+    throw new BadRequestException('El horario debe avanzar en bloques de 50 minutos.');
+  }
   return minutes;
+}
+
+function validateAcademicBlockTime(value: string) {
+  const minutes = toMinutes(value);
+  const academicGridStart = 7 * 60 + 40;
+  const academicGridEnd = 23 * 60 + 30;
+  if (
+    minutes < academicGridStart ||
+    minutes > academicGridEnd ||
+    (minutes - academicGridStart) % 50 !== 0
+  ) {
+    throw new BadRequestException('Las horas deben alinearse a la malla academica de 50 minutos.');
+  }
 }
 
 function toMinutes(value: string) {

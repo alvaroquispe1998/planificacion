@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuthModule } from './auth/auth.module';
 import { AuditModule } from './audit/audit.module';
 import { PlanningModule } from './planning/planning.module';
 import { SettingsModule } from './settings/settings.module';
@@ -15,8 +16,9 @@ import { buildTypeOrmConfig } from './config/typeorm.config';
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => buildTypeOrmConfig(configService),
+      useFactory: async (configService: ConfigService) => buildTypeOrmConfig(configService),
     }),
+    AuthModule,
     PlanningModule,
     SettingsModule,
     SyncModule,

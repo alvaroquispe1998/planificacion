@@ -19,7 +19,7 @@
     var(--shell-bg);
 }
 
-header {
+.shell-header {
   display: grid;
   gap: 0.35rem;
   padding: 0.65rem 1rem;
@@ -44,6 +44,43 @@ h1 {
   font-size: clamp(1.15rem, 1.8vw, 1.55rem);
   letter-spacing: 0.02em;
   line-height: 1.1;
+}
+
+.brand-block {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.session-block {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.session-name,
+.session-meta {
+  margin: 0;
+}
+
+.session-name {
+  font-weight: 700;
+}
+
+.session-meta {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.session-logout {
+  border: 1px solid #bfd0e3;
+  border-radius: 999px;
+  padding: 0.38rem 0.78rem;
+  color: var(--brand);
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
 }
 
 nav {
@@ -74,4 +111,19 @@ a.active {
 
 .content {
   padding: 0.7rem;
+}
+
+.hidden-link {
+  display: none;
+}
+
+@media (min-width: 960px) {
+  .shell-header {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+
+  nav {
+    grid-column: 1 / -1;
+  }
 }

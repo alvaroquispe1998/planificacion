@@ -1,0 +1,250 @@
+<section class="security-panel">
+  <header class="security-hero" *ngIf="showHeader; else compactToolbar">
+    <div>
+      <p class="eyebrow">Seguridad</p>
+      <h2>Usuarios, roles y privilegios</h2>
+      <p>Administra accesos por ventana y alcance de facultad/carrera.</p>
+    </div>
+    <button type="button" class="ghost" (click)="loadData()" [disabled]="isLoading">
+      {{ isLoading ? 'Actualizando...' : 'Refrescar datos' }}
+    </button>
+  </header>
+
+  <ng-template #compactToolbar>
+    <div class="compact-toolbar">
+      <button type="button" class="ghost" (click)="loadData()" [disabled]="isLoading">
+        {{ isLoading ? 'Actualizando...' : 'Refrescar datos' }}
+      </button>
+    </div>
+  </ng-template>
+
+  <p class="feedback" *ngIf="feedback">{{ feedback }}</p>
+  <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+
+  <div class="security-grid">
+    <article class="panel">
+      <div class="panel-head">
+        <h3>Usuarios</h3>
+        <button type="button" class="ghost" (click)="createNewUser()">Nuevo</button>
+      </div>
+      <div class="list-stack">
+        <button
+          type="button"
+          class="list-item"
+          *ngFor="let user of users"
+          [class.selected]="user.id === selectedUserId"
+          (click)="selectUser(user)"
+        >
+          <strong>{{ user.display_name }}</strong>
+          <span>{{ user.username }}</span>
+        </button>
+      </div>
+    </article>
+
+    <article class="panel editor-panel">
+      <div class="panel-head">
+        <h3>{{ selectedUserId ? 'Editar usuario' : 'Nuevo usuario' }}</h3>
+      </div>
+
+      <div class="form-grid">
+        <label>
+          Username
+          <input [(ngModel)]="userForm.username" />
+        </label>
+        <label>
+          Nombre visible
+          <input [(ngModel)]="userForm.display_name" />
+        </label>
+        <label>
+          Email
+          <input [(ngModel)]="userForm.email" />
+        </label>
+        <label>
+          Password
+          <input [(ngModel)]="userForm.password" type="password" />
+        </label>
+      </div>
+
+      <label class="checkbox-line">
+        <input type="checkbox" [(ngModel)]="userForm.is_active" />
+        Usuario activo
+      </label>
+
+      <div class="assignments-head">
+        <h4>Asignaciones</h4>
+        <button type="button" class="ghost" (click)="addAssignment()">Agregar fila</button>
+      </div>
+
+      <div class="assignment-card" *ngFor="let assignment of userAssignments; let index = index">
+        <div class="assignment-grid">
+          <label>
+            Rol
+            <select [(ngModel)]="assignment.role_id">
+              <option value="">Seleccionar</option>
+              <option *ngFor="let role of availableRoles" [value]="role.id">{{ role.name }}</option>
+            </select>
+          </label>
+          <label class="checkbox-line">
+            <input type="checkbox" [(ngModel)]="assignment.is_active" />
+            Activa
+          </label>
+        </div>
+
+        <p class="scope-summary">{{ assignmentSummary(assignment) }}</p>
+
+        <div class="scope-grid">
+          <section class="scope-panel">
+            <div class="scope-panel-head">
+              <div>
+                <h5>Facultades</h5>
+                <p>Si no marcas ninguna, el alcance queda global o derivado por programa.</p>
+              </div>
+              <div class="scope-actions">
+                <button type="button" class="ghost mini-ghost" (click)="selectAllFaculties(assignment)">
+                  Todas
+                </button>
+                <button type="button" class="ghost mini-ghost" (click)="clearFaculties(assignment)">
+                  Limpiar
+                </button>
+              </div>
+            </div>
+
+            <label class="scope-search">
+              <span>Buscar facultad</span>
+              <input [(ngModel)]="assignment.faculty_search" placeholder="Buscar facultad..." />
+            </label>
+
+            <div class="scope-list">
+              <label class="scope-option" *ngFor="let faculty of filteredFaculties(assignment)">
+                <input
+                  type="checkbox"
+                  [checked]="isFacultySelected(assignment, faculty.id)"
+                  (change)="toggleAssignmentFaculty(assignment, faculty.id, $any($event.target).checked)"
+                />
+                <span>{{ faculty.name }}</span>
+              </label>
+
+              <p class="scope-empty" *ngIf="!filteredFaculties(assignment).length">
+                No hay facultades que coincidan con la búsqueda.
+              </p>
+            </div>
+          </section>
+
+          <section class="scope-panel">
+            <div class="scope-panel-head">
+              <div>
+                <h5>Carreras / Programas</h5>
+                <p>Puedes combinar programas de distintas facultades en la misma asignación.</p>
+              </div>
+              <div class="scope-actions">
+                <button type="button" class="ghost mini-ghost" (click)="selectAllPrograms(assignment)">
+                  Todas
+                </button>
+                <button type="button" class="ghost mini-ghost" (click)="clearPrograms(assignment)">
+                  Limpiar
+                </button>
+              </div>
+            </div>
+
+            <label class="scope-search">
+              <span>Buscar carrera o programa</span>
+              <input [(ngModel)]="assignment.program_search" placeholder="Buscar carrera o programa..." />
+            </label>
+
+            <div class="scope-list">
+              <label class="scope-option" *ngFor="let program of filteredPrograms(assignment)">
+                <input
+                  type="checkbox"
+                  [checked]="isProgramSelected(assignment, program.id)"
+                  (change)="toggleAssignmentProgram(assignment, program.id, $any($event.target).checked)"
+                />
+                <span>
+                  {{ program.name }}
+                  <small *ngIf="program.faculty"> | {{ program.faculty }}</small>
+                </span>
+              </label>
+
+              <p class="scope-empty" *ngIf="!filteredPrograms(assignment).length">
+                No hay programas que coincidan con la búsqueda o las facultades elegidas.
+              </p>
+            </div>
+          </section>
+        </div>
+
+        <button type="button" class="mini-link" (click)="removeAssignment(index)">Quitar fila</button>
+      </div>
+
+      <div class="actions">
+        <button type="button" (click)="saveUser()" [disabled]="isSavingUser">
+          {{ isSavingUser ? 'Guardando...' : 'Guardar usuario' }}
+        </button>
+      </div>
+    </article>
+  </div>
+
+  <div class="security-grid">
+    <article class="panel">
+      <div class="panel-head">
+        <h3>Roles</h3>
+        <button type="button" class="ghost" (click)="createNewRole()">Nuevo</button>
+      </div>
+      <div class="list-stack">
+        <button
+          type="button"
+          class="list-item"
+          *ngFor="let role of roles"
+          [class.selected]="role.id === selectedRoleId"
+          (click)="selectRole(role)"
+        >
+          <strong>{{ role.name }}</strong>
+          <span>{{ role.code }}</span>
+        </button>
+      </div>
+    </article>
+
+    <article class="panel editor-panel">
+      <div class="panel-head">
+        <h3>{{ selectedRoleId ? 'Editar rol' : 'Nuevo rol' }}</h3>
+      </div>
+
+      <div class="form-grid">
+        <label>
+          Codigo
+          <input [(ngModel)]="roleForm.code" />
+        </label>
+        <label>
+          Nombre
+          <input [(ngModel)]="roleForm.name" />
+        </label>
+      </div>
+
+      <div class="form-grid compact-grid">
+        <label class="checkbox-line">
+          <input type="checkbox" [(ngModel)]="roleForm.is_active" />
+          Rol activo
+        </label>
+        <label class="checkbox-line">
+          <input type="checkbox" [(ngModel)]="roleForm.is_editable" />
+          Editable
+        </label>
+      </div>
+
+      <div class="permissions-grid">
+        <label class="permission-pill" *ngFor="let permission of permissions">
+          <input
+            type="checkbox"
+            [checked]="rolePermissionIds.has(permission.id)"
+            (change)="toggleRolePermission(permission.id, $any($event.target).checked)"
+          />
+          <span>{{ permission.code }}</span>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button type="button" (click)="saveRole()" [disabled]="isSavingRole">
+          {{ isSavingRole ? 'Guardando...' : 'Guardar rol' }}
+        </button>
+      </div>
+    </article>
+  </div>
+</section>

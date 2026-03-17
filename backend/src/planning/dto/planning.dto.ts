@@ -659,6 +659,12 @@ export class CreatePlanningSectionDto {
   @IsString()
   course_modality_id?: string;
 
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  projected_vacancies?: number;
+
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -677,6 +683,12 @@ export class UpdatePlanningSectionDto {
   @IsOptional()
   @IsString()
   course_modality_id?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  projected_vacancies?: number;
 
   @IsOptional()
   @IsBoolean()
@@ -705,6 +717,10 @@ export class CreatePlanningSubsectionDto {
 
   @IsOptional()
   @IsString()
+  course_modality_id?: string;
+
+  @IsOptional()
+  @IsString()
   building_id?: string;
 
   @IsOptional()
@@ -720,6 +736,12 @@ export class CreatePlanningSubsectionDto {
   @IsOptional()
   @IsString()
   shift?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  projected_vacancies?: number;
 
   @IsOptional()
   @IsString()
@@ -741,6 +763,10 @@ export class UpdatePlanningSubsectionDto {
 
   @IsOptional()
   @IsString()
+  course_modality_id?: string;
+
+  @IsOptional()
+  @IsString()
   building_id?: string;
 
   @IsOptional()
@@ -756,6 +782,12 @@ export class UpdatePlanningSubsectionDto {
   @IsOptional()
   @IsString()
   shift?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  projected_vacancies?: number;
 
   @IsOptional()
   @Type(() => Number)

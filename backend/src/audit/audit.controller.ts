@@ -8,6 +8,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
+import { RequirePermissions } from '../auth/permissions.decorator';
 import {
   CreateClassZoomMeetingDto,
   CreateMeetingAttendanceSegmentDto,
@@ -21,6 +23,7 @@ import {
 import { AuditService } from './audit.service';
 
 @Controller('audit')
+@RequirePermissions(WINDOW_PERMISSIONS.AUDIT)
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 

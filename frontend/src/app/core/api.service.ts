@@ -386,4 +386,45 @@ export class ApiService {
       { method: 'HYBRID' },
     );
   }
+
+  // --- Auth Admin ---
+  listAdminUsers() {
+    return this.http.get<any[]>(`${this.baseUrl}/auth/admin/users`);
+  }
+
+  createAdminUser(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/auth/admin/users`, payload);
+  }
+
+  updateAdminUser(id: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/auth/admin/users/${id}`, payload);
+  }
+
+  replaceAdminUserAssignments(id: string, payload: any) {
+    return this.http.put<any>(`${this.baseUrl}/auth/admin/users/${id}/assignments`, payload);
+  }
+
+  listAdminRoles() {
+    return this.http.get<any[]>(`${this.baseUrl}/auth/admin/roles`);
+  }
+
+  createAdminRole(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/auth/admin/roles`, payload);
+  }
+
+  updateAdminRole(id: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/auth/admin/roles/${id}`, payload);
+  }
+
+  replaceRolePermissions(id: string, payload: any) {
+    return this.http.put<any>(`${this.baseUrl}/auth/admin/roles/${id}/permissions`, payload);
+  }
+
+  listAdminPermissions() {
+    return this.http.get<any[]>(`${this.baseUrl}/auth/admin/permissions`);
+  }
+
+  getAdminScopeCatalog() {
+    return this.http.get<any>(`${this.baseUrl}/auth/admin/scopes/catalog`);
+  }
 }

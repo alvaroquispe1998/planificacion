@@ -1,8 +1,11 @@
 import { Controller, Get, Post, Body, Query } from '@nestjs/common';
+import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
+import { RequirePermissions } from '../auth/permissions.decorator';
 import { VideoconferenceService } from './videoconference.service';
 import { FilterOptionsDto, GenerateVideoconferenceDto } from './videoconference.dto';
 
 @Controller('videoconference')
+@RequirePermissions(WINDOW_PERMISSIONS.VIDEOCONFERENCES)
 export class VideoconferenceController {
     constructor(private readonly service: VideoconferenceService) { }
 

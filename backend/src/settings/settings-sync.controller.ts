@@ -1,8 +1,11 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { ACTION_PERMISSIONS, WINDOW_PERMISSIONS } from '../auth/auth.constants';
+import { RequirePermissions } from '../auth/permissions.decorator';
 import { RunSettingsSyncDto, UpsertSourceSessionDto } from './dto/settings-sync.dto';
 import { SettingsSyncService } from './settings-sync.service';
 
 @Controller('settings/sync')
+@RequirePermissions(WINDOW_PERMISSIONS.SETTINGS, ACTION_PERMISSIONS.SETTINGS_MANAGE)
 export class SettingsSyncController {
   constructor(private readonly settingsSyncService: SettingsSyncService) {}
 
