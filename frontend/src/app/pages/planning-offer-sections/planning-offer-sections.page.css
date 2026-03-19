@@ -200,6 +200,21 @@
   background: linear-gradient(180deg, rgba(248, 250, 252, 0.45) 0%, rgba(255, 255, 255, 0.94) 100%);
 }
 
+.section-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 0.65rem;
+}
+
+.section-delete-helper {
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
 .section-teacher-bar {
   display: grid;
   grid-template-columns: 180px minmax(0, 1fr) minmax(180px, 220px);
@@ -366,6 +381,12 @@
   font-weight: 700;
 }
 
+.schedule-conflict-note {
+  color: #9a3412;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
 .schedule-list {
   display: grid;
   gap: 0.45rem;
@@ -479,6 +500,26 @@
   color: #b91c1c;
 }
 
+.status-draft {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.status-review {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.status-approved {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.status-correction {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 .flash {
   margin: 0;
   padding: 0.55rem 0.8rem;
@@ -545,6 +586,12 @@ input[disabled] {
 .btn-secondary {
   background: white;
   color: #0b4f6c;
+}
+
+.btn-danger {
+  background: #fff1f2;
+  color: #be123c;
+  border-color: rgba(190, 18, 60, 0.18);
 }
 
 .btn-ghost {
@@ -632,6 +679,13 @@ input[disabled] {
 
 .drawer-grid-two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.drawer-helper {
+  margin: 0;
+  color: #5f7698;
+  font-size: 0.87rem;
+  line-height: 1.45;
 }
 
 .drawer-schedule-form {

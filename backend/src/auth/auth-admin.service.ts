@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import * as bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 import { newId } from '../common';
 import {
@@ -134,7 +134,7 @@ export class AuthAdminService {
   async listRoles() {
     const [roles, permissions, mappings] = await Promise.all([
       this.rolesRepo.find({ order: { name: 'ASC' } }),
-      this.permissionsRepo.find({ order: { type: 'ASC', code: 'ASC' } }),
+      this.permissionsRepo.find({ order: { sort_order: 'ASC', type: 'ASC', code: 'ASC' } }),
       this.rolePermissionsRepo.find(),
     ]);
     const permissionMap = new Map(permissions.map((item) => [item.id, item]));
@@ -155,6 +155,10 @@ export class AuthAdminService {
           code: permission.code,
           type: permission.type,
           description: permission.description,
+          display_name: permission.display_name,
+          group_key: permission.group_key,
+          parent_window_code: permission.parent_window_code,
+          sort_order: permission.sort_order,
           is_active: permission.is_active,
         })),
     }));
@@ -197,7 +201,7 @@ export class AuthAdminService {
   }
 
   listPermissions() {
-    return this.permissionsRepo.find({ order: { type: 'ASC', code: 'ASC' } });
+    return this.permissionsRepo.find({ order: { sort_order: 'ASC', type: 'ASC', code: 'ASC' } });
   }
 
   async replaceRolePermissions(roleId: string, dto: ReplaceRolePermissionsDto) {
@@ -211,11 +215,28 @@ export class AuthAdminService {
       throw new BadRequestException('Uno o mas privilegios no existen.');
     }
 
+    const permissionMap = new Map(permissions.map((item) => [item.id, item]));
+    const parentCodes = [...new Set(
+      permissions
+        .map((permission) => permission.parent_window_code)
+        .filter((code): code is string => Boolean(code)),
+    )];
+    const missingParentCodes = parentCodes.filter(
+      (code) => !permissions.some((permission) => permission.code === code),
+    );
+    const parentPermissions = missingParentCodes.length
+      ? await this.permissionsRepo.find({ where: missingParentCodes.map((code) => ({ code })) })
+      : [];
+    for (const permission of parentPermissions) {
+      permissionMap.set(permission.id, permission);
+    }
+    const normalizedPermissions = [...permissionMap.values()];
+
     await this.rolePermissionsRepo.delete({ role_id: roleId });
     const now = new Date();
-    if (permissions.length > 0) {
+    if (normalizedPermissions.length > 0) {
       await this.rolePermissionsRepo.save(
-        permissions.map((permission) =>
+        normalizedPermissions.map((permission) =>
           this.rolePermissionsRepo.create({
             id: newId(),
             role_id: roleId,

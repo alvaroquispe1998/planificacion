@@ -1,11 +1,9 @@
 <section class="security-page">
   <header class="hero">
     <p class="eyebrow">Seguridad</p>
-    <h1>Usuarios, roles y privilegios</h1>
-    <p>
-      Gestiona accesos por ventana, privilegios sensibles y alcance por facultad o carrera.
-    </p>
+    <h1>{{ title }}</h1>
+    <p>{{ description }}</p>
   </header>
 
-  <app-security-admin-panel [showHeader]="false"></app-security-admin-panel>
+  <app-security-admin-panel [showHeader]="false" [activeView]="activeView"></app-security-admin-panel>
 </section>

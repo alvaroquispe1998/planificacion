@@ -76,6 +76,7 @@
   display: flex;
   gap: 0.35rem;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .rule-form-inline select {
@@ -99,6 +100,32 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.88rem;
+}
+
+.rule-item-main,
+.workflow-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.workflow-actions {
+  margin-top: 0.65rem;
+}
+
+.btn-link {
+  border: 0;
+  background: transparent;
+  color: #0b4f6c;
+  padding: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
 }
 
 .rule-plan-name {
@@ -179,6 +206,21 @@
 .status-active {
   background: #dcfce7;
   color: #166534;
+}
+
+.status-review {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.status-approved {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.status-correction {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .status-observed {
@@ -279,6 +321,122 @@ input[disabled] {
   font-size: 0.85rem;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  z-index: 60;
+}
+
+.modal-card {
+  width: min(560px, 100%);
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid rgba(20, 33, 61, 0.08);
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.24);
+  padding: 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.timeline-modal {
+  width: min(720px, 100%);
+}
+
+.modal-head,
+.modal-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.modal-head {
+  align-items: flex-start;
+}
+
+.modal-head h3,
+.modal-head p {
+  margin: 0;
+}
+
+.modal-head p:last-child {
+  color: #5b6c80;
+  font-size: 0.9rem;
+}
+
+.modal-body,
+.modal-field {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.modal-field textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  border-radius: 12px;
+  border: 1px solid rgba(20, 33, 61, 0.16);
+  padding: 0.75rem 0.85rem;
+  font: inherit;
+}
+
+.timeline-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.timeline-marker {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  margin-top: 0.25rem;
+  background: #cbd5e1;
+}
+
+.timeline-content {
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid rgba(20, 33, 61, 0.08);
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 0.8rem 0.9rem;
+}
+
+.timeline-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.timeline-top strong {
+  color: #173558;
+}
+
+.timeline-top span,
+.timeline-meta,
+.timeline-comment {
+  margin: 0;
+  color: #5b6c80;
+  font-size: 0.86rem;
+}
+
+.timeline-comment {
+  color: #173558;
+  font-weight: 600;
+}
+
 /* --- Responsive --- */
 @media (max-width: 900px) {
   .planning-shell {
@@ -297,5 +455,11 @@ input[disabled] {
   .section-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .modal-head,
+  .modal-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

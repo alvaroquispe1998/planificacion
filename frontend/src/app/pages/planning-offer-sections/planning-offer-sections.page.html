@@ -9,6 +9,12 @@
     </div>
     <div class="hero-actions">
       <button class="btn btn-secondary" (click)="goBack()">Volver al editor</button>
+      <button
+        *ngIf="auth.hasPermission('action.planning.change_log.view')"
+        class="btn btn-secondary"
+        (click)="openChangeLog()">
+        Ver historial
+      </button>
       <button class="btn btn-primary" (click)="openCreateSectionModal()" [disabled]="!canCreateSection">
         Crear seccion
       </button>
@@ -17,6 +23,9 @@
 
   <p *ngIf="message" class="flash success">{{ message }}</p>
   <p *ngIf="error" class="flash error">{{ error }}</p>
+  <p *ngIf="isWorkflowReadOnly" class="flash">
+    Este plan esta en {{ workflowStatusLabel(planRule?.workflow_status).toLowerCase() }}. Puedes revisar la configuracion, pero no editarla.
+  </p>
   <p *ngIf="supportDataLoading && offer" class="flash">
     Cargando catalogos auxiliares. Ya puedes crear la primera seccion.
   </p>
@@ -53,6 +62,14 @@
     <div class="context-item">
       <span>Tipo</span>
       <strong>{{ offer.course_type }}</strong>
+    </div>
+    <div class="context-item" *ngIf="planRule">
+      <span>Workflow</span>
+      <strong>
+        <span class="pill" [ngClass]="workflowStatusClass(planRule.workflow_status)">
+          {{ workflowStatusLabel(planRule.workflow_status) }}
+        </span>
+      </strong>
     </div>
   </section>
 
@@ -117,6 +134,20 @@
         </button>
 
         <div *ngIf="isSectionExpanded(section.id)" class="section-detail">
+          <div class="section-detail-actions">
+            <button
+              *ngIf="!isWorkflowReadOnly"
+              type="button"
+              class="btn btn-danger btn-sm"
+              [disabled]="saving || !canDeleteSection(section)"
+              (click)="deleteSection(section)">
+              Eliminar seccion
+            </button>
+            <span *ngIf="!isWorkflowReadOnly" class="section-delete-helper">
+              {{ sectionDeleteHelper(section) }}
+            </span>
+          </div>
+
           <div class="section-teacher-bar">
             <div class="section-teacher-label">
               <span class="field-kicker">Docente de seccion</span>
@@ -129,7 +160,7 @@
                   (ngModelChange)="onSectionTeacherQueryChange(section.id, $event)"
                   (focus)="onSectionTeacherFocus(section.id)"
                   (blur)="onSectionTeacherBlur(section.id)"
-                  [disabled]="saving"
+                  [disabled]="saving || isWorkflowReadOnly"
                   placeholder="Buscar por DNI o nombre" />
 
                 <div *ngIf="sectionTeacherMenuOpenById[section.id]" class="search-select-menu">
@@ -161,7 +192,7 @@
                 min="0"
                 [ngModel]="section.projected_vacancies"
                 (change)="updateSectionVacancies(section, $any($event.target).value)"
-                [disabled]="saving" />
+                [disabled]="saving || isWorkflowReadOnly" />
             </label>
           </div>
 
@@ -203,7 +234,7 @@
                   </td>
                   <td class="table-action">
                     <button type="button" class="btn btn-secondary btn-sm" (click)="openSubsectionDrawer(section, subsection)">
-                      Editar
+                      {{ isWorkflowReadOnly ? 'Ver' : 'Editar' }}
                     </button>
                   </td>
                 </tr>
@@ -216,7 +247,7 @@
   </section>
 </div>
 
-<div *ngIf="drawerOpen && activeSubsection as activeSubsection" class="drawer-backdrop" (click)="closeSubsectionDrawer()">
+<div *ngIf="drawerOpen && activeSubsection as activeSubsection" class="drawer-backdrop">
   <aside class="subsection-drawer" (click)="$event.stopPropagation()">
     <div class="drawer-head">
       <div>
@@ -256,7 +287,7 @@
                 (ngModelChange)="onSubsectionTeacherQueryChange(activeSubsection.id, $event)"
                 (focus)="onSubsectionTeacherFocus(activeSubsection.id)"
                 (blur)="onSubsectionTeacherBlur(activeSubsection.id)"
-                [disabled]="saving"
+                [disabled]="saving || isWorkflowReadOnly"
                 placeholder="Buscar por DNI o nombre" />
 
               <div *ngIf="subsectionTeacherMenuOpenById[activeSubsection.id]" class="search-select-menu">
@@ -287,7 +318,7 @@
             <select
               [(ngModel)]="activeSubsection.shift"
               (ngModelChange)="onSubsectionShiftChange(activeSubsection, $event)"
-              [disabled]="saving">
+              [disabled]="saving || isWorkflowReadOnly">
               <option value="">Sin turno</option>
               <option *ngFor="let shift of shiftOptions" [value]="shift.value">
                 {{ shift.label }}
@@ -307,9 +338,22 @@
             <input
               type="number"
               min="0"
+              [max]="subsectionVacancyLimit(activeSubsection)"
               [ngModel]="activeSubsection.projected_vacancies"
               (change)="updateSubsectionVacancies(activeSubsection, $any($event.target).value)"
-              [disabled]="saving" />
+              [disabled]="saving || isWorkflowReadOnly" />
+          </label>
+
+          <label class="field">
+            <span>Tipo de subseccion</span>
+            <select
+              [ngModel]="activeSubsection.kind"
+              (ngModelChange)="onSubsectionKindChange(activeSubsection, $event)"
+              [disabled]="saving || isWorkflowReadOnly || !canEditSubsectionKind(activeSubsection)">
+              <option *ngFor="let option of subsectionKindOptions(activeSubsection)" [value]="option.value">
+                {{ option.label }}
+              </option>
+            </select>
           </label>
 
           <label class="field">
@@ -317,7 +361,7 @@
             <select
               [(ngModel)]="activeSubsection.course_modality_id"
               (ngModelChange)="onSubsectionModalityChange(activeSubsection, $event)"
-              [disabled]="saving">
+              [disabled]="saving || isWorkflowReadOnly">
               <option value="">Sin modalidad</option>
               <option *ngFor="let modality of subsectionModalityOptions" [value]="modality.id">
                 {{ modality.name }}
@@ -325,6 +369,15 @@
             </select>
           </label>
         </div>
+        <p class="drawer-helper">
+          <ng-container [ngSwitch]="offer?.course_type">
+            <span *ngSwitchCase="'TEORICO'">Este curso solo admite subsecciones teoricas.</span>
+            <span *ngSwitchCase="'PRACTICO'">Este curso solo admite subsecciones practicas.</span>
+            <span *ngSwitchDefault>
+              En cursos teorico practico puedes ajustar la distribucion, pero debe quedar al menos una subseccion teorica y una practica.
+            </span>
+          </ng-container>
+        </p>
       </section>
 
       <section class="drawer-block">
@@ -337,9 +390,9 @@
             <select
               [(ngModel)]="activeSubsection.building_id"
               (ngModelChange)="onSubsectionBuildingChange(activeSubsection, $event)"
-              [disabled]="saving">
+              [disabled]="saving || isWorkflowReadOnly">
               <option value="">Sin pabellon</option>
-              <option *ngFor="let building of buildings" [value]="building.id">
+              <option *ngFor="let building of campusBuildings" [value]="building.id">
                 {{ building.name }}
               </option>
             </select>
@@ -350,7 +403,7 @@
             <select
               [(ngModel)]="activeSubsection.classroom_id"
               (ngModelChange)="onSubsectionClassroomChange(activeSubsection, $event)"
-              [disabled]="saving || !activeSubsection.building_id">
+              [disabled]="saving || isWorkflowReadOnly || !activeSubsection.building_id">
               <option value="">Sin aula</option>
               <option *ngFor="let classroom of classroomsForBuilding(activeSubsection.building_id)" [value]="classroom.id">
                 {{ classroomOptionLabel(classroom) }}
@@ -370,6 +423,9 @@
           <span *ngFor="let label of scheduleConflictLabels(activeSubsection)" class="conflict-chip">
             {{ label }}
           </span>
+          <span class="schedule-conflict-note">
+            Los cruces detectados no bloquean el guardado del horario.
+          </span>
         </div>
 
         <div *ngIf="(activeSubsection.schedules?.length || 0) > 0" class="schedule-list">
@@ -384,7 +440,7 @@
                 type="button"
                 class="btn btn-ghost btn-sm"
                 (click)="deleteSchedule(activeSubsection, schedule.id)"
-                [disabled]="saving">
+                [disabled]="saving || isWorkflowReadOnly">
                 Eliminar
               </button>
             </div>
@@ -404,7 +460,7 @@
             <span>Dia</span>
             <select
               [(ngModel)]="scheduleDraftsBySubsectionId[activeSubsection.id].day_of_week"
-              [disabled]="saving">
+              [disabled]="saving || isWorkflowReadOnly">
               <option *ngFor="let day of dayOptions" [value]="day.value">
                 {{ day.label }}
               </option>
@@ -414,9 +470,9 @@
           <label class="field">
             <span>Hora inicio</span>
             <select
-              [ngModel]="scheduleDraftsBySubsectionId[activeSubsection.id].start_time"
-              (ngModelChange)="onScheduleStartTimeChange(activeSubsection.id, $event)"
-              [disabled]="saving">
+              [value]="scheduleDraftsBySubsectionId[activeSubsection.id]?.start_time || ''"
+              (change)="onScheduleStartTimeChange(activeSubsection.id, $any($event.target).value)"
+              [disabled]="saving || isWorkflowReadOnly">
               <option *ngFor="let option of scheduleTimeOptions" [value]="option.value">
                 {{ option.label }}
               </option>
@@ -426,8 +482,9 @@
           <label class="field">
             <span>Hora fin</span>
             <select
-              [(ngModel)]="scheduleDraftsBySubsectionId[activeSubsection.id].end_time"
-              [disabled]="saving">
+              [value]="scheduleDraftsBySubsectionId[activeSubsection.id]?.end_time || ''"
+              (change)="onScheduleEndTimeChange(activeSubsection.id, $any($event.target).value)"
+              [disabled]="saving || isWorkflowReadOnly">
               <option *ngFor="let option of availableEndTimeOptions(activeSubsection.id)" [value]="option.value">
                 {{ option.label }}
               </option>
@@ -444,7 +501,7 @@
               type="button"
               class="btn btn-primary btn-sm"
               (click)="saveSchedule(activeSubsection)"
-              [disabled]="saving || !canCreateSchedule(activeSubsection.id)">
+              [disabled]="saving || isWorkflowReadOnly || !canCreateSchedule(activeSubsection.id)">
               {{ (activeSubsection.schedules?.length || 0) > 0 ? 'Actualizar horario' : 'Guardar horario' }}
             </button>
             <span *ngIf="scheduleDraftInvalid(activeSubsection.id)" class="schedule-helper error-text">
@@ -457,7 +514,7 @@
   </aside>
 </div>
 
-<div *ngIf="showCreateModal" class="modal-backdrop" (click)="closeCreateSectionModal()">
+<div *ngIf="showCreateModal" class="modal-backdrop">
   <section class="modal-card" (click)="$event.stopPropagation()">
     <div class="modal-head">
       <div>

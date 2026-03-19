@@ -22,6 +22,7 @@ type AssignmentRow = {
 })
 export class SecurityAdminPanelComponent implements OnInit {
   @Input() showHeader = true;
+  @Input() activeView: 'users' | 'roles' = 'users';
 
   users: any[] = [];
   roles: any[] = [];
@@ -248,13 +249,62 @@ export class SecurityAdminPanelComponent implements OnInit {
   }
 
   toggleRolePermission(permissionId: string, checked: boolean) {
+    const permission = this.permissions.find((item) => item.id === permissionId);
+    if (!permission) {
+      return;
+    }
     const next = new Set(this.rolePermissionIds);
     if (checked) {
       next.add(permissionId);
+      if (permission.parent_window_code) {
+        const parent = this.permissions.find((item) => item.code === permission.parent_window_code);
+        if (parent?.id) {
+          next.add(parent.id);
+        }
+      }
     } else {
       next.delete(permissionId);
+      if (permission.type === 'WINDOW') {
+        this.permissions
+          .filter((item) => item.parent_window_code === permission.code)
+          .forEach((child) => next.delete(child.id));
+      }
     }
     this.rolePermissionIds = next;
+  }
+
+  permissionLabel(permission: any) {
+    return permission?.display_name || permission?.description || permission?.code || 'Privilegio';
+  }
+
+  permissionSecondaryLabel(permission: any) {
+    return permission?.code || '';
+  }
+
+  get windowPermissionGroups() {
+    const windows = this.permissions
+      .filter((item) => item.type === 'WINDOW')
+      .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
+    return windows.map((windowPermission) => ({
+      windowPermission,
+      actions: this.permissions
+        .filter((item) => item.parent_window_code === windowPermission.code)
+        .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)),
+    }));
+  }
+
+  get globalActionPermissions() {
+    return this.permissions
+      .filter((item) => item.type === 'ACTION' && !item.parent_window_code)
+      .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
+  }
+
+  get selectedRolePermissionSummary() {
+    const selectedPermissions = this.permissions.filter((item) => this.rolePermissionIds.has(item.id));
+    return {
+      windowCount: selectedPermissions.filter((item) => item.type === 'WINDOW').length,
+      actionCount: selectedPermissions.filter((item) => item.type === 'ACTION').length,
+    };
   }
 
   saveRole() {

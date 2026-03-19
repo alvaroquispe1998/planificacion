@@ -1,0 +1,144 @@
+<div class="planning-shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Planificacion manual</p>
+      <h1>Historial de cambios</h1>
+      <p class="subtle">Consulta quien cambió qué, cuándo y con qué valor anterior o nuevo.</p>
+    </div>
+    <div class="hero-actions">
+      <button class="btn btn-secondary" (click)="goBack()">Volver a planificacion</button>
+      <button class="btn btn-primary" (click)="loadRows()">Recargar</button>
+    </div>
+  </header>
+
+  <section class="filters-card">
+    <select [(ngModel)]="filters.entity_type" (ngModelChange)="loadRows()">
+      <option *ngFor="let option of entityTypeOptions" [value]="option.value">
+        {{ option.label }}
+      </option>
+    </select>
+
+    <select [(ngModel)]="filters.action" (ngModelChange)="loadRows()">
+      <option *ngFor="let option of actionOptions" [value]="option.value">
+        {{ option.label }}
+      </option>
+    </select>
+
+    <input
+      type="text"
+      [(ngModel)]="filters.changed_by"
+      (keyup.enter)="loadRows()"
+      placeholder="Usuario o nombre" />
+
+    <input
+      type="text"
+      [(ngModel)]="filters.offer_id"
+      (keyup.enter)="loadRows()"
+      placeholder="ID de oferta" />
+
+    <label class="field">
+      <span>Desde</span>
+      <input type="date" [(ngModel)]="filters.from" (ngModelChange)="loadRows()" />
+    </label>
+
+    <label class="field">
+      <span>Hasta</span>
+      <input type="date" [(ngModel)]="filters.to" (ngModelChange)="loadRows()" />
+    </label>
+
+    <select [(ngModel)]="filters.limit" (ngModelChange)="loadRows()">
+      <option *ngFor="let option of limitOptions" [value]="option">
+        {{ option }} registros
+      </option>
+    </select>
+
+    <button class="btn btn-secondary" (click)="clearFilters()">Limpiar filtros</button>
+  </section>
+
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+
+  <section class="panel">
+    <div class="section-head">
+      <h2>Eventos encontrados <span class="count">({{ rows.length }})</span></h2>
+    </div>
+
+    <div class="table-wrap" *ngIf="rows.length > 0; else emptyState">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Usuario</th>
+            <th>Accion</th>
+            <th>Entidad</th>
+            <th>Referencia</th>
+            <th>Cambios</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <ng-container *ngFor="let row of rows">
+            <tr>
+              <td>{{ row.changed_at | date:'yyyy-MM-dd HH:mm:ss' }}</td>
+              <td>{{ actorLabel(row) }}</td>
+              <td><span [class]="actionClass(row.action)">{{ formatAction(row.action) }}</span></td>
+              <td>{{ formatEntityType(row.entity_type) }}</td>
+              <td>{{ contextLabel(row) }}</td>
+              <td>{{ row.changes?.length || 0 }}</td>
+              <td class="td-action">
+                <button class="btn btn-secondary btn-sm" (click)="toggleRow(row.id)">
+                  {{ expandedId === row.id ? 'Ocultar' : 'Ver detalle' }}
+                </button>
+              </td>
+            </tr>
+            <tr *ngIf="expandedId === row.id" class="detail-row">
+              <td colspan="7">
+                <div class="detail-card">
+                  <div class="detail-head">
+                    <div>
+                      <strong>{{ detailTitle(row) }}</strong>
+                      <span class="detail-type">{{ formatEntityType(row.entity_type) }}</span>
+                    </div>
+                    <span class="pill neutral">{{ row.changes?.length || 0 }} cambios</span>
+                  </div>
+
+                  <div class="detail-meta">
+                    <span><strong>Actor:</strong> {{ actorLabel(row) }}</span>
+                    <span><strong>Fecha:</strong> {{ row.changed_at | date:'yyyy-MM-dd HH:mm:ss' }}</span>
+                    <span><strong>Contexto:</strong> {{ contextLabel(row) }}</span>
+                  </div>
+
+                  <table class="detail-table" *ngIf="row.changes?.length; else noDiff">
+                    <thead>
+                      <tr>
+                        <th>Campo</th>
+                        <th>Valor anterior</th>
+                        <th>Valor nuevo</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr *ngFor="let change of row.changes">
+                        <td>{{ change.field }}</td>
+                        <td><code>{{ displayValue(change.before) }}</code></td>
+                        <td><code>{{ displayValue(change.after) }}</code></td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  <ng-template #noDiff>
+                    <div class="empty-inline">No se detectaron diferencias visibles para este evento.</div>
+                  </ng-template>
+                </div>
+              </td>
+            </tr>
+          </ng-container>
+        </tbody>
+      </table>
+    </div>
+
+    <ng-template #emptyState>
+      <div class="empty-block">
+        <p>{{ loading ? 'Cargando historial...' : 'No hay cambios para los filtros seleccionados.' }}</p>
+      </div>
+    </ng-template>
+  </section>
+</div>

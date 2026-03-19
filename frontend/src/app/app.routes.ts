@@ -7,6 +7,7 @@ import { LoginPageComponent } from './pages/login/login.page';
 import { PlanningPageComponent } from './pages/planning/planning.page';
 import { PlanningCycleDetailPageComponent } from './pages/planning-cycle-detail/planning-cycle-detail.page';
 import { PlanningCycleEditorPageComponent } from './pages/planning-cycle-editor/planning-cycle-editor.page';
+import { PlanningChangeLogPageComponent } from './pages/planning-change-log/planning-change-log.page';
 import { PlanningOfferSectionsPageComponent } from './pages/planning-offer-sections/planning-offer-sections.page';
 import { SecurityPageComponent } from './pages/security/security.page';
 import { SettingsPageComponent } from './pages/settings/settings.page';
@@ -35,34 +36,49 @@ export const routes: Routes = [
     data: { requiredWindow: 'window.planning' },
   },
   {
+    path: 'planning/change-log',
+    component: PlanningChangeLogPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.planning',
+      requiredPermission: 'action.planning.change_log.view',
+    },
+  },
+  {
     path: 'planning/offers/:offerId/sections',
     component: PlanningOfferSectionsPageComponent,
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.planning' },
   },
   {
-    path: 'conflicts',
+    path: 'planning/conflicts',
     component: ConflictsPageComponent,
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.conflicts' },
   },
   {
-    path: 'audit',
+    path: 'videoconferences/audit',
     component: AuditPageComponent,
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.audit' },
   },
   {
-    path: 'settings',
+    path: 'integrations/sync',
     component: SettingsPageComponent,
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.settings' },
   },
   {
-    path: 'security',
+    path: 'admin/security/users',
     component: SecurityPageComponent,
     canActivate: [permissionGuard],
-    data: { requiredPermission: 'action.users.manage' },
+    data: { requiredPermission: 'action.users.manage', securityView: 'users' },
+  },
+  {
+    path: 'admin/security/roles',
+    component: SecurityPageComponent,
+    canActivate: [permissionGuard],
+    data: { requiredPermission: 'action.users.manage', securityView: 'roles' },
   },
   {
     path: 'class-detail/:id',
@@ -76,4 +92,9 @@ export const routes: Routes = [
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.videoconferences' },
   },
+  { path: 'conflicts', pathMatch: 'full', redirectTo: 'planning/conflicts' },
+  { path: 'audit', pathMatch: 'full', redirectTo: 'videoconferences/audit' },
+  { path: 'settings', pathMatch: 'full', redirectTo: 'integrations/sync' },
+  { path: 'admin/security', pathMatch: 'full', redirectTo: 'admin/security/users' },
+  { path: 'security', pathMatch: 'full', redirectTo: 'admin/security/users' },
 ];

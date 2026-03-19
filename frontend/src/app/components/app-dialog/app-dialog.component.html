@@ -1,0 +1,29 @@
+<ng-container *ngIf="dialog$ | async as dialog">
+  <div class="dialog-backdrop">
+    <section class="dialog-card" [ngClass]="'tone-' + dialog.tone" (click)="$event.stopPropagation()">
+      <div class="dialog-head">
+        <p class="dialog-kicker">{{ dialog.kind === 'confirm' ? 'Confirmacion' : 'Mensaje del sistema' }}</p>
+        <h3>{{ dialog.title }}</h3>
+      </div>
+
+      <p class="dialog-message">{{ dialog.message }}</p>
+
+      <div class="dialog-actions">
+        <button
+          *ngIf="dialog.kind === 'confirm'"
+          type="button"
+          class="btn btn-secondary"
+          (click)="cancel()">
+          {{ dialog.cancelLabel }}
+        </button>
+        <button
+          type="button"
+          class="btn"
+          [ngClass]="dialog.tone === 'danger' ? 'btn-danger' : 'btn-primary'"
+          (click)="accept()">
+          {{ dialog.confirmLabel }}
+        </button>
+      </div>
+    </section>
+  </div>
+</ng-container>

@@ -70,6 +70,27 @@ Payload para cookie/sesion:
 La sesion se valida contra cada fuente y se marca como `ACTIVE`, `EXPIRED` o `ERROR`.
 Si el backend detecta redireccion a login/401/403, se considera cookie vencida y se pide renovacion.
 
+Para `AULAVIRTUAL` tambien puedes activar renovacion automatica por login desde `backend/.env`:
+
+```env
+AULA_VIRTUAL_AUTO_LOGIN_ENABLED=true
+AULA_VIRTUAL_LOGIN_URL=https://aulavirtual2.autonomadeica.edu.pe/account/login?ReturnUrl=%2F
+AULA_VIRTUAL_USERNAME=tu_usuario
+AULA_VIRTUAL_PASSWORD=tu_password
+AULA_VIRTUAL_LOGIN_USERNAME_FIELD=username
+AULA_VIRTUAL_LOGIN_PASSWORD_FIELD=password
+AULA_VIRTUAL_LOGIN_RETURN_URL_FIELD=ReturnUrl
+AULA_VIRTUAL_LOGIN_RETURN_URL_VALUE=/
+```
+
+Cuando la validacion detecta sesion vencida o faltante para `AULAVIRTUAL`, el backend intenta:
+
+- cargar la pagina de login
+- recoger cookies e inputs ocultos
+- ejecutar el login
+- capturar `LAUXAUTH`
+- guardar la nueva sesion automaticamente
+
 Payload para ejecutar sincronizacion:
 
 ```json

@@ -8,7 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
+import { ACTION_PERMISSIONS, WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { CurrentAuthUser } from '../auth/current-auth-user.decorator';
 import { AuthService } from '../auth/auth.service';
 import { RequirePermissions } from '../auth/permissions.decorator';
@@ -17,11 +17,13 @@ import {
   BulkAssignClassroomDto,
   BulkAssignTeacherDto,
   BulkDuplicateDto,
+  BulkSubmitPlanningPlanReviewDto,
   CreatePlanningCyclePlanRuleDto,
   CreatePlanningOfferDto,
   CreatePlanningSectionDto,
   CreatePlanningSubsectionDto,
   CreatePlanningSubsectionScheduleDto,
+  ApprovePlanningPlanDto,
   CreateClassGroupDto,
   CreateClassGroupTeacherDto,
   CreateClassMeetingDto,
@@ -29,6 +31,8 @@ import {
   CreateClassTeacherDto,
   CreateCourseSectionHourRequirementDto,
   UpdatePlanningCyclePlanRuleDto,
+  RequestPlanningPlanCorrectionDto,
+  SubmitPlanningPlanReviewDto,
   UpdatePlanningOfferDto,
   UpdatePlanningSectionDto,
   UpdatePlanningSubsectionDto,
@@ -132,7 +136,69 @@ export class PlanningController {
     @Body() dto: CreatePlanningCyclePlanRuleDto,
   ) {
     this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
-    return this.planningManualService.createPlanRule(dto);
+    return this.planningManualService.createPlanRule(idActor(authUser), dto);
+  }
+
+  @Post('plan-rules/:id/submit-review')
+  @RequirePermissions(ACTION_PERMISSIONS.PLANNING_PLAN_SUBMIT_REVIEW)
+  async submitPlanRuleReview(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: SubmitPlanningPlanReviewDto,
+  ) {
+    const current = await this.planningManualService.listPlanRules();
+    const rule = current.find((item) => item.id === id);
+    if (rule) {
+      this.authService.assertScopeAccess(authUser, rule.faculty_id ?? null, rule.academic_program_id ?? null);
+    }
+    return this.planningManualService.submitPlanRuleReview(idActor(authUser), id, dto.review_comment);
+  }
+
+  @Post('plan-rules/submit-review-bulk')
+  @RequirePermissions(ACTION_PERMISSIONS.PLANNING_PLAN_SUBMIT_REVIEW)
+  async submitPlanRulesReviewBulk(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Body() dto: BulkSubmitPlanningPlanReviewDto,
+  ) {
+    const rules = await Promise.all(dto.ids.map((id) => this.planningManualService.getPlanRule(id)));
+    rules.forEach((rule) => {
+      this.authService.assertScopeAccess(authUser, rule.faculty_id ?? null, rule.academic_program_id ?? null);
+    });
+    return this.planningManualService.submitPlanRulesReviewBulk(
+      idActor(authUser),
+      dto.ids,
+      dto.review_comment,
+    );
+  }
+
+  @Post('plan-rules/:id/approve')
+  @RequirePermissions(ACTION_PERMISSIONS.PLANNING_PLAN_REVIEW_DECIDE)
+  async approvePlanRule(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: ApprovePlanningPlanDto,
+  ) {
+    const current = await this.planningManualService.listPlanRules();
+    const rule = current.find((item) => item.id === id);
+    if (rule) {
+      this.authService.assertScopeAccess(authUser, rule.faculty_id ?? null, rule.academic_program_id ?? null);
+    }
+    return this.planningManualService.approvePlanRule(idActor(authUser), id, dto.review_comment);
+  }
+
+  @Post('plan-rules/:id/request-correction')
+  @RequirePermissions(ACTION_PERMISSIONS.PLANNING_PLAN_REVIEW_DECIDE)
+  async requestPlanRuleCorrection(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: RequestPlanningPlanCorrectionDto,
+  ) {
+    const current = await this.planningManualService.listPlanRules();
+    const rule = current.find((item) => item.id === id);
+    if (rule) {
+      this.authService.assertScopeAccess(authUser, rule.faculty_id ?? null, rule.academic_program_id ?? null);
+    }
+    return this.planningManualService.requestPlanRuleCorrection(idActor(authUser), id, dto.review_comment);
   }
 
   @Patch('plan-rules/:id')
@@ -149,7 +215,7 @@ export class PlanningController {
     if (dto.faculty_id || dto.academic_program_id) {
       this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
     }
-    return this.planningManualService.updatePlanRule(id, dto);
+    return this.planningManualService.updatePlanRule(idActor(authUser), id, dto);
   }
 
   @Delete('plan-rules/:id')
@@ -162,7 +228,7 @@ export class PlanningController {
     if (rule) {
       this.authService.assertScopeAccess(authUser, rule.faculty_id ?? null, rule.academic_program_id ?? null);
     }
-    return this.planningManualService.deletePlanRule(id);
+    return this.planningManualService.deletePlanRule(idActor(authUser), id);
   }
 
   @Get('course-candidates')
@@ -185,6 +251,21 @@ export class PlanningController {
       academic_program_id: academicProgramId,
       cycle: cycle ? Number(cycle) : undefined,
       study_plan_id: studyPlanId,
+    }).then((result) => {
+      const resolvedFacultyId =
+        result.plan_rule?.faculty_id ??
+        facultyId ??
+        result.study_plan?.faculty_id ??
+        null;
+      const resolvedProgramId =
+        result.plan_rule?.academic_program_id ??
+        academicProgramId ??
+        result.study_plan?.academic_program_id ??
+        null;
+      if (resolvedFacultyId || resolvedProgramId) {
+        this.authService.assertScopeAccess(authUser, resolvedFacultyId, resolvedProgramId);
+      }
+      return result;
     });
   }
 
@@ -194,7 +275,7 @@ export class PlanningController {
     @Body() dto: CreatePlanningOfferDto,
   ) {
     this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
-    return this.planningManualService.createOffer(dto);
+    return this.planningManualService.createOffer(idActor(authUser), dto);
   }
 
   @Get('offers')
@@ -243,7 +324,7 @@ export class PlanningController {
   ) {
     const offer = await this.planningManualService.getOffer(id);
     this.authService.assertScopeAccess(authUser, offer.faculty_id ?? null, offer.academic_program_id ?? null);
-    return this.planningManualService.updateOffer(id, dto);
+    return this.planningManualService.updateOffer(idActor(authUser), id, dto);
   }
 
   @Post('offers/:id/sections')
@@ -254,7 +335,7 @@ export class PlanningController {
   ) {
     const offer = await this.planningManualService.getOffer(id);
     this.authService.assertScopeAccess(authUser, offer.faculty_id ?? null, offer.academic_program_id ?? null);
-    return this.planningManualService.createSection(id, dto);
+    return this.planningManualService.createSection(idActor(authUser), id, dto);
   }
 
   @Get('sections/:id')
@@ -283,7 +364,21 @@ export class PlanningController {
       section.offer?.faculty_id ?? null,
       section.offer?.academic_program_id ?? null,
     );
-    return this.planningManualService.updateSection(id, dto);
+    return this.planningManualService.updateSection(idActor(authUser), id, dto);
+  }
+
+  @Delete('sections/:id')
+  async deleteSection(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+  ) {
+    const section = await this.planningManualService.getSection(id);
+    this.authService.assertScopeAccess(
+      authUser,
+      section.offer?.faculty_id ?? null,
+      section.offer?.academic_program_id ?? null,
+    );
+    return this.planningManualService.deleteSection(idActor(authUser), id);
   }
 
   @Post('sections/:id/subsections')
@@ -298,7 +393,7 @@ export class PlanningController {
       section.offer?.faculty_id ?? null,
       section.offer?.academic_program_id ?? null,
     );
-    return this.planningManualService.createSubsection(id, dto);
+    return this.planningManualService.createSubsection(idActor(authUser), id, dto);
   }
 
   @Get('subsections/:id')
@@ -327,7 +422,7 @@ export class PlanningController {
       subsection.offer?.faculty_id ?? null,
       subsection.offer?.academic_program_id ?? null,
     );
-    return this.planningManualService.updateSubsection(id, dto);
+    return this.planningManualService.updateSubsection(idActor(authUser), id, dto);
   }
 
   @Post('subsections/:id/schedules')
@@ -342,7 +437,7 @@ export class PlanningController {
         subsection.offer?.faculty_id ?? null,
         subsection.offer?.academic_program_id ?? null,
       );
-      return this.planningManualService.createSubsectionSchedule(id, dto);
+      return this.planningManualService.createSubsectionSchedule(idActor(authUser), id, dto);
     });
   }
 
@@ -358,7 +453,7 @@ export class PlanningController {
         schedule.offer?.faculty_id ?? null,
         schedule.offer?.academic_program_id ?? null,
       );
-      return this.planningManualService.updateSubsectionSchedule(id, dto);
+      return this.planningManualService.updateSubsectionSchedule(idActor(authUser), id, dto);
     });
   }
 
@@ -373,7 +468,7 @@ export class PlanningController {
         schedule.offer?.faculty_id ?? null,
         schedule.offer?.academic_program_id ?? null,
       );
-      return this.planningManualService.deleteSubsectionSchedule(id);
+      return this.planningManualService.deleteSubsectionSchedule(idActor(authUser), id);
     });
   }
 
@@ -393,11 +488,32 @@ export class PlanningController {
   }
 
   @Get('change-log')
+  @RequirePermissions(ACTION_PERMISSIONS.PLANNING_CHANGE_LOG_VIEW)
   listChangeLog(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('entity_type') entityType?: string,
     @Query('entity_id') entityId?: string,
+    @Query('action') action?: string,
+    @Query('offer_id') offerId?: string,
+    @Query('changed_by') changedBy?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.planningManualService.listChangeLog(entityType, entityId);
+    return this.planningManualService
+      .listChangeLog({
+        entity_type: entityType,
+        entity_id: entityId,
+        action,
+        offer_id: offerId,
+        changed_by: changedBy,
+        from,
+        to,
+        limit: limit ? Number(limit) : undefined,
+      })
+      .then((rows) =>
+        this.authService.filterByScope(authUser, rows, (item: any) => scopeFromChangeLog(item)),
+      );
   }
 
   @Get('class-offerings')
@@ -652,4 +768,21 @@ export class PlanningController {
       return false;
     }
   }
+}
+
+function idActor(authUser: AuthenticatedRequestUser) {
+  return {
+    user_id: authUser.id,
+    username: authUser.username,
+    display_name: authUser.display_name,
+  };
+}
+
+function scopeFromChangeLog(item: any) {
+  const context = item?.context_json ?? {};
+  const snapshot = item?.after_json ?? item?.before_json ?? {};
+  return {
+    faculty_id: context.faculty_id ?? snapshot.faculty_id ?? null,
+    academic_program_id: context.academic_program_id ?? snapshot.academic_program_id ?? null,
+  };
 }

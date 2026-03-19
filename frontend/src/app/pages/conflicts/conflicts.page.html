@@ -1,35 +1,134 @@
-<section class="page">
-  <h1>Deteccion de cruces</h1>
-  <div class="toolbar">
-    <label>Semester ID <input [(ngModel)]="semesterId" placeholder="UUID semester" /></label>
-    <button (click)="detectConflicts()">Detectar y guardar snapshot</button>
-    <button (click)="loadConflicts()">Recargar lista</button>
-  </div>
+<div class="conflicts-shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Supervision de cruces</p>
+      <h1>Deteccion de cruces</h1>
+      <p class="hero-copy">
+        Revisa por periodo los cruces de horario mas importantes: docente y seccion.
+      </p>
+    </div>
+    <div class="hero-status">
+      <span class="status-dot" [class.status-dot-live]="refreshing"></span>
+      <span>{{ refreshing ? 'Actualizando cruces...' : 'Actualizacion automatica por periodo' }}</span>
+    </div>
+  </header>
 
-  <pre *ngIf="lastRun">{{ lastRun | json }}</pre>
+  <section class="filters-card">
+    <label class="field">
+      <span>Periodo</span>
+      <select [(ngModel)]="semesterId" (ngModelChange)="onSemesterChange()" [disabled]="loading || refreshing">
+        <option *ngFor="let semester of semesters" [value]="semester.id">
+          {{ semester.name }}
+        </option>
+      </select>
+    </label>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Tipo</th>
-        <th>Severidad</th>
-        <th>Overlap min</th>
-        <th>Teacher</th>
-        <th>Classroom</th>
-        <th>Meeting A</th>
-        <th>Meeting B</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr *ngFor="let conflict of conflicts">
-        <td>{{ conflict.conflict_type }}</td>
-        <td>{{ conflict.severity }}</td>
-        <td>{{ conflict.overlap_minutes }}</td>
-        <td>{{ conflict.teacher_id }}</td>
-        <td>{{ conflict.classroom_id }}</td>
-        <td>{{ conflict.meeting_a_id }}</td>
-        <td>{{ conflict.meeting_b_id }}</td>
-      </tr>
-    </tbody>
-  </table>
-</section>
+    <button
+      type="button"
+      class="summary-card summary-card-inline"
+      [ngClass]="{ active: activeView === 'TEACHER_OVERLAP' }"
+      (click)="setActiveView('TEACHER_OVERLAP')">
+      <div class="summary-head">
+        <span class="summary-label">Cruce de docente</span>
+        <strong>{{ teacherConflicts.length }}</strong>
+      </div>
+      <small>Docentes con bloques superpuestos en el periodo.</small>
+    </button>
+
+    <button
+      type="button"
+      class="summary-card summary-card-inline"
+      [ngClass]="{ active: activeView === 'SECTION_OVERLAP' }"
+      (click)="setActiveView('SECTION_OVERLAP')">
+      <div class="summary-head">
+        <span class="summary-label">Cruce de seccion</span>
+        <strong>{{ sectionConflicts.length }}</strong>
+      </div>
+      <small>Secciones con reuniones que se pisan dentro del mismo curso.</small>
+    </button>
+
+    <div class="filters-meta">
+      <span>Ultima actualizacion: {{ formatUpdatedAt(lastUpdatedAt) }}</span>
+    </div>
+  </section>
+
+  <p *ngIf="message" class="flash success">{{ message }}</p>
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Vista actual</p>
+        <h2>{{ activeViewTitle }}</h2>
+        <p class="section-copy">{{ activeViewDescription }}</p>
+      </div>
+      <span class="pill" [ngClass]="severityClass(activeRows[0]?.severity)">
+        {{ activeRows.length }} casos
+      </span>
+    </div>
+
+    <div class="table-wrap" *ngIf="activeRows.length > 0; else emptyState">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Afectado</th>
+            <th>Bloque cruzado</th>
+            <th>Registro A</th>
+            <th>Registro B</th>
+            <th>Severidad</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of activeRows">
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.affected_label || 'Sin referencia' }}</strong>
+                <span>{{ row.academic_program_name || 'Programa sin referencia' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ overlapWindowLabel(row) }}</strong>
+                <span>{{ row.overlap_minutes }} min de cruce</span>
+              </div>
+            </td>
+            <td>
+              <div class="meeting-card">
+                <strong>{{ row.meeting_a?.course_label || row.meeting_a?.summary || 'Sin detalle' }}</strong>
+                <span>{{ row.meeting_a?.section_name || 'Sin seccion' }} · {{ row.meeting_a?.group_code || 'Sin grupo' }}</span>
+                <span>{{ meetingScheduleLabel(row.meeting_a) }}</span>
+                <span *ngIf="row.meeting_a?.classroom_name">{{ row.meeting_a.classroom_name }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="meeting-card">
+                <strong>{{ row.meeting_b?.course_label || row.meeting_b?.summary || 'Sin detalle' }}</strong>
+                <span>{{ row.meeting_b?.section_name || 'Sin seccion' }} · {{ row.meeting_b?.group_code || 'Sin grupo' }}</span>
+                <span>{{ meetingScheduleLabel(row.meeting_b) }}</span>
+                <span *ngIf="row.meeting_b?.classroom_name">{{ row.meeting_b.classroom_name }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack align-end">
+                <span class="pill" [ngClass]="severityClass(row.severity)">{{ formatSeverity(row.severity) }}</span>
+                <span>{{ formatUpdatedAt(row.detected_at) }}</span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ng-template #emptyState>
+      <div class="empty-block">
+        <p>
+          {{
+            loading || refreshing
+              ? 'Actualizando cruces del periodo seleccionado...'
+              : 'No se detectaron cruces para esta vista en el periodo seleccionado.'
+          }}
+        </p>
+      </div>
+    </ng-template>
+  </section>
+</div>

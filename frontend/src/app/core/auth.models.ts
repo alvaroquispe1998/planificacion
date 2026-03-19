@@ -10,7 +10,10 @@ export type PermissionCode =
   | 'action.users.manage'
   | 'action.roles.manage'
   | 'action.permissions.manage'
-  | 'action.settings.manage';
+  | 'action.settings.manage'
+  | 'action.planning.change_log.view'
+  | 'action.planning.plan.submit_review'
+  | 'action.planning.plan.review_decide';
 
 export type AccessScope = {
   assignment_id: string;

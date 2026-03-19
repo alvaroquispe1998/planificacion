@@ -129,6 +129,22 @@ export class ApiService {
     return this.http.delete<any>(`${this.baseUrl}/planning/plan-rules/${id}`);
   }
 
+  submitPlanningPlanRuleReview(id: string, payload: any = {}) {
+    return this.http.post<any>(`${this.baseUrl}/planning/plan-rules/${id}/submit-review`, payload);
+  }
+
+  submitPlanningPlanRulesReviewBulk(payload: any = {}) {
+    return this.http.post<any>(`${this.baseUrl}/planning/plan-rules/submit-review-bulk`, payload);
+  }
+
+  approvePlanningPlanRule(id: string, payload: any = {}) {
+    return this.http.post<any>(`${this.baseUrl}/planning/plan-rules/${id}/approve`, payload);
+  }
+
+  requestPlanningPlanRuleCorrection(id: string, payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/plan-rules/${id}/request-correction`, payload);
+  }
+
   listPlanningCourseCandidates(filters: Record<string, string>) {
     let params = new HttpParams();
     Object.entries(filters).forEach(([key, value]) => {
@@ -173,6 +189,10 @@ export class ApiService {
     return this.http.patch<any>(`${this.baseUrl}/planning/sections/${id}`, payload);
   }
 
+  deletePlanningSection(id: string) {
+    return this.http.delete<any>(`${this.baseUrl}/planning/sections/${id}`);
+  }
+
   createPlanningSubsection(sectionId: string, payload: any) {
     return this.http.post<any>(`${this.baseUrl}/planning/sections/${sectionId}/subsections`, payload);
   }
@@ -208,14 +228,13 @@ export class ApiService {
     return this.http.get<any[]>(`${this.baseUrl}/planning/conflicts`, { params });
   }
 
-  listPlanningChangeLog(entityType?: string, entityId?: string) {
+  listPlanningChangeLog(filters: Record<string, string | number | undefined> = {}) {
     let params = new HttpParams();
-    if (entityType) {
-      params = params.set('entity_type', entityType);
-    }
-    if (entityId) {
-      params = params.set('entity_id', entityId);
-    }
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}` !== '') {
+        params = params.set(key, String(value));
+      }
+    });
     return this.http.get<any[]>(`${this.baseUrl}/planning/change-log`, { params });
   }
 

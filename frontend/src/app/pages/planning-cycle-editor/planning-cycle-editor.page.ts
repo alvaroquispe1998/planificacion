@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { finalize, forkJoin } from 'rxjs';
 import { ApiService } from '../../core/api.service';
+import { AuthService } from '../../core/auth.service';
 
 type PlanningEditorFilters = {
   semester_id: string;
@@ -11,6 +12,17 @@ type PlanningEditorFilters = {
   faculty_id: string;
   academic_program_id: string;
   cycle: string;
+};
+
+type WorkflowActionType = 'SUBMIT_REVIEW' | 'APPROVE' | 'REQUEST_CORRECTION';
+
+type WorkflowTimelineEntry = {
+  id: string;
+  title: string;
+  status: string;
+  actor: string;
+  changed_at: string;
+  comment: string | null;
 };
 
 @Component({
@@ -26,6 +38,17 @@ export class PlanningCycleEditorPageComponent implements OnInit {
   message = '';
   error = '';
   showRules = true;
+  workflowDialog = {
+    open: false,
+    action: 'SUBMIT_REVIEW' as WorkflowActionType,
+    comment: '',
+  };
+  timelineDialog = {
+    open: false,
+    loading: false,
+    entries: [] as WorkflowTimelineEntry[],
+    error: '',
+  };
 
   filters: PlanningEditorFilters = {
     semester_id: '',
@@ -91,6 +114,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     private readonly route: ActivatedRoute,
     private readonly router: Router,
     private readonly cdr: ChangeDetectorRef,
+    readonly auth: AuthService,
   ) {}
 
   ngOnInit(): void {
@@ -196,6 +220,27 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     return Boolean(this.currentPlanRule?.id);
   }
 
+  get isWorkflowReadOnly() {
+    return ['IN_REVIEW', 'APPROVED'].includes(this.currentPlanRule?.workflow_status ?? '');
+  }
+
+  get canSubmitReview() {
+    return (
+      Boolean(this.currentPlanRule?.id) &&
+      this.auth.hasPermission('action.planning.plan.submit_review') &&
+      ['DRAFT', 'IN_CORRECTION'].includes(this.currentPlanRule?.workflow_status ?? 'DRAFT') &&
+      this.planReviewReady
+    );
+  }
+
+  get canReviewDecide() {
+    return (
+      Boolean(this.currentPlanRule?.id) &&
+      this.auth.hasPermission('action.planning.plan.review_decide') &&
+      this.currentPlanRule?.workflow_status === 'IN_REVIEW'
+    );
+  }
+
   get selectedSection() {
     return this.selectedOffer?.sections?.find((item: any) => item.id === this.selectedSectionId) ?? null;
   }
@@ -220,6 +265,27 @@ export class PlanningCycleEditorPageComponent implements OnInit {
       this.filters.cycle ??
       'Selecciona ciclo'
     );
+  }
+
+  get planReviewReady() {
+    return (
+      this.candidates.length > 0 &&
+      this.candidates.every((candidate) => candidate?.has_offer && candidate?.review_ready)
+    );
+  }
+
+  get planReviewProgressLabel() {
+    const total = this.candidates.length;
+    if (total === 0) {
+      return 'Este plan aun no tiene cursos listos para revision.';
+    }
+    const ready = this.candidates.filter(
+      (candidate) => candidate?.has_offer && candidate?.review_ready,
+    ).length;
+    if (ready === total) {
+      return 'Todos los cursos del plan estan listos para revision.';
+    }
+    return `${ready}/${total} cursos listos. Cada curso debe tener al menos una seccion y todas sus subsecciones configuradas.`;
   }
 
   get visiblePlanRules() {
@@ -386,6 +452,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
 
   createPlanRule() {
     if (
+      this.canManageOffers ||
       !this.filters.semester_id ||
       !this.filters.campus_id ||
       !this.filters.faculty_id ||
@@ -433,9 +500,19 @@ export class PlanningCycleEditorPageComponent implements OnInit {
   }
 
   deletePlanRule(ruleId: string) {
+    if (this.isWorkflowReadOnly) {
+      return;
+    }
     this.api.deletePlanningPlanRule(ruleId).subscribe({
-      next: () => {
-        this.message = 'Regla eliminada.';
+      next: (response) => {
+        const deletedOffers = Number(response?.deleted_offer_count ?? 0);
+        const deletedSections = Number(response?.deleted_section_count ?? 0);
+        const deletedSubsections = Number(response?.deleted_subsection_count ?? 0);
+        const deletedSchedules = Number(response?.deleted_schedule_count ?? 0);
+        this.message =
+          deletedOffers > 0 || deletedSections > 0 || deletedSubsections > 0 || deletedSchedules > 0
+            ? `Plan eliminado. Tambien se borraron ${deletedOffers} ofertas, ${deletedSections} secciones, ${deletedSubsections} subsecciones y ${deletedSchedules} horarios.`
+            : 'Plan eliminado.';
         this.cdr.detectChanges();
         this.loadPlanRules();
         this.loadCandidates();
@@ -450,6 +527,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
   createOffer(candidate: any) {
     if (
       !this.canManageOffers ||
+      this.isWorkflowReadOnly ||
       !this.filters.semester_id ||
       !this.filters.campus_id ||
       !this.filters.cycle
@@ -672,8 +750,253 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     };
   }
 
+  offerStatusLabel(status: string | null | undefined) {
+    switch (status) {
+      case 'ACTIVE':
+        return 'Configurado';
+      case 'OBSERVED':
+        return 'Observado';
+      case 'CLOSED':
+        return 'Cerrado';
+      case 'DRAFT':
+        return 'Borrador';
+      case 'SIN_OFERTA':
+        return 'Sin oferta';
+      default:
+        return 'Borrador';
+    }
+  }
+
+  workflowStatusLabel(status: string | null | undefined) {
+    switch (status) {
+      case 'IN_REVIEW':
+        return 'En revision';
+      case 'APPROVED':
+        return 'Aprobado';
+      case 'IN_CORRECTION':
+        return 'En correccion';
+      default:
+        return 'Borrador';
+    }
+  }
+
+  workflowStatusClass(status: string | null | undefined) {
+    return {
+      'status-draft': status === 'DRAFT' || !status,
+      'status-review': status === 'IN_REVIEW',
+      'status-approved': status === 'APPROVED',
+      'status-correction': status === 'IN_CORRECTION',
+    };
+  }
+
+  openWorkflowDialog(action: WorkflowActionType) {
+    this.workflowDialog = {
+      open: true,
+      action,
+      comment: '',
+    };
+  }
+
+  closeWorkflowDialog() {
+    this.workflowDialog = {
+      open: false,
+      action: 'SUBMIT_REVIEW',
+      comment: '',
+    };
+  }
+
+  openTimelineDialog() {
+    if (!this.currentPlanRule?.id) {
+      return;
+    }
+    this.timelineDialog = {
+      open: true,
+      loading: true,
+      entries: [],
+      error: '',
+    };
+    this.api
+      .listPlanningChangeLog({
+        entity_type: 'planning_cycle_plan_rule',
+        entity_id: this.currentPlanRule.id,
+        limit: 30,
+      })
+      .subscribe({
+        next: (rows) => {
+          this.timelineDialog = {
+            ...this.timelineDialog,
+            loading: false,
+            entries: this.buildWorkflowTimeline(rows),
+          };
+          this.cdr.detectChanges();
+        },
+        error: (err: any) => {
+          this.timelineDialog = {
+            ...this.timelineDialog,
+            loading: false,
+            error: err?.error?.message ?? 'No se pudo cargar la linea de tiempo del plan.',
+          };
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  closeTimelineDialog() {
+    this.timelineDialog = {
+      open: false,
+      loading: false,
+      entries: [],
+      error: '',
+    };
+  }
+
+  confirmWorkflowAction() {
+    if (!this.currentPlanRule?.id) {
+      return;
+    }
+    const comment = this.workflowDialog.comment?.trim() || undefined;
+    if (this.workflowDialog.action === 'REQUEST_CORRECTION' && !comment) {
+      this.error = 'Debes ingresar un comentario para mandar a correccion.';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.saving = true;
+    const request =
+      this.workflowDialog.action === 'APPROVE'
+        ? this.api.approvePlanningPlanRule(this.currentPlanRule.id, { review_comment: comment })
+        : this.workflowDialog.action === 'REQUEST_CORRECTION'
+          ? this.api.requestPlanningPlanRuleCorrection(this.currentPlanRule.id, { review_comment: comment })
+          : this.api.submitPlanningPlanRuleReview(this.currentPlanRule.id, { review_comment: comment });
+
+    request
+      .pipe(
+        finalize(() => {
+          this.saving = false;
+        }),
+      )
+      .subscribe({
+        next: () => {
+          this.closeWorkflowDialog();
+          this.message = 'Workflow del plan actualizado.';
+          this.error = '';
+          this.reloadPlanningView();
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.error = err?.error?.message ?? 'No se pudo actualizar el workflow del plan.';
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  workflowActionTitle() {
+    switch (this.workflowDialog.action) {
+      case 'APPROVE':
+        return 'Aprobar plan';
+      case 'REQUEST_CORRECTION':
+        return 'Mandar a correccion';
+      default:
+        return 'Enviar a revision';
+    }
+  }
+
+  workflowActionDescription() {
+    switch (this.workflowDialog.action) {
+      case 'APPROVE':
+        return 'El plan quedara cerrado y solo se mostrara en modo lectura.';
+      case 'REQUEST_CORRECTION':
+        return 'El comentario sera visible y el plan volvera a edicion.';
+      default:
+        return 'El plan se bloqueara para edicion mientras este en revision.';
+    }
+  }
+
   goBackToSummary() {
-    this.router.navigate(['/planning']);
+    this.router.navigate(['/planning'], {
+      queryParams: this.summaryQueryParams(),
+    });
+  }
+
+  timelineTargetLabel() {
+    if (!this.currentPlanRule) {
+      return '';
+    }
+    return `${this.selectedProgram?.name || this.currentPlanRule?.career_name || 'Programa'} · Ciclo ${
+      this.currentPlanRule?.cycle
+    } · ${this.currentPlanRule?.study_plan?.name || this.currentPlanRule?.study_plan_id}`;
+  }
+
+  timelineStatusLabel(status: string | null | undefined) {
+    return this.workflowStatusLabel(status);
+  }
+
+  formatTimelineDate(value: string | null | undefined) {
+    if (!value) {
+      return 'Sin fecha';
+    }
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString('es-PE', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  private buildWorkflowTimeline(rows: any[]): WorkflowTimelineEntry[] {
+    return (Array.isArray(rows) ? rows : [])
+      .filter((row) => this.isWorkflowTimelineRow(row))
+      .map((row) => {
+        const workflowAction = row?.context_json?.workflow_action ?? null;
+        const status = row?.after_json?.workflow_status ?? row?.before_json?.workflow_status ?? 'DRAFT';
+        return {
+          id: row.id,
+          title: this.workflowTimelineTitle(row?.action, workflowAction, status),
+          status,
+          actor: row?.changed_by || 'Sistema',
+          changed_at: row?.changed_at,
+          comment: row?.after_json?.review_comment ?? row?.before_json?.review_comment ?? null,
+        };
+      })
+      .sort((left, right) => new Date(right.changed_at).getTime() - new Date(left.changed_at).getTime());
+  }
+
+  private isWorkflowTimelineRow(row: any) {
+    if (!row) {
+      return false;
+    }
+    if (row.action === 'CREATE') {
+      return true;
+    }
+    if (row?.context_json?.workflow_action) {
+      return true;
+    }
+    return (row?.changes ?? []).some((change: any) => change?.field === 'workflow_status');
+  }
+
+  private workflowTimelineTitle(
+    action: string | null | undefined,
+    workflowAction: string | null | undefined,
+    status: string | null | undefined,
+  ) {
+    if (action === 'CREATE') {
+      return 'Plan creado';
+    }
+    switch (workflowAction) {
+      case 'submit_review':
+        return 'Enviado a revision';
+      case 'approve':
+        return 'Plan aprobado';
+      case 'request_correction':
+        return 'Mandado a correccion';
+      default:
+        return `Workflow actualizado a ${this.timelineStatusLabel(status).toLowerCase()}`;
+    }
   }
 
   private syncAcademicProgramSelection() {
@@ -716,6 +1039,15 @@ export class PlanningCycleEditorPageComponent implements OnInit {
         study_plan_id: this.ruleForm.study_plan_id || null,
       },
     });
+  }
+
+  private summaryQueryParams() {
+    return {
+      semester_id: this.filters.semester_id || null,
+      campus_id: this.filters.campus_id || null,
+      faculty_id: this.filters.faculty_id || null,
+      academic_program_id: this.filters.academic_program_id || null,
+    };
   }
 
   private resetOfferDetail() {

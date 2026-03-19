@@ -30,17 +30,20 @@
   font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  text-align: center;
 }
 
 h1 {
   margin: 0;
   color: #102c52;
   font-size: 1.9rem;
+  text-align: center;
 }
 
 .intro {
   margin: 0;
   color: #5b6c80;
+  text-align: center;
 }
 
 label {

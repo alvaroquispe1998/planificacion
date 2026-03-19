@@ -1,27 +1,16 @@
 <section class="security-panel">
-  <header class="security-hero" *ngIf="showHeader; else compactToolbar">
+  <header class="security-hero" *ngIf="showHeader">
     <div>
       <p class="eyebrow">Seguridad</p>
       <h2>Usuarios, roles y privilegios</h2>
       <p>Administra accesos por ventana y alcance de facultad/carrera.</p>
     </div>
-    <button type="button" class="ghost" (click)="loadData()" [disabled]="isLoading">
-      {{ isLoading ? 'Actualizando...' : 'Refrescar datos' }}
-    </button>
   </header>
-
-  <ng-template #compactToolbar>
-    <div class="compact-toolbar">
-      <button type="button" class="ghost" (click)="loadData()" [disabled]="isLoading">
-        {{ isLoading ? 'Actualizando...' : 'Refrescar datos' }}
-      </button>
-    </div>
-  </ng-template>
 
   <p class="feedback" *ngIf="feedback">{{ feedback }}</p>
   <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
 
-  <div class="security-grid">
+  <div class="security-grid" *ngIf="activeView === 'users'">
     <article class="panel">
       <div class="panel-head">
         <h3>Usuarios</h3>
@@ -125,7 +114,7 @@
               </label>
 
               <p class="scope-empty" *ngIf="!filteredFaculties(assignment).length">
-                No hay facultades que coincidan con la búsqueda.
+                No hay facultades que coincidan con la busqueda.
               </p>
             </div>
           </section>
@@ -134,7 +123,7 @@
             <div class="scope-panel-head">
               <div>
                 <h5>Carreras / Programas</h5>
-                <p>Puedes combinar programas de distintas facultades en la misma asignación.</p>
+                <p>Puedes combinar programas de distintas facultades en la misma asignacion.</p>
               </div>
               <div class="scope-actions">
                 <button type="button" class="ghost mini-ghost" (click)="selectAllPrograms(assignment)">
@@ -165,7 +154,7 @@
               </label>
 
               <p class="scope-empty" *ngIf="!filteredPrograms(assignment).length">
-                No hay programas que coincidan con la búsqueda o las facultades elegidas.
+                No hay programas que coincidan con la busqueda o las facultades elegidas.
               </p>
             </div>
           </section>
@@ -182,7 +171,7 @@
     </article>
   </div>
 
-  <div class="security-grid">
+  <div class="security-grid" *ngIf="activeView === 'roles'">
     <article class="panel">
       <div class="panel-head">
         <h3>Roles</h3>
@@ -229,15 +218,90 @@
         </label>
       </div>
 
-      <div class="permissions-grid">
-        <label class="permission-pill" *ngFor="let permission of permissions">
-          <input
-            type="checkbox"
-            [checked]="rolePermissionIds.has(permission.id)"
-            (change)="toggleRolePermission(permission.id, $any($event.target).checked)"
-          />
-          <span>{{ permission.code }}</span>
-        </label>
+      <div class="permission-summary">
+        <div class="summary-chip">
+          <strong>{{ selectedRolePermissionSummary.windowCount }}</strong>
+          <span>ventanas</span>
+        </div>
+        <div class="summary-chip">
+          <strong>{{ selectedRolePermissionSummary.actionCount }}</strong>
+          <span>acciones</span>
+        </div>
+      </div>
+
+      <section class="permission-section">
+        <div class="permission-section-head">
+          <div>
+            <h4>Ventanas y acciones relacionadas</h4>
+            <p>Si activas una accion, su ventana principal se marca automaticamente.</p>
+          </div>
+        </div>
+
+        <div class="permission-groups">
+          <article class="permission-group-card" *ngFor="let group of windowPermissionGroups">
+            <label class="permission-group-head">
+              <div class="permission-check">
+                <input
+                  type="checkbox"
+                  [checked]="rolePermissionIds.has(group.windowPermission.id)"
+                  (change)="toggleRolePermission(group.windowPermission.id, $any($event.target).checked)"
+                />
+              </div>
+              <div class="permission-copy">
+                <strong>{{ permissionLabel(group.windowPermission) }}</strong>
+                <span>{{ permissionSecondaryLabel(group.windowPermission) }}</span>
+                <small>{{ group.windowPermission.description }}</small>
+              </div>
+            </label>
+
+            <div class="permission-actions" *ngIf="group.actions.length > 0">
+              <label class="permission-action-card" *ngFor="let permission of group.actions">
+                <div class="permission-check">
+                  <input
+                    type="checkbox"
+                    [checked]="rolePermissionIds.has(permission.id)"
+                    (change)="toggleRolePermission(permission.id, $any($event.target).checked)"
+                  />
+                </div>
+                <div class="permission-copy">
+                  <strong>{{ permissionLabel(permission) }}</strong>
+                  <span>{{ permissionSecondaryLabel(permission) }}</span>
+                  <small>{{ permission.description }}</small>
+                </div>
+              </label>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="permission-section" *ngIf="globalActionPermissions.length > 0">
+        <div class="permission-section-head">
+          <div>
+            <h4>Acciones globales</h4>
+            <p>Estas acciones no dependen de una ventana especifica.</p>
+          </div>
+        </div>
+
+        <div class="permission-actions permission-actions-global">
+          <label class="permission-action-card" *ngFor="let permission of globalActionPermissions">
+            <div class="permission-check">
+              <input
+                type="checkbox"
+                [checked]="rolePermissionIds.has(permission.id)"
+                (change)="toggleRolePermission(permission.id, $any($event.target).checked)"
+              />
+            </div>
+            <div class="permission-copy">
+              <strong>{{ permissionLabel(permission) }}</strong>
+              <span>{{ permissionSecondaryLabel(permission) }}</span>
+              <small>{{ permission.description }}</small>
+            </div>
+          </label>
+        </div>
+      </section>
+
+      <div class="permission-help">
+        Marca primero lo que el rol debe ver y luego las acciones que puede ejecutar dentro de cada ventana.
       </div>
 
       <div class="actions">

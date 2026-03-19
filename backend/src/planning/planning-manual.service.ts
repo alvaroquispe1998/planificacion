@@ -70,6 +70,34 @@ type ConfiguredCycleFilters = {
   academic_program_id?: string;
 };
 
+type ChangeLogActor = {
+  user_id?: string | null;
+  username?: string | null;
+  display_name?: string | null;
+};
+
+type ChangeLogFilters = {
+  entity_type?: string;
+  entity_id?: string;
+  action?: string;
+  offer_id?: string;
+  changed_by?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+};
+
+type ChangeLogReferenceMaps = {
+  offers: Map<string, PlanningOfferEntity>;
+  sections: Map<string, PlanningSectionEntity>;
+  subsections: Map<string, PlanningSubsectionEntity>;
+  semesters: Map<string, SemesterEntity>;
+  campuses: Map<string, CampusEntity>;
+  faculties: Map<string, FacultyEntity>;
+  programs: Map<string, AcademicProgramEntity>;
+  studyPlans: Map<string, StudyPlanEntity>;
+};
+
 type PlanningContext = {
   offers: PlanningOfferEntity[];
   sections: PlanningSectionEntity[];
@@ -237,6 +265,51 @@ export class PlanningManualService {
       this.findManyByIds(this.studyPlansRepo, studyPlanIds),
       this.findManyByIds(this.campusesRepo, campusIds),
     ]);
+    const offerConfiguration = await this.buildOfferConfigurationContext(offers.map((item) => item.id));
+    const offerReviewStateById = new Map(
+      offers.map((offer) => [
+        offer.id,
+        this.buildOfferReviewState(
+          offer.id,
+          offerConfiguration.sectionsByOfferId,
+          offerConfiguration.subsectionsBySectionId,
+          offerConfiguration.schedulesBySubsectionId,
+        ),
+      ]),
+    );
+    const planCourses = studyPlanIds.length
+      ? await this.studyPlanCoursesRepo.find({
+          where: { study_plan_id: In(studyPlanIds) },
+          order: { order: 'ASC', course_code: 'ASC' },
+        })
+      : [];
+    const planCourseDetails = planCourses.length
+      ? await this.findManyByField(
+          this.studyPlanCourseDetailsRepo,
+          'study_plan_course_id',
+          planCourses.map((item) => item.id),
+        )
+      : [];
+    const planCourseDetailById = new Map(
+      planCourseDetails.map((item) => [item.study_plan_course_id, item] as const),
+    );
+    const expectedCourseCountByRuleKey = new Map<string, number>();
+    for (const course of planCourses) {
+      const detail = planCourseDetailById.get(course.id) ?? null;
+      const resolvedCycle =
+        detail?.academic_year ?? extractCycleFromLabel(course.year_label) ?? null;
+      if (!resolvedCycle) {
+        continue;
+      }
+      const key = configuredCycleKey({
+        semester_id: '',
+        campus_id: '',
+        academic_program_id: '',
+        study_plan_id: course.study_plan_id,
+        cycle: resolvedCycle,
+      });
+      expectedCourseCountByRuleKey.set(key, (expectedCourseCountByRuleKey.get(key) ?? 0) + 1);
+    }
 
     const semesterMap = mapById(semesters);
     const programMap = mapById(programs);
@@ -281,6 +354,19 @@ export class PlanningManualService {
         const rowCampuses = rowCampusIds
           .map((id) => campusMap.get(id))
           .filter((item): item is CampusEntity => Boolean(item));
+        const readyCourseCount = rowOffers.filter(
+          (item) => offerReviewStateById.get(item.id)?.is_ready,
+        ).length;
+        const expectedCourseCount =
+          expectedCourseCountByRuleKey.get(
+            configuredCycleKey({
+              semester_id: '',
+              campus_id: '',
+              academic_program_id: '',
+              study_plan_id: rule.study_plan_id,
+              cycle,
+            }),
+          ) ?? 0;
         return {
           id: rule.id,
           semester_id: rule.semester_id,
@@ -290,6 +376,14 @@ export class PlanningManualService {
           career_name: rule.career_name ?? null,
           study_plan_id: rule.study_plan_id,
           cycle,
+          workflow_status: rule.workflow_status,
+          submitted_at: rule.submitted_at,
+          submitted_by_user_id: rule.submitted_by_user_id,
+          submitted_by: rule.submitted_by,
+          reviewed_at: rule.reviewed_at,
+          reviewed_by_user_id: rule.reviewed_by_user_id,
+          reviewed_by: rule.reviewed_by,
+          review_comment: rule.review_comment,
           semester: semesterMap.get(rule.semester_id) ?? null,
           faculty: facultyMap.get(rule.faculty_id ?? '') ?? null,
           academic_program: programMap.get(rule.academic_program_id) ?? null,
@@ -301,6 +395,12 @@ export class PlanningManualService {
             : 'Sin local',
           primary_campus_id: rowCampusIds[0] ?? null,
           offer_count: rowOffers.length,
+          expected_course_count: expectedCourseCount,
+          ready_course_count: readyCourseCount,
+          review_ready:
+            expectedCourseCount > 0 &&
+            rowOffers.length === expectedCourseCount &&
+            readyCourseCount === expectedCourseCount,
         };
       })
       .filter((row) =>
@@ -350,7 +450,7 @@ export class PlanningManualService {
     return this.enrichPlanRules(rules);
   }
 
-  async createPlanRule(dto: CreatePlanningCyclePlanRuleDto) {
+  async createPlanRule(actor: ChangeLogActor | null | undefined, dto: CreatePlanningCyclePlanRuleDto) {
     await this.ensureDefaultCatalogs();
     await this.ensureStudyPlanMatchesContext(
       dto.study_plan_id,
@@ -370,12 +470,28 @@ export class PlanningManualService {
       cycle: dto.cycle,
       study_plan_id: dto.study_plan_id,
       is_active: dto.is_active ?? true,
+      workflow_status: 'DRAFT',
+      submitted_at: null,
+      submitted_by_user_id: null,
+      submitted_by: null,
+      reviewed_at: null,
+      reviewed_by_user_id: null,
+      reviewed_by: null,
+      review_comment: null,
       created_at: now,
       updated_at: now,
     });
     const saved = await this.planRulesRepo.save(entity);
-    await this.logChange('planning_cycle_plan_rule', saved.id, 'CREATE', null, saved);
-    const offerSync = await this.ensureCycleOffersForRule(saved);
+    await this.logChange(
+      'planning_cycle_plan_rule',
+      saved.id,
+      'CREATE',
+      null,
+      saved,
+      this.buildPlanRuleLogContext(saved),
+      actor,
+    );
+    const offerSync = await this.ensureCycleOffersForRule(saved, actor);
     return {
       ...(await this.enrichPlanRule(saved)),
       created_offer_count: offerSync.created,
@@ -384,8 +500,9 @@ export class PlanningManualService {
     };
   }
 
-  async updatePlanRule(id: string, dto: UpdatePlanningCyclePlanRuleDto) {
+  async updatePlanRule(actor: ChangeLogActor | null | undefined, id: string, dto: UpdatePlanningCyclePlanRuleDto) {
     const current = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
+    this.ensurePlanRuleEditable(current);
     const next = {
       ...current,
       ...dto,
@@ -400,15 +517,179 @@ export class PlanningManualService {
     await this.ensureNoOverlappingRule(next, id);
     await this.planRulesRepo.save(next);
     const saved = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
-    await this.logChange('planning_cycle_plan_rule', id, 'UPDATE', current, saved);
+    await this.logChange(
+      'planning_cycle_plan_rule',
+      id,
+      'UPDATE',
+      current,
+      saved,
+      this.buildPlanRuleLogContext(saved),
+      actor,
+    );
     return this.enrichPlanRule(saved);
   }
 
-  async deletePlanRule(id: string) {
+  async deletePlanRule(actor: ChangeLogActor | null | undefined, id: string) {
     const current = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
-    await this.planRulesRepo.delete({ id });
-    await this.logChange('planning_cycle_plan_rule', id, 'DELETE', current, null);
-    return { deleted: true, id };
+    this.ensurePlanRuleEditable(current);
+    const deletedHierarchy = await this.deletePlanRuleHierarchy(current, actor);
+    await this.logChange(
+      'planning_cycle_plan_rule',
+      id,
+      'DELETE',
+      current,
+      null,
+      this.buildPlanRuleLogContext(current),
+      actor,
+    );
+    await this.rebuildConflictsForSemester(current.semester_id, actor);
+    return {
+      deleted: true,
+      id,
+      ...deletedHierarchy,
+    };
+  }
+
+  async getPlanRule(id: string) {
+    const rule = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
+    return this.enrichPlanRule(rule);
+  }
+
+  async submitPlanRuleReview(
+    actor: ChangeLogActor | null | undefined,
+    id: string,
+    reviewComment?: string | null,
+  ) {
+    const current = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
+    if (!['DRAFT', 'IN_CORRECTION'].includes(current.workflow_status)) {
+      throw new BadRequestException('Solo puedes enviar a revision planes en borrador o en correccion.');
+    }
+    await this.assertPlanRuleReadyForReview(current);
+    const next = this.planRulesRepo.create({
+      ...current,
+      workflow_status: 'IN_REVIEW',
+      submitted_at: new Date(),
+      submitted_by_user_id: actor?.user_id ?? null,
+      submitted_by: actor?.display_name || actor?.username || 'SYSTEM',
+      review_comment: normalizeOptionalComment(reviewComment),
+      updated_at: new Date(),
+    });
+    await this.planRulesRepo.save(next);
+    const saved = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
+    await this.logChange(
+      'planning_cycle_plan_rule',
+      id,
+      'UPDATE',
+      current,
+      saved,
+      { ...this.buildPlanRuleLogContext(saved), workflow_action: 'submit_review' },
+      actor,
+    );
+    return this.enrichPlanRule(saved);
+  }
+
+  async submitPlanRulesReviewBulk(
+    actor: ChangeLogActor | null | undefined,
+    ids: string[],
+    reviewComment?: string | null,
+  ) {
+    const uniqueRuleIds = uniqueIds(ids);
+    if (uniqueRuleIds.length === 0) {
+      throw new BadRequestException('Debes indicar al menos un plan para enviar a revision.');
+    }
+
+    const currentRules = await this.planRulesRepo.find({
+      where: { id: In(uniqueRuleIds) },
+      order: { cycle: 'ASC', created_at: 'ASC' },
+    });
+    if (currentRules.length !== uniqueRuleIds.length) {
+      throw new NotFoundException('Uno o mas planes ya no existen.');
+    }
+
+    const eligibleRules = currentRules.filter((item) =>
+      ['DRAFT', 'IN_CORRECTION'].includes(item.workflow_status),
+    );
+    if (eligibleRules.length === 0) {
+      throw new BadRequestException(
+        'No hay planes elegibles para enviar a revision en la seleccion actual.',
+      );
+    }
+
+    const updated = [];
+    for (const rule of eligibleRules) {
+      updated.push(await this.submitPlanRuleReview(actor, rule.id, reviewComment));
+    }
+
+    return {
+      submitted_count: updated.length,
+      skipped_count: currentRules.length - updated.length,
+      submitted_ids: updated.map((item) => item.id),
+      items: updated,
+    };
+  }
+
+  async approvePlanRule(
+    actor: ChangeLogActor | null | undefined,
+    id: string,
+    reviewComment?: string | null,
+  ) {
+    const current = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
+    if (current.workflow_status !== 'IN_REVIEW') {
+      throw new BadRequestException('Solo puedes aprobar planes que estan en revision.');
+    }
+    const next = this.planRulesRepo.create({
+      ...current,
+      workflow_status: 'APPROVED',
+      reviewed_at: new Date(),
+      reviewed_by_user_id: actor?.user_id ?? null,
+      reviewed_by: actor?.display_name || actor?.username || 'SYSTEM',
+      review_comment: normalizeOptionalComment(reviewComment),
+      updated_at: new Date(),
+    });
+    await this.planRulesRepo.save(next);
+    const saved = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
+    await this.logChange(
+      'planning_cycle_plan_rule',
+      id,
+      'UPDATE',
+      current,
+      saved,
+      { ...this.buildPlanRuleLogContext(saved), workflow_action: 'approve' },
+      actor,
+    );
+    return this.enrichPlanRule(saved);
+  }
+
+  async requestPlanRuleCorrection(
+    actor: ChangeLogActor | null | undefined,
+    id: string,
+    reviewComment: string,
+  ) {
+    const current = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
+    if (current.workflow_status !== 'IN_REVIEW') {
+      throw new BadRequestException('Solo puedes mandar a correccion planes que estan en revision.');
+    }
+    const next = this.planRulesRepo.create({
+      ...current,
+      workflow_status: 'IN_CORRECTION',
+      reviewed_at: new Date(),
+      reviewed_by_user_id: actor?.user_id ?? null,
+      reviewed_by: actor?.display_name || actor?.username || 'SYSTEM',
+      review_comment: normalizeRequiredComment(reviewComment),
+      updated_at: new Date(),
+    });
+    await this.planRulesRepo.save(next);
+    const saved = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
+    await this.logChange(
+      'planning_cycle_plan_rule',
+      id,
+      'UPDATE',
+      current,
+      saved,
+      { ...this.buildPlanRuleLogContext(saved), workflow_action: 'request_correction' },
+      actor,
+    );
+    return this.enrichPlanRule(saved);
   }
 
   async listCourseCandidates(filters: CourseCandidateFilters) {
@@ -494,12 +775,24 @@ export class PlanningManualService {
       courses.map((item) => item.id),
     );
     const detailById = new Map(details.map((item) => [item.study_plan_course_id, item]));
-    const offers = await this.offersRepo.find({
-      where: {
-        semester_id: filters.semester_id,
-        campus_id: filters.campus_id ?? undefined,
-      },
-    });
+    const offers = planRule
+      ? await this.offersRepo.find({
+          where: {
+            semester_id: planRule.semester_id,
+            campus_id: planRule.campus_id ?? undefined,
+            academic_program_id: planRule.academic_program_id,
+            study_plan_id: planRule.study_plan_id,
+            cycle: planRule.cycle,
+          },
+        })
+      : [];
+    const offerContext = await this.buildOfferConfigurationContext(offers.map((item) => item.id));
+    const offerReviewStateById = new Map(
+      offers.map((offer) => [
+        offer.id,
+        this.buildOfferReviewState(offer.id, offerContext.sectionsByOfferId, offerContext.subsectionsBySectionId, offerContext.schedulesBySubsectionId),
+      ]),
+    );
     const offerByCourseId = new Map(offers.map((item) => [item.study_plan_course_id, item]));
 
     const candidates = courses
@@ -534,6 +827,7 @@ export class PlanningManualService {
           has_offer: Boolean(offer),
           offer_id: offer?.id ?? null,
           offer_status: offer?.status ?? null,
+          review_ready: offer ? (offerReviewStateById.get(offer.id)?.is_ready ?? false) : false,
         };
       });
 
@@ -546,7 +840,7 @@ export class PlanningManualService {
     };
   }
 
-  async createOffer(dto: CreatePlanningOfferDto) {
+  async createOffer(actor: ChangeLogActor | null | undefined, dto: CreatePlanningOfferDto) {
     await this.ensureDefaultCatalogs();
     await this.ensureStudyPlanMatchesContext(
       dto.study_plan_id,
@@ -554,10 +848,21 @@ export class PlanningManualService {
       dto.faculty_id ?? null,
       dto.cycle,
     );
+    const planRule = await this.findPlanRuleForOfferContext({
+      semester_id: dto.semester_id,
+      campus_id: dto.campus_id,
+      academic_program_id: dto.academic_program_id ?? null,
+      study_plan_id: dto.study_plan_id,
+      cycle: dto.cycle,
+    });
+    this.ensurePlanRuleEditable(planRule);
     const existing = await this.offersRepo.findOne({
       where: {
         semester_id: dto.semester_id,
         campus_id: dto.campus_id || undefined,
+        academic_program_id: dto.academic_program_id ?? undefined,
+        study_plan_id: dto.study_plan_id,
+        cycle: dto.cycle,
         study_plan_course_id: dto.study_plan_course_id,
       },
     });
@@ -607,7 +912,15 @@ export class PlanningManualService {
       updated_at: now,
     });
     const saved = await this.offersRepo.save(entity);
-    await this.logChange('planning_offer', saved.id, 'CREATE', null, saved);
+    await this.logChange(
+      'planning_offer',
+      saved.id,
+      'CREATE',
+      null,
+      saved,
+      this.buildOfferLogContext(saved),
+      actor,
+    );
     return this.getOffer(saved.id);
   }
 
@@ -636,11 +949,22 @@ export class PlanningManualService {
   async getOffer(id: string) {
     const offer = await this.requireEntity(this.offersRepo, id, 'planning_offer');
     const context = await this.buildContext([offer.id]);
-    return this.buildOfferDetail(offer, context);
+    const planRule = await this.findPlanRuleForOfferContext({
+      semester_id: offer.semester_id,
+      campus_id: offer.campus_id,
+      academic_program_id: offer.academic_program_id ?? null,
+      study_plan_id: offer.study_plan_id,
+      cycle: offer.cycle,
+    });
+    return {
+      ...this.buildOfferDetail(offer, context),
+      plan_rule: planRule ? await this.enrichPlanRule(planRule) : null,
+    };
   }
 
-  async updateOffer(id: string, dto: UpdatePlanningOfferDto) {
+  async updateOffer(actor: ChangeLogActor | null | undefined, id: string, dto: UpdatePlanningOfferDto) {
     const current = await this.requireEntity(this.offersRepo, id, 'planning_offer');
+    await this.assertOfferPlanEditable(current);
     const next = this.offersRepo.create({
       ...current,
       ...dto,
@@ -648,13 +972,22 @@ export class PlanningManualService {
     });
     await this.offersRepo.save(next);
     const saved = await this.requireEntity(this.offersRepo, id, 'planning_offer');
-    await this.logChange('planning_offer', id, 'UPDATE', current, saved);
+    await this.logChange(
+      'planning_offer',
+      id,
+      'UPDATE',
+      current,
+      saved,
+      this.buildOfferLogContext(saved),
+      actor,
+    );
     return this.getOffer(id);
   }
 
-  async createSection(offerId: string, dto: CreatePlanningSectionDto) {
+  async createSection(actor: ChangeLogActor | null | undefined, offerId: string, dto: CreatePlanningSectionDto) {
     await this.ensureDefaultCatalogs();
     const offer = await this.requireEntity(this.offersRepo, offerId, 'planning_offer');
+    await this.assertOfferPlanEditable(offer);
     const now = new Date();
     const subsectionCount = Math.max(1, Math.trunc(dto.subsection_count));
     const modalityId = dto.course_modality_id ?? (await this.defaultCourseModalityId());
@@ -726,18 +1059,31 @@ export class PlanningManualService {
       return savedSection;
     });
 
-    await this.logChange('planning_section', saved.id, 'CREATE', null, saved, { offer_id: offerId });
+    await this.logChange(
+      'planning_section',
+      saved.id,
+      'CREATE',
+      null,
+      saved,
+      this.buildSectionLogContext(saved, offer),
+      actor,
+    );
     const createdSubsections = await this.subsectionsRepo.find({
       where: { planning_section_id: saved.id },
       order: { code: 'ASC' },
     });
     for (const subsection of createdSubsections) {
-      await this.logChange('planning_subsection', subsection.id, 'CREATE', null, subsection, {
-        offer_id: offerId,
-        section_id: saved.id,
-      });
+      await this.logChange(
+        'planning_subsection',
+        subsection.id,
+        'CREATE',
+        null,
+        subsection,
+        this.buildSubsectionLogContext(subsection, saved, offer),
+        actor,
+      );
     }
-    await this.refreshOfferStatus(offerId);
+    await this.refreshOfferStatus(offerId, undefined, actor);
     return this.getSection(saved.id);
   }
 
@@ -789,8 +1135,10 @@ export class PlanningManualService {
     };
   }
 
-  async updateSection(id: string, dto: UpdatePlanningSectionDto) {
+  async updateSection(actor: ChangeLogActor | null | undefined, id: string, dto: UpdatePlanningSectionDto) {
     const current = await this.requireEntity(this.sectionsRepo, id, 'planning_section');
+    const currentOffer = await this.requireEntity(this.offersRepo, current.planning_offer_id, 'planning_offer');
+    await this.assertOfferPlanEditable(currentOffer);
     const nextCode = dto.code ? dto.code.trim().toUpperCase() : current.code;
     if (nextCode !== current.code) {
       const existing = await this.sectionsRepo.findOne({
@@ -818,6 +1166,7 @@ export class PlanningManualService {
         where: { planning_section_id: id },
         order: { code: 'ASC' },
       });
+      const subsectionBeforeMap = new Map(sectionSubsections.map((subsection) => [subsection.id, { ...subsection }]));
       const updatedSubsections = sectionSubsections.map((subsection, index) =>
         this.subsectionsRepo.create({
           ...subsection,
@@ -830,16 +1179,129 @@ export class PlanningManualService {
         }),
       );
       await this.subsectionsRepo.save(updatedSubsections);
+      for (const updated of updatedSubsections) {
+        const before = subsectionBeforeMap.get(updated.id);
+        if (
+          before &&
+          JSON.stringify(toLogJson(before)) !== JSON.stringify(toLogJson(updated))
+        ) {
+          await this.logChange(
+            'planning_subsection',
+            updated.id,
+            'UPDATE',
+            before,
+            updated,
+            this.buildSubsectionLogContext(updated, next, currentOffer),
+            actor,
+          );
+        }
+      }
     }
     const saved = await this.requireEntity(this.sectionsRepo, id, 'planning_section');
-    await this.logChange('planning_section', id, 'UPDATE', current, saved);
-    await this.refreshOfferStatus(saved.planning_offer_id);
+    await this.logChange(
+      'planning_section',
+      id,
+      'UPDATE',
+      current,
+      saved,
+      this.buildSectionLogContext(saved, currentOffer),
+      actor,
+    );
+    await this.refreshOfferStatus(saved.planning_offer_id, undefined, actor);
     return this.getSection(id);
   }
 
-  async createSubsection(sectionId: string, dto: CreatePlanningSubsectionDto) {
+  async deleteSection(actor: ChangeLogActor | null | undefined, id: string) {
+    const section = await this.requireEntity(this.sectionsRepo, id, 'planning_section');
+    const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
+    await this.assertOfferPlanEditable(offer);
+    const offerSections = await this.sectionsRepo.find({
+      where: { planning_offer_id: offer.id },
+      select: ['id', 'code'],
+      order: { code: 'ASC' },
+    });
+    const highestSectionIndex = offerSections.reduce((currentMax, item) => {
+      const index = parseSectionCodeIndex(item.code);
+      return index === null ? currentMax : Math.max(currentMax, index);
+    }, -1);
+    const currentSectionIndex = parseSectionCodeIndex(section.code);
+    if (
+      currentSectionIndex === null ||
+      (highestSectionIndex >= 0 && currentSectionIndex !== highestSectionIndex)
+    ) {
+      throw new BadRequestException(
+        'Solo puedes eliminar la ultima seccion creada para mantener el correlativo.',
+      );
+    }
+    const subsections = await this.subsectionsRepo.find({
+      where: { planning_section_id: id },
+      order: { code: 'ASC' },
+    });
+    const subsectionIds = subsections.map((item) => item.id);
+    const schedules = subsectionIds.length
+      ? await this.schedulesRepo.find({
+          where: { planning_subsection_id: In(subsectionIds) },
+          order: { day_of_week: 'ASC', start_time: 'ASC' },
+        })
+      : [];
+
+    for (const schedule of schedules) {
+      const subsection = subsections.find((item) => item.id === schedule.planning_subsection_id);
+      if (!subsection) {
+        continue;
+      }
+      await this.logChange(
+        'planning_subsection_schedule',
+        schedule.id,
+        'DELETE',
+        schedule,
+        null,
+        this.buildScheduleLogContext(schedule, subsection, section, offer),
+        actor,
+      );
+    }
+    for (const subsection of subsections) {
+      await this.logChange(
+        'planning_subsection',
+        subsection.id,
+        'DELETE',
+        subsection,
+        null,
+        this.buildSubsectionLogContext(subsection, section, offer),
+        actor,
+      );
+    }
+    await this.logChange(
+      'planning_section',
+      section.id,
+      'DELETE',
+      section,
+      null,
+      this.buildSectionLogContext(section, offer),
+      actor,
+    );
+
+    if (schedules.length > 0) {
+      await this.schedulesRepo.remove(schedules);
+    }
+    if (subsections.length > 0) {
+      await this.subsectionsRepo.remove(subsections);
+    }
+    await this.sectionsRepo.remove(section);
+    await this.rebuildConflictsForSemesterByOffer(offer.id, actor);
+
+    return {
+      deleted: true,
+      id,
+      deleted_subsection_count: subsections.length,
+      deleted_schedule_count: schedules.length,
+    };
+  }
+
+  async createSubsection(actor: ChangeLogActor | null | undefined, sectionId: string, dto: CreatePlanningSubsectionDto) {
     const section = await this.requireEntity(this.sectionsRepo, sectionId, 'planning_section');
     const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
+    await this.assertOfferPlanEditable(offer);
     const code = dto.code?.trim().toUpperCase() || (await this.nextSubsectionCode(sectionId, section.code));
     const existing = await this.subsectionsRepo.findOne({
       where: { planning_section_id: sectionId, code },
@@ -847,9 +1309,30 @@ export class PlanningManualService {
     if (existing) {
       throw new BadRequestException(`La subseccion ${code} ya existe.`);
     }
-    const classroom = dto.classroom_id
-      ? await this.classroomsRepo.findOne({ where: { id: dto.classroom_id } })
+    const classroomId = emptyToNull(dto.classroom_id);
+    const buildingId = emptyToNull(dto.building_id);
+    const classroom = classroomId
+      ? await this.classroomsRepo.findOne({ where: { id: classroomId } })
       : null;
+    const projectedVacancies =
+      dto.projected_vacancies !== undefined
+        ? Math.max(0, Math.trunc(dto.projected_vacancies))
+        : section.projected_vacancies;
+    this.ensureSubsectionVacanciesWithinSection(projectedVacancies, section.projected_vacancies);
+    await this.validateSubsectionLocationForOffer(
+      offer,
+      classroom?.building_id ?? buildingId ?? null,
+      classroomId,
+    );
+    const sectionSubsections = await this.subsectionsRepo.find({
+      where: { planning_section_id: sectionId },
+      order: { code: 'ASC' },
+    });
+    this.ensureSubsectionKindAllowed(
+      offer,
+      dto.kind,
+      sectionSubsections.map((item) => item.kind),
+    );
     const assigned = resolveAssignedHours(dto.kind, offer);
     const now = new Date();
     const subsection = this.subsectionsRepo.create({
@@ -859,14 +1342,11 @@ export class PlanningManualService {
       kind: dto.kind,
       responsible_teacher_id: emptyToNull(dto.responsible_teacher_id),
       course_modality_id: emptyToNull(dto.course_modality_id) ?? section.course_modality_id ?? null,
-      building_id: emptyToNull(dto.building_id) ?? classroom?.building_id ?? null,
-      classroom_id: emptyToNull(dto.classroom_id),
+      building_id: buildingId ?? classroom?.building_id ?? null,
+      classroom_id: classroomId,
       capacity_snapshot: dto.capacity_snapshot ?? classroom?.capacity ?? null,
       shift: emptyToNull(dto.shift),
-      projected_vacancies:
-        dto.projected_vacancies !== undefined
-          ? Math.max(0, Math.trunc(dto.projected_vacancies))
-          : section.projected_vacancies,
+      projected_vacancies: projectedVacancies,
       course_type: offer.course_type,
       assigned_theoretical_hours: assigned.theoretical_hours,
       assigned_practical_hours: assigned.practical_hours,
@@ -881,8 +1361,16 @@ export class PlanningManualService {
       updated_at: now,
     });
     const saved = await this.subsectionsRepo.save(subsection);
-    await this.logChange('planning_subsection', saved.id, 'CREATE', null, saved, { section_id: sectionId });
-    await this.refreshOfferStatus(section.planning_offer_id);
+    await this.logChange(
+      'planning_subsection',
+      saved.id,
+      'CREATE',
+      null,
+      saved,
+      this.buildSubsectionLogContext(saved, section, offer),
+      actor,
+    );
+    await this.refreshOfferStatus(section.planning_offer_id, undefined, actor);
     return this.getSubsection(saved.id);
   }
 
@@ -921,13 +1409,15 @@ export class PlanningManualService {
     });
   }
 
-  async updateSubsection(id: string, dto: UpdatePlanningSubsectionDto) {
+  async updateSubsection(actor: ChangeLogActor | null | undefined, id: string, dto: UpdatePlanningSubsectionDto) {
     const current = await this.requireEntity(this.subsectionsRepo, id, 'planning_subsection');
     const section = await this.requireEntity(
       this.sectionsRepo,
       current.planning_section_id,
       'planning_section',
     );
+    const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
+    await this.assertOfferPlanEditable(offer);
     const nextCode = dto.code ? dto.code.trim().toUpperCase() : current.code;
     if (nextCode !== current.code) {
       const duplicate = await this.subsectionsRepo.findOne({
@@ -946,10 +1436,34 @@ export class PlanningManualService {
       dto.building_id !== undefined
         ? emptyToNull(dto.building_id)
         : classroom?.building_id ?? current.building_id;
+    const nextProjectedVacancies =
+      dto.projected_vacancies !== undefined
+        ? Math.max(0, Math.trunc(dto.projected_vacancies))
+        : current.projected_vacancies;
+    if (dto.projected_vacancies !== undefined) {
+      this.ensureSubsectionVacanciesWithinSection(nextProjectedVacancies, section.projected_vacancies);
+    }
+    const nextBuildingId = classroom?.building_id ?? buildingId ?? null;
+    if (dto.building_id !== undefined || dto.classroom_id !== undefined) {
+      await this.validateSubsectionLocationForOffer(offer, nextBuildingId, classroomId);
+    }
+    const nextKind = dto.kind ?? current.kind;
+    if (dto.kind !== undefined) {
+      const sectionSubsections = await this.subsectionsRepo.find({
+        where: { planning_section_id: current.planning_section_id },
+        order: { code: 'ASC' },
+      });
+      const siblingKinds = sectionSubsections
+        .filter((item) => item.id !== id)
+        .map((item) => item.kind);
+      this.ensureSubsectionKindAllowed(offer, nextKind, siblingKinds);
+    }
+    const assigned = resolveAssignedHours(nextKind, offer);
     const next = this.subsectionsRepo.create({
       ...current,
       ...dto,
       code: nextCode,
+      kind: nextKind,
       responsible_teacher_id:
         dto.responsible_teacher_id !== undefined
           ? emptyToNull(dto.responsible_teacher_id)
@@ -958,7 +1472,7 @@ export class PlanningManualService {
         dto.course_modality_id !== undefined
           ? emptyToNull(dto.course_modality_id)
           : current.course_modality_id,
-      building_id: classroom?.building_id ?? buildingId ?? null,
+      building_id: nextBuildingId,
       classroom_id: classroomId,
       capacity_snapshot:
         dto.capacity_snapshot !== undefined
@@ -969,31 +1483,47 @@ export class PlanningManualService {
               ? current.capacity_snapshot
               : null,
       shift: dto.shift !== undefined ? emptyToNull(dto.shift) : current.shift,
-      projected_vacancies:
-        dto.projected_vacancies !== undefined
-          ? Math.max(0, Math.trunc(dto.projected_vacancies))
-          : current.projected_vacancies,
-      assigned_total_hours: roundToTwo(
-        numberValue(dto.assigned_theoretical_hours, current.assigned_theoretical_hours) +
-          numberValue(dto.assigned_practical_hours, current.assigned_practical_hours) +
-          numberValue(dto.assigned_virtual_hours, current.assigned_virtual_hours) +
-          numberValue(dto.assigned_seminar_hours, current.assigned_seminar_hours),
-      ),
+      projected_vacancies: nextProjectedVacancies,
+      course_type: offer.course_type,
+      assigned_theoretical_hours: assigned.theoretical_hours,
+      assigned_practical_hours: assigned.practical_hours,
+      assigned_virtual_hours: assigned.virtual_hours,
+      assigned_seminar_hours: assigned.seminar_hours,
+      assigned_total_hours: assigned.total_hours,
       updated_at: new Date(),
     });
     await this.subsectionsRepo.save(next);
     const saved = await this.requireEntity(this.subsectionsRepo, id, 'planning_subsection');
-    await this.logChange('planning_subsection', id, 'UPDATE', current, saved);
-    await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id);
+    await this.logChange(
+      'planning_subsection',
+      id,
+      'UPDATE',
+      current,
+      saved,
+      this.buildSubsectionLogContext(saved, section, offer),
+      actor,
+    );
+    await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id, actor);
     return this.getSubsection(id);
   }
 
-  async createSubsectionSchedule(subsectionId: string, dto: CreatePlanningSubsectionScheduleDto) {
+  async createSubsectionSchedule(
+    actor: ChangeLogActor | null | undefined,
+    subsectionId: string,
+    dto: CreatePlanningSubsectionScheduleDto,
+  ) {
     const subsection = await this.requireEntity(
       this.subsectionsRepo,
       subsectionId,
       'planning_subsection',
     );
+    const section = await this.requireEntity(
+      this.sectionsRepo,
+      subsection.planning_section_id,
+      'planning_section',
+    );
+    const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
+    await this.assertOfferPlanEditable(offer);
     const existingSchedules = await this.schedulesRepo.count({
       where: { planning_subsection_id: subsectionId },
     });
@@ -1014,19 +1544,24 @@ export class PlanningManualService {
       updated_at: now,
     });
     const saved = await this.schedulesRepo.save(schedule);
-    await this.logChange('planning_subsection_schedule', saved.id, 'CREATE', null, saved, {
-      subsection_id: subsectionId,
-    });
-    const section = await this.requireEntity(
-      this.sectionsRepo,
-      subsection.planning_section_id,
-      'planning_section',
+    await this.logChange(
+      'planning_subsection_schedule',
+      saved.id,
+      'CREATE',
+      null,
+      saved,
+      this.buildScheduleLogContext(saved, subsection, section, offer),
+      actor,
     );
-    await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id);
+    await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id, actor);
     return this.getSubsection(subsectionId);
   }
 
-  async updateSubsectionSchedule(id: string, dto: UpdatePlanningSubsectionScheduleDto) {
+  async updateSubsectionSchedule(
+    actor: ChangeLogActor | null | undefined,
+    id: string,
+    dto: UpdatePlanningSubsectionScheduleDto,
+  ) {
     const current = await this.requireEntity(
       this.schedulesRepo,
       id,
@@ -1044,7 +1579,6 @@ export class PlanningManualService {
     });
     await this.schedulesRepo.save(next);
     const saved = await this.requireEntity(this.schedulesRepo, id, 'planning_subsection_schedule');
-    await this.logChange('planning_subsection_schedule', id, 'UPDATE', current, saved);
     const subsection = await this.requireEntity(
       this.subsectionsRepo,
       current.planning_subsection_id,
@@ -1055,7 +1589,18 @@ export class PlanningManualService {
       subsection.planning_section_id,
       'planning_section',
     );
-    await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id);
+    const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
+    await this.assertOfferPlanEditable(offer);
+    await this.logChange(
+      'planning_subsection_schedule',
+      id,
+      'UPDATE',
+      current,
+      saved,
+      this.buildScheduleLogContext(saved, subsection, section, offer),
+      actor,
+    );
+    await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id, actor);
     return this.getSubsection(subsection.id);
   }
 
@@ -1068,7 +1613,7 @@ export class PlanningManualService {
     return this.getSubsection(schedule.planning_subsection_id);
   }
 
-  async deleteSubsectionSchedule(id: string) {
+  async deleteSubsectionSchedule(actor: ChangeLogActor | null | undefined, id: string) {
     const current = await this.requireEntity(
       this.schedulesRepo,
       id,
@@ -1084,9 +1629,19 @@ export class PlanningManualService {
       subsection.planning_section_id,
       'planning_section',
     );
+    const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
+    await this.assertOfferPlanEditable(offer);
     await this.schedulesRepo.delete({ id });
-    await this.logChange('planning_subsection_schedule', id, 'DELETE', current, null);
-    await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id);
+    await this.logChange(
+      'planning_subsection_schedule',
+      id,
+      'DELETE',
+      current,
+      null,
+      this.buildScheduleLogContext(current, subsection, section, offer),
+      actor,
+    );
+    await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id, actor);
     return this.getSubsection(subsection.id);
   }
 
@@ -1098,19 +1653,131 @@ export class PlanningManualService {
       },
       order: { detected_at: 'DESC' },
     });
-    return conflicts;
+    if (conflicts.length === 0) {
+      return [];
+    }
+
+    const [offers, sections, subsections, schedules, teachers, semesters] = await Promise.all([
+      this.findManyByIds(this.offersRepo, uniqueIds(conflicts.map((item) => item.planning_offer_id))),
+      this.findManyByIds(this.sectionsRepo, uniqueIds(conflicts.map((item) => item.planning_section_id))),
+      this.findManyByIds(this.subsectionsRepo, uniqueIds(conflicts.map((item) => item.planning_subsection_id))),
+      this.findManyByIds(
+        this.schedulesRepo,
+        uniqueIds(conflicts.flatMap((item) => [item.schedule_a_id, item.schedule_b_id])),
+      ),
+      this.findManyByIds(this.teachersRepo, uniqueIds(conflicts.map((item) => item.teacher_id))),
+      this.findManyByIds(this.semestersRepo, uniqueIds(conflicts.map((item) => item.semester_id))),
+    ]);
+    const [programs, classrooms] = await Promise.all([
+      this.findManyByIds(
+        this.programsRepo,
+        uniqueIds(offers.map((item) => item.academic_program_id)),
+      ),
+      this.findManyByIds(
+        this.classroomsRepo,
+        uniqueIds([
+          ...conflicts.map((item) => item.classroom_id),
+          ...subsections.map((item) => item.classroom_id),
+        ]),
+      ),
+    ]);
+
+    const offerMap = mapById(offers);
+    const sectionMap = mapById(sections);
+    const subsectionMap = mapById(subsections);
+    const scheduleMap = mapById(schedules);
+    const teacherMap = mapById(teachers);
+    const semesterMap = mapById(semesters);
+    const programMap = mapById(programs);
+    const classroomMap = mapById(classrooms);
+
+    return conflicts.map((conflict) => {
+      const offer = offerMap.get(conflict.planning_offer_id ?? '') ?? null;
+      const section = sectionMap.get(conflict.planning_section_id ?? '') ?? null;
+      const subsection = subsectionMap.get(conflict.planning_subsection_id ?? '') ?? null;
+      const scheduleA = scheduleMap.get(conflict.schedule_a_id) ?? null;
+      const scheduleB = scheduleMap.get(conflict.schedule_b_id) ?? null;
+      const teacher = teacherMap.get(conflict.teacher_id ?? '') ?? null;
+      const semester = semesterMap.get(conflict.semester_id) ?? null;
+      const program = offer ? programMap.get(offer.academic_program_id ?? '') ?? null : null;
+      const classroom = classroomMap.get(conflict.classroom_id ?? '') ?? null;
+
+      return {
+        ...conflict,
+        offer,
+        section,
+        subsection,
+        semester_name: semester?.name ?? null,
+        academic_program_name: program?.name ?? null,
+        teacher_name: formatPlanningTeacherDisplay(teacher),
+        classroom_name: classroom?.name ?? null,
+        affected_label: buildPlanningConflictAffectedLabel(conflict, offer, section, subsection, teacher),
+        overlap_day: scheduleA?.day_of_week ?? scheduleB?.day_of_week ?? null,
+        overlap_start:
+          scheduleA && scheduleB
+            ? minutesToTime(Math.max(toMinutes(scheduleA.start_time), toMinutes(scheduleB.start_time)))
+            : null,
+        overlap_end:
+          scheduleA && scheduleB
+            ? minutesToTime(Math.min(toMinutes(scheduleA.end_time), toMinutes(scheduleB.end_time)))
+            : null,
+        meeting_a: buildPlanningConflictScheduleCard(
+          scheduleA,
+          subsectionMap,
+          sectionMap,
+          offerMap,
+          classroomMap,
+        ),
+        meeting_b: buildPlanningConflictScheduleCard(
+          scheduleB,
+          subsectionMap,
+          sectionMap,
+          offerMap,
+          classroomMap,
+        ),
+      };
+    });
   }
 
-  async listChangeLog(entityType?: string, entityId?: string) {
+  async listChangeLog(filters: ChangeLogFilters = {}) {
+    const limit = normalizeLogLimit(filters.limit);
+    const fromDate = parseLogDate(filters.from, false);
+    const toDate = parseLogDate(filters.to, true);
     const logs = await this.changeLogsRepo.find({
       where: {
-        ...(entityType ? { entity_type: entityType } : {}),
-        ...(entityId ? { entity_id: entityId } : {}),
+        ...(filters.entity_type ? { entity_type: filters.entity_type } : {}),
+        ...(filters.entity_id ? { entity_id: filters.entity_id } : {}),
+        ...(filters.action ? { action: filters.action as 'CREATE' | 'UPDATE' | 'DELETE' } : {}),
       },
       order: { changed_at: 'DESC' },
-      take: 200,
+      take: Math.min(Math.max(limit * 5, 300), 1000),
     });
-    return logs;
+    const changedByQuery = normalizeSearchValue(filters.changed_by);
+    const filteredLogs = logs
+      .filter((log) => {
+        const context = asRecord(log.context_json);
+        const changedAt = new Date(log.changed_at);
+        if (filters.offer_id && context?.offer_id !== filters.offer_id) {
+          return false;
+        }
+        if (changedByQuery && !normalizeSearchValue(log.changed_by).includes(changedByQuery)) {
+          return false;
+        }
+        if (fromDate && changedAt < fromDate) {
+          return false;
+        }
+        if (toDate && changedAt > toDate) {
+          return false;
+        }
+        return true;
+      })
+      .slice(0, limit);
+    const referenceMaps = await this.buildChangeLogReferenceMaps(filteredLogs);
+    return filteredLogs.map((log) => ({
+        ...log,
+        reference_label: this.buildChangeLogReferenceLabel(log, referenceMaps),
+        changes: buildChangeRows(log.before_json, log.after_json, log.action),
+      }));
   }
 
   private async ensureDefaultCatalogs() {
@@ -1479,7 +2146,7 @@ export class PlanningManualService {
     return blueprints.find((item) => item.study_plan_course_id === studyPlanCourseId) ?? null;
   }
 
-  private async ensureCycleOffersForRule(rule: PlanningCyclePlanRuleEntity) {
+  private async ensureCycleOffersForRule(rule: PlanningCyclePlanRuleEntity, actor?: ChangeLogActor | null) {
     const blueprints = await this.listCycleOfferBlueprints(rule.study_plan_id, rule.cycle);
     const existingOffers = await this.offersRepo.find({
       where: {
@@ -1521,10 +2188,19 @@ export class PlanningManualService {
 
     const savedOffers = newOffers.length > 0 ? await this.offersRepo.save(newOffers) : [];
     for (const offer of savedOffers) {
-      await this.logChange('planning_offer', offer.id, 'CREATE', null, offer, {
-        source: 'create_plan_rule',
-        plan_rule_id: rule.id,
-      });
+      await this.logChange(
+        'planning_offer',
+        offer.id,
+        'CREATE',
+        null,
+        offer,
+        {
+          ...this.buildOfferLogContext(offer),
+          source: 'create_plan_rule',
+          plan_rule_id: rule.id,
+        },
+        actor,
+      );
     }
 
     return {
@@ -1687,6 +2363,137 @@ export class PlanningManualService {
     };
   }
 
+  private async buildOfferConfigurationContext(offerIds: string[]) {
+    if (offerIds.length === 0) {
+      return {
+        sectionsByOfferId: new Map<string, PlanningSectionEntity[]>(),
+        subsectionsBySectionId: new Map<string, PlanningSubsectionEntity[]>(),
+        schedulesBySubsectionId: new Map<string, PlanningSubsectionScheduleEntity[]>(),
+      };
+    }
+
+    const sections = await this.sectionsRepo.find({
+      where: { planning_offer_id: In(offerIds) },
+      order: { code: 'ASC' },
+    });
+    const sectionIds = sections.map((item) => item.id);
+    const subsections = sectionIds.length
+      ? await this.subsectionsRepo.find({
+          where: { planning_section_id: In(sectionIds) },
+          order: { code: 'ASC' },
+        })
+      : [];
+    const subsectionIds = subsections.map((item) => item.id);
+    const schedules = subsectionIds.length
+      ? await this.schedulesRepo.find({
+          where: { planning_subsection_id: In(subsectionIds) },
+          order: { day_of_week: 'ASC', start_time: 'ASC' },
+        })
+      : [];
+
+    return {
+      sectionsByOfferId: groupBy(sections, (item) => item.planning_offer_id),
+      subsectionsBySectionId: groupBy(subsections, (item) => item.planning_section_id),
+      schedulesBySubsectionId: groupBy(schedules, (item) => item.planning_subsection_id),
+    };
+  }
+
+  private buildOfferReviewState(
+    offerId: string,
+    sectionsByOfferId: Map<string, PlanningSectionEntity[]>,
+    subsectionsBySectionId: Map<string, PlanningSubsectionEntity[]>,
+    schedulesBySubsectionId: Map<string, PlanningSubsectionScheduleEntity[]>,
+  ) {
+    const sections = sectionsByOfferId.get(offerId) ?? [];
+    if (sections.length === 0) {
+      return {
+        is_ready: false,
+        section_count: 0,
+        subsection_count: 0,
+        ready_subsection_count: 0,
+      };
+    }
+
+    let subsectionCount = 0;
+    let readySubsectionCount = 0;
+    for (const section of sections) {
+      const sectionSubsections = subsectionsBySectionId.get(section.id) ?? [];
+      if (sectionSubsections.length === 0) {
+        return {
+          is_ready: false,
+          section_count: sections.length,
+          subsection_count: subsectionCount,
+          ready_subsection_count: readySubsectionCount,
+        };
+      }
+      subsectionCount += sectionSubsections.length;
+      for (const subsection of sectionSubsections) {
+        if (
+          this.subsectionHasRequiredConfiguration(
+            subsection,
+            (schedulesBySubsectionId.get(subsection.id) ?? []).length,
+          )
+        ) {
+          readySubsectionCount += 1;
+        }
+      }
+    }
+
+    return {
+      is_ready: subsectionCount > 0 && readySubsectionCount === subsectionCount,
+      section_count: sections.length,
+      subsection_count: subsectionCount,
+      ready_subsection_count: readySubsectionCount,
+    };
+  }
+
+  private subsectionHasRequiredConfiguration(
+    subsection: PlanningSubsectionEntity,
+    scheduleCount: number,
+  ) {
+    return Boolean(
+      subsection.responsible_teacher_id &&
+        subsection.shift &&
+        subsection.course_modality_id &&
+        scheduleCount > 0,
+    );
+  }
+
+  private async assertPlanRuleReadyForReview(rule: PlanningCyclePlanRuleEntity) {
+    const candidatesPayload = await this.listCourseCandidates({
+      semester_id: rule.semester_id,
+      campus_id: rule.campus_id ?? undefined,
+      faculty_id: rule.faculty_id ?? undefined,
+      academic_program_id: rule.academic_program_id,
+      cycle: rule.cycle,
+      study_plan_id: rule.study_plan_id,
+    });
+    const candidates = Array.isArray(candidatesPayload?.candidates)
+      ? candidatesPayload.candidates
+      : [];
+    if (candidates.length === 0) {
+      throw new BadRequestException(
+        'El plan no puede enviarse a revision porque no tiene cursos configurados en el ciclo.',
+      );
+    }
+
+    const pending = candidates.filter((item: any) => !item?.has_offer || !item?.review_ready);
+    if (pending.length === 0) {
+      return;
+    }
+
+    const sample = pending
+      .slice(0, 3)
+      .map((item: any) => [item?.course_code, item?.course_name].filter(Boolean).join(' - '))
+      .filter(Boolean)
+      .join(', ');
+    throw new BadRequestException(
+      sample
+        ? `El plan no puede enviarse a revision hasta que todos sus cursos esten listos. Revisa: ${sample}.`
+        : 'El plan no puede enviarse a revision hasta que todos sus cursos tengan al menos una seccion y todas sus subsecciones configuradas.',
+    );
+  }
+
   private buildSubsectionDetail(
     subsection: PlanningSubsectionEntity,
     input: {
@@ -1718,6 +2525,68 @@ export class PlanningManualService {
     };
   }
 
+  private async findPlanRuleForOfferContext(input: {
+    semester_id: string;
+    campus_id: string | null;
+    academic_program_id: string | null;
+    study_plan_id: string;
+    cycle: number;
+  }) {
+    if (!input.academic_program_id) {
+      return null;
+    }
+    return this.planRulesRepo.findOne({
+      where: {
+        semester_id: input.semester_id,
+        campus_id: input.campus_id ?? undefined,
+        academic_program_id: input.academic_program_id,
+        study_plan_id: input.study_plan_id,
+        cycle: input.cycle,
+        is_active: true,
+      },
+      order: { created_at: 'DESC' },
+    });
+  }
+
+  private ensurePlanRuleEditable(rule: PlanningCyclePlanRuleEntity | null) {
+    if (!rule) {
+      return;
+    }
+    if (rule.workflow_status === 'IN_REVIEW' || rule.workflow_status === 'APPROVED') {
+      throw new BadRequestException(
+        'Este plan esta bloqueado por workflow. Solo puede editarse si vuelve a correccion.',
+      );
+    }
+  }
+
+  private async assertOfferPlanEditable(offer: PlanningOfferEntity) {
+    const rule = await this.findPlanRuleForOfferContext({
+      semester_id: offer.semester_id,
+      campus_id: offer.campus_id,
+      academic_program_id: offer.academic_program_id ?? null,
+      study_plan_id: offer.study_plan_id,
+      cycle: offer.cycle,
+    });
+    this.ensurePlanRuleEditable(rule);
+    return rule;
+  }
+
+  private ensureSubsectionKindAllowed(
+    offer: PlanningOfferEntity,
+    nextKind: PlanningSubsectionKind,
+    siblingKinds: PlanningSubsectionKind[],
+  ) {
+    const allowedKinds = resolveAllowedSubsectionKinds(offer.course_type, siblingKinds.length + 1);
+    if (!allowedKinds.includes(nextKind)) {
+      throw new BadRequestException(buildSubsectionKindErrorMessage(offer.course_type, siblingKinds.length + 1));
+    }
+    if (!validateSubsectionKindDistribution(offer.course_type, [...siblingKinds, nextKind])) {
+      throw new BadRequestException(
+        'En cursos teorico practico debe existir al menos una subseccion teorica y una practica.',
+      );
+    }
+  }
+
   private async defaultStudyTypeId() {
     await this.ensureDefaultCatalogs();
     const item = await this.studyTypesRepo.findOne({ where: { code: 'PREGRADO' } });
@@ -1745,9 +2614,13 @@ export class PlanningManualService {
     return candidate;
   }
 
-  private async rebuildConflictsForSemesterByOffer(offerId: string) {
+  private async rebuildConflictsForSemesterByOffer(offerId: string, actor?: ChangeLogActor | null) {
     const offer = await this.requireEntity(this.offersRepo, offerId, 'planning_offer');
-    const offers = await this.offersRepo.find({ where: { semester_id: offer.semester_id } });
+    await this.rebuildConflictsForSemester(offer.semester_id, actor);
+  }
+
+  private async rebuildConflictsForSemester(semesterId: string, actor?: ChangeLogActor | null) {
+    const offers = await this.offersRepo.find({ where: { semester_id: semesterId } });
     const offerIds = offers.map((item) => item.id);
     const sections = offerIds.length
       ? await this.sectionsRepo.find({ where: { planning_offer_id: In(offerIds) } })
@@ -1760,26 +2633,36 @@ export class PlanningManualService {
     const schedules = subsectionIds.length
       ? await this.schedulesRepo.find({ where: { planning_subsection_id: In(subsectionIds) } })
       : [];
-    await this.conflictsRepo.delete({ semester_id: offer.semester_id });
-    const conflicts = this.calculateConflictsForDataset(offer.semester_id, offers, sections, subsections, schedules);
+    await this.conflictsRepo.delete({ semester_id: semesterId });
+    const conflicts = this.calculateConflictsForDataset(semesterId, offers, sections, subsections, schedules);
     if (conflicts.length) {
       await this.conflictsRepo.save(conflicts);
     }
     for (const item of offers) {
-      await this.refreshOfferStatus(item.id, conflicts);
+      await this.refreshOfferStatus(item.id, conflicts, actor);
     }
   }
 
-  private async refreshOfferStatus(offerId: string, cachedConflicts?: PlanningScheduleConflictV2Entity[]) {
+  private async refreshOfferStatus(
+    offerId: string,
+    cachedConflicts?: PlanningScheduleConflictV2Entity[],
+    actor?: ChangeLogActor | null,
+  ) {
     const offer = await this.requireEntity(this.offersRepo, offerId, 'planning_offer');
-    const sectionCount = await this.sectionsRepo.count({ where: { planning_offer_id: offerId } });
+    const configuration = await this.buildOfferConfigurationContext([offerId]);
+    const reviewState = this.buildOfferReviewState(
+      offerId,
+      configuration.sectionsByOfferId,
+      configuration.subsectionsBySectionId,
+      configuration.schedulesBySubsectionId,
+    );
     const conflicts =
       cachedConflicts?.filter((item) => item.planning_offer_id === offerId) ??
       (await this.conflictsRepo.find({ where: { planning_offer_id: offerId } }));
     let status: PlanningOfferStatus = 'DRAFT';
     if (conflicts.length > 0) {
       status = 'OBSERVED';
-    } else if (sectionCount > 0) {
+    } else if (reviewState.is_ready) {
       status = 'ACTIVE';
     }
     if (status !== offer.status) {
@@ -1787,9 +2670,18 @@ export class PlanningManualService {
       offer.status = status;
       offer.updated_at = new Date();
       await this.offersRepo.save(offer);
-      await this.logChange('planning_offer', offer.id, 'UPDATE', before, offer, {
-        reason: 'status_refresh',
-      });
+      await this.logChange(
+        'planning_offer',
+        offer.id,
+        'UPDATE',
+        before,
+        offer,
+        {
+          ...this.buildOfferLogContext(offer),
+          reason: 'status_refresh',
+        },
+        actor,
+      );
     }
   }
 
@@ -1799,7 +2691,7 @@ export class PlanningManualService {
     sections: PlanningSectionEntity[],
     subsections: PlanningSubsectionEntity[],
     schedules: PlanningSubsectionScheduleEntity[],
-  ) {
+  ): PlanningScheduleConflictV2Entity[] {
     const offerMap = mapById(offers);
     const sectionMap = mapById(sections);
     const subsectionMap = mapById(subsections);
@@ -1865,6 +2757,30 @@ export class PlanningManualService {
               overlapMinutes,
               now,
               subsectionA.responsible_teacher_id,
+              undefined,
+              {
+                other_offer_id: offerB.id,
+                other_section_id: sectionB.id,
+                other_subsection_id: subsectionB.id,
+              },
+            ),
+            this.newConflict(
+              'TEACHER_OVERLAP',
+              semesterId,
+              offerB.id,
+              sectionB.id,
+              subsectionB.id,
+              a.id,
+              b.id,
+              overlapMinutes,
+              now,
+              subsectionB.responsible_teacher_id,
+              undefined,
+              {
+                other_offer_id: offerA.id,
+                other_section_id: sectionA.id,
+                other_subsection_id: subsectionA.id,
+              },
             ),
           );
         }
@@ -1883,6 +2799,29 @@ export class PlanningManualService {
               now,
               undefined,
               subsectionA.classroom_id,
+              {
+                other_offer_id: offerB.id,
+                other_section_id: sectionB.id,
+                other_subsection_id: subsectionB.id,
+              },
+            ),
+            this.newConflict(
+              'CLASSROOM_OVERLAP',
+              semesterId,
+              offerB.id,
+              sectionB.id,
+              subsectionB.id,
+              a.id,
+              b.id,
+              overlapMinutes,
+              now,
+              undefined,
+              subsectionB.classroom_id,
+              {
+                other_offer_id: offerA.id,
+                other_section_id: sectionA.id,
+                other_subsection_id: subsectionA.id,
+              },
             ),
           );
         }
@@ -1910,6 +2849,25 @@ export class PlanningManualService {
               {
                 other_offer_id: offerB.id,
                 other_section_id: sectionB.id,
+                other_subsection_id: subsectionB.id,
+              },
+            ),
+            this.newConflict(
+              'SECTION_OVERLAP',
+              semesterId,
+              offerB.id,
+              sectionB.id,
+              subsectionB.id,
+              a.id,
+              b.id,
+              overlapMinutes,
+              now,
+              undefined,
+              undefined,
+              {
+                other_offer_id: offerA.id,
+                other_section_id: sectionA.id,
+                other_subsection_id: subsectionA.id,
               },
             ),
           );
@@ -1918,6 +2876,165 @@ export class PlanningManualService {
     }
 
     return dedupePlanningConflicts(conflicts);
+  }
+
+  private async deletePlanRuleHierarchy(
+    rule: PlanningCyclePlanRuleEntity,
+    actor?: ChangeLogActor | null,
+  ) {
+    const offers = await this.offersRepo.find({
+      where: {
+        semester_id: rule.semester_id,
+        academic_program_id: rule.academic_program_id,
+        study_plan_id: rule.study_plan_id,
+        cycle: rule.cycle,
+        ...(rule.campus_id ? { campus_id: rule.campus_id } : {}),
+      },
+      order: { course_code: 'ASC', created_at: 'ASC' },
+    });
+
+    const offerIds = offers.map((item) => item.id);
+    const sections = offerIds.length
+      ? await this.sectionsRepo.find({
+          where: { planning_offer_id: In(offerIds) },
+          order: { code: 'ASC', created_at: 'ASC' },
+        })
+      : [];
+    const sectionIds = sections.map((item) => item.id);
+    const subsections = sectionIds.length
+      ? await this.subsectionsRepo.find({
+          where: { planning_section_id: In(sectionIds) },
+          order: { code: 'ASC', created_at: 'ASC' },
+        })
+      : [];
+    const subsectionIds = subsections.map((item) => item.id);
+    const schedules = subsectionIds.length
+      ? await this.schedulesRepo.find({
+          where: { planning_subsection_id: In(subsectionIds) },
+          order: { planning_subsection_id: 'ASC', day_of_week: 'ASC', start_time: 'ASC' },
+        })
+      : [];
+
+    await this.planRulesRepo.manager.transaction(async (manager) => {
+      if (subsectionIds.length > 0) {
+        await manager.delete(PlanningSubsectionScheduleEntity, {
+          planning_subsection_id: In(subsectionIds),
+        });
+      }
+      if (sectionIds.length > 0) {
+        await manager.delete(PlanningSubsectionEntity, {
+          planning_section_id: In(sectionIds),
+        });
+      }
+      if (offerIds.length > 0) {
+        await manager.delete(PlanningSectionEntity, {
+          planning_offer_id: In(offerIds),
+        });
+        await manager.delete(PlanningOfferEntity, {
+          id: In(offerIds),
+        });
+      }
+      await manager.delete(PlanningCyclePlanRuleEntity, { id: rule.id });
+    });
+
+    const offerMap = mapById(offers);
+    const sectionMap = mapById(sections);
+    const subsectionMap = mapById(subsections);
+
+    for (const schedule of schedules) {
+      const subsection = subsectionMap.get(schedule.planning_subsection_id);
+      if (!subsection) {
+        continue;
+      }
+      const section = sectionMap.get(subsection.planning_section_id);
+      if (!section) {
+        continue;
+      }
+      const offer = offerMap.get(section.planning_offer_id);
+      if (!offer) {
+        continue;
+      }
+      await this.logChange(
+        'planning_subsection_schedule',
+        schedule.id,
+        'DELETE',
+        schedule,
+        null,
+        {
+          ...this.buildScheduleLogContext(schedule, subsection, section, offer),
+          source: 'delete_plan_rule',
+          plan_rule_id: rule.id,
+        },
+        actor,
+      );
+    }
+
+    for (const subsection of subsections) {
+      const section = sectionMap.get(subsection.planning_section_id);
+      if (!section) {
+        continue;
+      }
+      const offer = offerMap.get(section.planning_offer_id);
+      if (!offer) {
+        continue;
+      }
+      await this.logChange(
+        'planning_subsection',
+        subsection.id,
+        'DELETE',
+        subsection,
+        null,
+        {
+          ...this.buildSubsectionLogContext(subsection, section, offer),
+          source: 'delete_plan_rule',
+          plan_rule_id: rule.id,
+        },
+        actor,
+      );
+    }
+
+    for (const section of sections) {
+      const offer = offerMap.get(section.planning_offer_id);
+      if (!offer) {
+        continue;
+      }
+      await this.logChange(
+        'planning_section',
+        section.id,
+        'DELETE',
+        section,
+        null,
+        {
+          ...this.buildSectionLogContext(section, offer),
+          source: 'delete_plan_rule',
+          plan_rule_id: rule.id,
+        },
+        actor,
+      );
+    }
+
+    for (const offer of offers) {
+      await this.logChange(
+        'planning_offer',
+        offer.id,
+        'DELETE',
+        offer,
+        null,
+        {
+          ...this.buildOfferLogContext(offer),
+          source: 'delete_plan_rule',
+          plan_rule_id: rule.id,
+        },
+        actor,
+      );
+    }
+
+    return {
+      deleted_offer_count: offers.length,
+      deleted_section_count: sections.length,
+      deleted_subsection_count: subsections.length,
+      deleted_schedule_count: schedules.length,
+    };
   }
 
   private newConflict(
@@ -1953,6 +3070,320 @@ export class PlanningManualService {
     });
   }
 
+  private buildPlanRuleLogContext(rule: PlanningCyclePlanRuleEntity) {
+    return {
+      semester_id: rule.semester_id,
+      campus_id: rule.campus_id ?? null,
+      faculty_id: rule.faculty_id ?? null,
+      academic_program_id: rule.academic_program_id,
+      study_plan_id: rule.study_plan_id,
+      career_name: rule.career_name ?? null,
+      cycle: rule.cycle,
+    };
+  }
+
+  private buildOfferLogContext(offer: PlanningOfferEntity) {
+    return {
+      offer_id: offer.id,
+      semester_id: offer.semester_id,
+      campus_id: offer.campus_id,
+      faculty_id: offer.faculty_id ?? null,
+      academic_program_id: offer.academic_program_id ?? null,
+      study_plan_id: offer.study_plan_id,
+      course_code: offer.course_code ?? null,
+      course_name: offer.course_name ?? null,
+      cycle: offer.cycle,
+    };
+  }
+
+  private buildSectionLogContext(section: PlanningSectionEntity, offer: PlanningOfferEntity) {
+    return {
+      ...this.buildOfferLogContext(offer),
+      section_id: section.id,
+      section_code: section.code,
+    };
+  }
+
+  private buildSubsectionLogContext(
+    subsection: PlanningSubsectionEntity,
+    section: PlanningSectionEntity,
+    offer: PlanningOfferEntity,
+  ) {
+    return {
+      ...this.buildSectionLogContext(section, offer),
+      subsection_id: subsection.id,
+      subsection_code: subsection.code,
+    };
+  }
+
+  private buildScheduleLogContext(
+    schedule: PlanningSubsectionScheduleEntity,
+    subsection: PlanningSubsectionEntity,
+    section: PlanningSectionEntity,
+    offer: PlanningOfferEntity,
+  ) {
+    return {
+      ...this.buildSubsectionLogContext(subsection, section, offer),
+      schedule_id: schedule.id,
+      day_of_week: schedule.day_of_week,
+      start_time: schedule.start_time,
+      end_time: schedule.end_time,
+    };
+  }
+
+  private async buildChangeLogReferenceMaps(logs: PlanningChangeLogEntity[]) {
+    const offerIds = uniqueIds(
+      logs.flatMap((log) => {
+        const context = asRecord(log.context_json);
+        const snapshot = asRecord(log.after_json) ?? asRecord(log.before_json);
+        return [
+          recordString(context, 'offer_id'),
+          log.entity_type === 'planning_offer' ? log.entity_id : null,
+          recordString(snapshot, 'planning_offer_id'),
+        ];
+      }),
+    );
+    const sectionIds = uniqueIds(
+      logs.flatMap((log) => {
+        const context = asRecord(log.context_json);
+        const snapshot = asRecord(log.after_json) ?? asRecord(log.before_json);
+        return [
+          recordString(context, 'section_id'),
+          log.entity_type === 'planning_section' ? log.entity_id : null,
+          recordString(snapshot, 'planning_section_id'),
+        ];
+      }),
+    );
+    const subsectionIds = uniqueIds(
+      logs.flatMap((log) => {
+        const context = asRecord(log.context_json);
+        const snapshot = asRecord(log.after_json) ?? asRecord(log.before_json);
+        return [
+          recordString(context, 'subsection_id'),
+          log.entity_type === 'planning_subsection' ? log.entity_id : null,
+          recordString(snapshot, 'planning_subsection_id'),
+        ];
+      }),
+    );
+    const semesterIds = uniqueIds(
+      logs.flatMap((log) => {
+        const context = asRecord(log.context_json);
+        const snapshot = asRecord(log.after_json) ?? asRecord(log.before_json);
+        return [recordString(context, 'semester_id'), recordString(snapshot, 'semester_id')];
+      }),
+    );
+    const campusIds = uniqueIds(
+      logs.flatMap((log) => {
+        const context = asRecord(log.context_json);
+        const snapshot = asRecord(log.after_json) ?? asRecord(log.before_json);
+        return [recordString(context, 'campus_id'), recordString(snapshot, 'campus_id')];
+      }),
+    );
+    const facultyIds = uniqueIds(
+      logs.flatMap((log) => {
+        const context = asRecord(log.context_json);
+        const snapshot = asRecord(log.after_json) ?? asRecord(log.before_json);
+        return [recordString(context, 'faculty_id'), recordString(snapshot, 'faculty_id')];
+      }),
+    );
+    const programIds = uniqueIds(
+      logs.flatMap((log) => {
+        const context = asRecord(log.context_json);
+        const snapshot = asRecord(log.after_json) ?? asRecord(log.before_json);
+        return [
+          recordString(context, 'academic_program_id'),
+          recordString(snapshot, 'academic_program_id'),
+        ];
+      }),
+    );
+    const studyPlanIds = uniqueIds(
+      logs.flatMap((log) => {
+        const context = asRecord(log.context_json);
+        const snapshot = asRecord(log.after_json) ?? asRecord(log.before_json);
+        return [recordString(context, 'study_plan_id'), recordString(snapshot, 'study_plan_id')];
+      }),
+    );
+
+    const [offers, sections, subsections, semesters, campuses, faculties, programs, studyPlans] =
+      await Promise.all([
+        this.findManyByIds(this.offersRepo, offerIds),
+        this.findManyByIds(this.sectionsRepo, sectionIds),
+        this.findManyByIds(this.subsectionsRepo, subsectionIds),
+        this.findManyByIds(this.semestersRepo, semesterIds),
+        this.findManyByIds(this.campusesRepo, campusIds),
+        this.findManyByIds(this.facultiesRepo, facultyIds),
+        this.findManyByIds(this.programsRepo, programIds),
+        this.findManyByIds(this.studyPlansRepo, studyPlanIds),
+      ]);
+
+    return {
+      offers: mapById(offers),
+      sections: mapById(sections),
+      subsections: mapById(subsections),
+      semesters: mapById(semesters),
+      campuses: mapById(campuses),
+      faculties: mapById(faculties),
+      programs: mapById(programs),
+      studyPlans: mapById(studyPlans),
+    } as ChangeLogReferenceMaps;
+  }
+
+  private buildChangeLogReferenceLabel(
+    log: PlanningChangeLogEntity,
+    maps: ChangeLogReferenceMaps,
+  ) {
+    const context = asRecord(log.context_json);
+    const snapshot = asRecord(log.after_json) ?? asRecord(log.before_json);
+    const offerId =
+      recordString(context, 'offer_id') ??
+      (log.entity_type === 'planning_offer' ? log.entity_id : null) ??
+      recordString(snapshot, 'planning_offer_id');
+    const sectionId =
+      recordString(context, 'section_id') ??
+      (log.entity_type === 'planning_section' ? log.entity_id : null) ??
+      recordString(snapshot, 'planning_section_id');
+    const subsectionId =
+      recordString(context, 'subsection_id') ??
+      (log.entity_type === 'planning_subsection' ? log.entity_id : null) ??
+      recordString(snapshot, 'planning_subsection_id');
+    const offer = offerId ? maps.offers.get(offerId) ?? null : null;
+    const section = sectionId ? maps.sections.get(sectionId) ?? null : null;
+    const subsection = subsectionId ? maps.subsections.get(subsectionId) ?? null : null;
+    const semester =
+      maps.semesters.get(
+        recordString(context, 'semester_id') ?? recordString(snapshot, 'semester_id') ?? '',
+      ) ?? null;
+    const campus =
+      maps.campuses.get(
+        recordString(context, 'campus_id') ?? recordString(snapshot, 'campus_id') ?? '',
+      ) ?? null;
+    const faculty =
+      maps.faculties.get(
+        recordString(context, 'faculty_id') ?? recordString(snapshot, 'faculty_id') ?? '',
+      ) ?? null;
+    const program =
+      maps.programs.get(
+        recordString(context, 'academic_program_id') ??
+          recordString(snapshot, 'academic_program_id') ??
+          '',
+      ) ?? null;
+    const studyPlan =
+      maps.studyPlans.get(
+        recordString(context, 'study_plan_id') ?? recordString(snapshot, 'study_plan_id') ?? '',
+      ) ?? null;
+
+    const offerLabel = buildChangeLogOfferLabel(offer, studyPlan, snapshot, context);
+    const sectionCode =
+      section?.code ??
+      recordString(context, 'section_code') ??
+      (log.entity_type === 'planning_section' ? recordString(snapshot, 'code') : null);
+    const subsectionCode =
+      subsection?.code ??
+      recordString(context, 'subsection_code') ??
+      (log.entity_type === 'planning_subsection' ? recordString(snapshot, 'code') : null);
+    const semesterLabel = coalesceCatalogLabel(semester?.name, recordString(context, 'semester_name'));
+    const campusLabel = coalesceCatalogLabel(campus?.name, recordString(context, 'campus_name'));
+    const facultyLabel = coalesceCatalogLabel(
+      faculty?.name,
+      recordString(context, 'faculty_name'),
+      recordString(snapshot, 'faculty'),
+    );
+    const programLabel = coalesceCatalogLabel(
+      program?.name,
+      recordString(context, 'academic_program_name'),
+      recordString(snapshot, 'career_name'),
+      recordString(snapshot, 'academic_program'),
+    );
+    const studyPlanLabel = buildChangeLogStudyPlanLabel(studyPlan, snapshot, context);
+    const cycleValue = recordNumber(context, 'cycle') ?? recordNumber(snapshot, 'cycle');
+
+    if (log.entity_type === 'planning_subsection_schedule') {
+      const scheduleLabel = buildChangeLogScheduleLabel(snapshot, context);
+      return joinReferenceParts([
+        offerLabel,
+        sectionCode ? `Seccion ${sectionCode}` : null,
+        subsectionCode ? `Subseccion ${subsectionCode}` : null,
+        scheduleLabel ? `Horario ${scheduleLabel}` : null,
+      ]);
+    }
+    if (log.entity_type === 'planning_subsection') {
+      return joinReferenceParts([
+        offerLabel,
+        sectionCode ? `Seccion ${sectionCode}` : null,
+        subsectionCode ? `Subseccion ${subsectionCode}` : null,
+      ]);
+    }
+    if (log.entity_type === 'planning_section') {
+      return joinReferenceParts([offerLabel, sectionCode ? `Seccion ${sectionCode}` : null]);
+    }
+    if (log.entity_type === 'planning_offer') {
+      return offerLabel || 'Oferta configurada';
+    }
+    if (log.entity_type === 'planning_cycle_plan_rule') {
+      return (
+        joinReferenceParts([
+          programLabel,
+          studyPlanLabel,
+          cycleValue ? `Ciclo ${cycleValue}` : null,
+          semesterLabel,
+          campusLabel,
+          facultyLabel,
+        ]) || 'Plan individual'
+      );
+    }
+    return (
+      joinReferenceParts([
+        offerLabel,
+        sectionCode ? `Seccion ${sectionCode}` : null,
+        subsectionCode ? `Subseccion ${subsectionCode}` : null,
+      ]) || 'Sin contexto adicional'
+    );
+  }
+
+  private ensureSubsectionVacanciesWithinSection(
+    subsectionProjectedVacancies: number | null | undefined,
+    sectionProjectedVacancies: number | null | undefined,
+  ) {
+    if (subsectionProjectedVacancies === null || subsectionProjectedVacancies === undefined) {
+      return;
+    }
+    if (sectionProjectedVacancies === null || sectionProjectedVacancies === undefined) {
+      return;
+    }
+    if (subsectionProjectedVacancies > sectionProjectedVacancies) {
+      throw new BadRequestException(
+        'La vacante de la subseccion no puede ser mayor a la vacante de la seccion.',
+      );
+    }
+  }
+
+  private async validateSubsectionLocationForOffer(
+    offer: PlanningOfferEntity,
+    buildingId: string | null | undefined,
+    classroomId: string | null | undefined,
+  ) {
+    const normalizedBuildingId = emptyToNull(buildingId);
+    const normalizedClassroomId = emptyToNull(classroomId);
+    const [building, classroom] = await Promise.all([
+      normalizedBuildingId
+        ? this.requireEntity(this.buildingsRepo, normalizedBuildingId, 'building')
+        : Promise.resolve(null),
+      normalizedClassroomId
+        ? this.requireEntity(this.classroomsRepo, normalizedClassroomId, 'classroom')
+        : Promise.resolve(null),
+    ]);
+
+    if (classroom && normalizedBuildingId && classroom.building_id && classroom.building_id !== normalizedBuildingId) {
+      throw new BadRequestException('El aula seleccionada no pertenece al pabellon indicado.');
+    }
+    if (building && offer.campus_id && building.campus_id !== offer.campus_id) {
+      throw new BadRequestException('El pabellon seleccionado no pertenece a la sede del plan.');
+    }
+    if (classroom && offer.campus_id && classroom.campus_id !== offer.campus_id) {
+      throw new BadRequestException('El aula seleccionada no pertenece a la sede del plan.');
+    }
+  }
+
   private async logChange(
     entityType: string,
     entityId: string,
@@ -1960,6 +3391,7 @@ export class PlanningManualService {
     beforeValue: unknown,
     afterValue: unknown,
     context?: Record<string, unknown>,
+    actor?: ChangeLogActor | null,
   ) {
     await this.changeLogsRepo.save(
       this.changeLogsRepo.create({
@@ -1969,7 +3401,8 @@ export class PlanningManualService {
         action,
         before_json: toLogJson(beforeValue),
         after_json: toLogJson(afterValue),
-        changed_by: 'SYSTEM',
+        changed_by_user_id: actor?.user_id ?? null,
+        changed_by: actor?.display_name || actor?.username || 'SYSTEM',
         context_json: context ?? null,
         changed_at: new Date(),
       }),
@@ -2135,6 +3568,18 @@ function emptyToNull(value: string | null | undefined) {
   return trimmed === '' ? null : trimmed;
 }
 
+function normalizeOptionalComment(value: string | null | undefined) {
+  return emptyToNull(value);
+}
+
+function normalizeRequiredComment(value: string | null | undefined) {
+  const normalized = emptyToNull(value);
+  if (!normalized) {
+    throw new BadRequestException('Debes ingresar un comentario para mandar el plan a correccion.');
+  }
+  return normalized;
+}
+
 function resolveGeneratedSubsectionKind(
   courseType: string | null | undefined,
   subsectionCount: number,
@@ -2150,6 +3595,55 @@ function resolveGeneratedSubsectionKind(
     return 'MIXED';
   }
   return index === 0 ? 'THEORY' : 'PRACTICE';
+}
+
+function resolveAllowedSubsectionKinds(
+  courseType: string | null | undefined,
+  subsectionCount: number,
+): PlanningSubsectionKind[] {
+  if (courseType === 'TEORICO') {
+    return ['THEORY'];
+  }
+  if (courseType === 'PRACTICO') {
+    return ['PRACTICE'];
+  }
+  if (Math.max(1, subsectionCount) <= 1) {
+    return ['MIXED'];
+  }
+  return ['THEORY', 'PRACTICE'];
+}
+
+function validateSubsectionKindDistribution(
+  courseType: string | null | undefined,
+  kinds: PlanningSubsectionKind[],
+) {
+  const normalizedKinds = kinds.filter(Boolean);
+  if (courseType === 'TEORICO') {
+    return normalizedKinds.every((item) => item === 'THEORY');
+  }
+  if (courseType === 'PRACTICO') {
+    return normalizedKinds.every((item) => item === 'PRACTICE');
+  }
+  if (normalizedKinds.length <= 1) {
+    return normalizedKinds[0] === 'MIXED';
+  }
+  return normalizedKinds.includes('THEORY') && normalizedKinds.includes('PRACTICE');
+}
+
+function buildSubsectionKindErrorMessage(
+  courseType: string | null | undefined,
+  subsectionCount: number,
+) {
+  if (courseType === 'TEORICO') {
+    return 'Este curso solo admite subsecciones teoricas.';
+  }
+  if (courseType === 'PRACTICO') {
+    return 'Este curso solo admite subsecciones practicas.';
+  }
+  if (Math.max(1, subsectionCount) <= 1) {
+    return 'Si solo existe una subseccion en un curso teorico practico, debe ser mixta.';
+  }
+  return 'En cursos teorico practico solo puedes usar subsecciones teoricas o practicas.';
 }
 
 function nextSectionCodeValue(existingCodes: Array<string | null | undefined>) {
@@ -2219,6 +3713,16 @@ function validateAcademicBlockTime(value: string) {
 function toMinutes(value: string) {
   const [hours = '0', minutes = '0'] = value.split(':');
   return Number(hours) * 60 + Number(minutes);
+}
+
+function minutesToTime(totalMinutes: number) {
+  const hours = Math.floor(totalMinutes / 60)
+    .toString()
+    .padStart(2, '0');
+  const minutes = Math.floor(totalMinutes % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${hours}:${minutes}:00`;
 }
 
 function overlap(startA: string, endA: string, startB: string, endB: string) {
@@ -2343,6 +3847,77 @@ function mapById<T extends { id: string }>(items: T[]) {
   return new Map(items.map((item) => [item.id, item]));
 }
 
+function formatPlanningTeacherDisplay(teacher: TeacherEntity | null) {
+  if (!teacher) {
+    return null;
+  }
+  const name = teacher.full_name || teacher.name || null;
+  if (!name) {
+    return teacher.dni || null;
+  }
+  return teacher.dni ? `${teacher.dni} - ${name}` : name;
+}
+
+function buildPlanningConflictAffectedLabel(
+  conflict: PlanningScheduleConflictV2Entity,
+  offer: PlanningOfferEntity | null,
+  section: PlanningSectionEntity | null,
+  subsection: PlanningSubsectionEntity | null,
+  teacher: TeacherEntity | null,
+) {
+  if (conflict.conflict_type === 'TEACHER_OVERLAP') {
+    return formatPlanningTeacherDisplay(teacher) ?? 'Docente sin asignar';
+  }
+  if (conflict.conflict_type === 'SECTION_OVERLAP') {
+    return [
+      offer?.course_code ? `${offer.course_code} - ${offer.course_name}` : offer?.course_name ?? null,
+      section?.code ? `Seccion ${section.code}` : null,
+      subsection?.code ?? null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
+  return subsection?.code ?? section?.code ?? offer?.course_name ?? 'Cruce detectado';
+}
+
+function buildPlanningConflictScheduleCard(
+  schedule: PlanningSubsectionScheduleEntity | null,
+  subsectionMap: Map<string, PlanningSubsectionEntity>,
+  sectionMap: Map<string, PlanningSectionEntity>,
+  offerMap: Map<string, PlanningOfferEntity>,
+  classroomMap: Map<string, ClassroomEntity>,
+) {
+  if (!schedule) {
+    return null;
+  }
+  const subsection = subsectionMap.get(schedule.planning_subsection_id) ?? null;
+  const section = subsection ? sectionMap.get(subsection.planning_section_id) ?? null : null;
+  const offer = section ? offerMap.get(section.planning_offer_id) ?? null : null;
+  const classroom = classroomMap.get(subsection?.classroom_id ?? '') ?? null;
+  const courseLabel = offer?.course_code
+    ? `${offer.course_code} - ${offer.course_name}`
+    : offer?.course_name ?? 'Sin curso';
+
+  return {
+    id: schedule.id,
+    offering_id: offer?.id ?? null,
+    course_label: courseLabel,
+    section_name: section?.code ? `Seccion ${section.code}` : null,
+    group_code: subsection?.code ?? null,
+    day_of_week: schedule.day_of_week,
+    start_time: schedule.start_time,
+    end_time: schedule.end_time,
+    classroom_name: classroom?.name ?? null,
+    summary: [
+      courseLabel,
+      section?.code ? `Seccion ${section.code}` : null,
+      subsection?.code ?? null,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+  };
+}
+
 function dedupePlanningConflicts(conflicts: PlanningScheduleConflictV2Entity[]) {
   const map = new Map<string, PlanningScheduleConflictV2Entity>();
   for (const conflict of conflicts) {
@@ -2368,4 +3943,178 @@ function toLogJson(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function buildChangeRows(
+  beforeValue: Record<string, unknown> | null,
+  afterValue: Record<string, unknown> | null,
+  action: 'CREATE' | 'UPDATE' | 'DELETE',
+) {
+  const before = asRecord(beforeValue) ?? {};
+  const after = asRecord(afterValue) ?? {};
+  const ignoredFields = new Set(['created_at', 'updated_at']);
+  const keys =
+    action === 'CREATE'
+      ? Object.keys(after)
+      : action === 'DELETE'
+        ? Object.keys(before)
+        : [...new Set([...Object.keys(before), ...Object.keys(after)])];
+
+  return keys
+    .filter((field) => !ignoredFields.has(field))
+    .filter((field) => action !== 'UPDATE' || !logValuesEqual(before[field], after[field]))
+    .sort((left, right) => left.localeCompare(right))
+    .map((field) => ({
+      field,
+      before: field in before ? before[field] : null,
+      after: field in after ? after[field] : null,
+    }));
+}
+
+function logValuesEqual(left: unknown, right: unknown) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+function normalizeLogLimit(value: number | undefined) {
+  const parsed = Math.trunc(Number(value ?? 100));
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 100;
+  }
+  return Math.min(parsed, 200);
+}
+
+function parseLogDate(value: string | undefined, isEnd: boolean) {
+  if (!value) {
+    return null;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T${isEnd ? '23:59:59.999' : '00:00:00.000'}Z`);
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeSearchValue(value: unknown) {
+  return `${value ?? ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function recordString(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function recordNumber(record: Record<string, unknown> | null, key: string) {
+  const value = record?.[key];
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function joinReferenceParts(parts: Array<string | null | undefined>) {
+  return parts.map((item) => item?.trim()).filter((item): item is string => Boolean(item)).join(' · ');
+}
+
+function buildChangeLogOfferLabel(
+  offer: PlanningOfferEntity | null,
+  studyPlan: StudyPlanEntity | null,
+  snapshot: Record<string, unknown> | null,
+  context: Record<string, unknown> | null,
+) {
+  const courseCode = coalesceCatalogLabel(offer?.course_code, recordString(snapshot, 'course_code'));
+  const courseName = coalesceCatalogLabel(offer?.course_name, recordString(snapshot, 'course_name'));
+  const studyPlanLabel = buildChangeLogStudyPlanLabel(studyPlan, snapshot, context);
+  const cycle = recordNumber(context, 'cycle') ?? recordNumber(snapshot, 'cycle');
+  const courseLabel = [courseCode, courseName].filter(Boolean).join(' - ');
+  return (
+    joinReferenceParts([
+      courseLabel || null,
+      studyPlanLabel,
+      cycle ? `Ciclo ${cycle}` : null,
+    ]) || null
+  );
+}
+
+function buildChangeLogStudyPlanLabel(
+  studyPlan: StudyPlanEntity | null,
+  snapshot: Record<string, unknown> | null,
+  context: Record<string, unknown> | null,
+) {
+  const career = coalesceCatalogLabel(
+    studyPlan?.career,
+    studyPlan?.academic_program,
+    recordString(snapshot, 'career_name'),
+    recordString(context, 'career_name'),
+    recordString(snapshot, 'academic_program'),
+  );
+  const year = coalesceCatalogLabel(studyPlan?.year, recordString(snapshot, 'study_plan_year'));
+  const planName = coalesceCatalogLabel(studyPlan?.name, recordString(snapshot, 'study_plan_name'));
+  return coalesceCatalogLabel(
+    [career, year].filter(Boolean).join(' - ') || null,
+    planName,
+  );
+}
+
+function buildChangeLogScheduleLabel(
+  snapshot: Record<string, unknown> | null,
+  context: Record<string, unknown> | null,
+) {
+  const day = formatScheduleDayLabel(
+    recordString(snapshot, 'day_of_week') ?? recordString(context, 'day_of_week'),
+  );
+  const start = normalizeScheduleTimeValue(
+    recordString(snapshot, 'start_time') ?? recordString(context, 'start_time'),
+  );
+  const end = normalizeScheduleTimeValue(
+    recordString(snapshot, 'end_time') ?? recordString(context, 'end_time'),
+  );
+  const range = start && end ? `${start}-${end}` : null;
+  return joinReferenceParts([day, range]);
+}
+
+function formatScheduleDayLabel(value: string | null | undefined) {
+  switch ((value ?? '').trim().toUpperCase()) {
+    case 'LUNES':
+      return 'Lunes';
+    case 'MARTES':
+      return 'Martes';
+    case 'MIERCOLES':
+      return 'Miercoles';
+    case 'JUEVES':
+      return 'Jueves';
+    case 'VIERNES':
+      return 'Viernes';
+    case 'SABADO':
+      return 'Sabado';
+    case 'DOMINGO':
+      return 'Domingo';
+    default:
+      return coalesceCatalogLabel(value);
+  }
+}
+
+function normalizeScheduleTimeValue(value: string | null | undefined) {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) {
+    return null;
+  }
+  return /^\d{2}:\d{2}:\d{2}$/.test(normalized) ? normalized.slice(0, 5) : normalized;
 }

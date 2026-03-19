@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 import { newId } from '../common';
 import {
@@ -116,8 +116,10 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Credenciales invalidas.');
     }
 
-    const authUser = await this.buildAuthenticatedUser(user.id);
-    const tokens = await this.issueTokens(user.id, user.username);
+    const [authUser, tokens] = await Promise.all([
+      this.buildAuthenticatedUser(user.id, user),
+      this.issueTokens(user.id, user.username),
+    ]);
     return {
       ...tokens,
       user: this.serializeUser(user),
@@ -225,8 +227,8 @@ export class AuthService implements OnModuleInit {
     }
   }
 
-  async buildAuthenticatedUser(userId: string): Promise<AuthenticatedRequestUser> {
-    const user = await this.requireActiveUser(userId);
+  async buildAuthenticatedUser(userId: string, cachedUser?: AuthUserEntity): Promise<AuthenticatedRequestUser> {
+    const user = cachedUser ?? await this.requireActiveUser(userId);
     const assignments = await this.assignmentsRepo.find({
       where: { user_id: userId, is_active: true },
       order: { created_at: 'ASC' },
@@ -424,6 +426,22 @@ export class AuthService implements OnModuleInit {
           existing.description = seed.description;
           changed = true;
         }
+        if ((existing.display_name ?? null) !== (seed.display_name ?? null)) {
+          existing.display_name = seed.display_name ?? null;
+          changed = true;
+        }
+        if ((existing.group_key ?? null) !== (seed.group_key ?? null)) {
+          existing.group_key = seed.group_key ?? null;
+          changed = true;
+        }
+        if ((existing.parent_window_code ?? null) !== (seed.parent_window_code ?? null)) {
+          existing.parent_window_code = seed.parent_window_code ?? null;
+          changed = true;
+        }
+        if (Number(existing.sort_order ?? 0) !== Number(seed.sort_order ?? 0)) {
+          existing.sort_order = Number(seed.sort_order ?? 0);
+          changed = true;
+        }
         if (!existing.is_active) {
           existing.is_active = true;
           changed = true;
@@ -442,6 +460,10 @@ export class AuthService implements OnModuleInit {
           code: seed.code,
           type: seed.type,
           description: seed.description,
+          display_name: seed.display_name ?? null,
+          group_key: seed.group_key ?? null,
+          parent_window_code: seed.parent_window_code ?? null,
+          sort_order: Number(seed.sort_order ?? 0),
           is_active: true,
           created_at: now,
           updated_at: now,
@@ -571,7 +593,7 @@ export class AuthService implements OnModuleInit {
       this.refreshTokensRepo.create({
         id: refreshId,
         user_id: userId,
-        token_hash: await bcrypt.hash(refreshToken, 10),
+        token_hash: await bcrypt.hash(refreshToken, 5),
         expires_at: new Date(now.getTime() + this.refreshExpiresDays * 24 * 60 * 60 * 1000),
         revoked_at: null,
         created_at: now,

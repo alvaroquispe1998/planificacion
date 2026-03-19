@@ -70,6 +70,18 @@ export class AuthPermissionEntity {
   @Column({ type: 'varchar', length: 180 })
   description!: string;
 
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  display_name!: string | null;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  group_key!: string | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  parent_window_code!: string | null;
+
+  @Column({ type: 'int', default: 0 })
+  sort_order!: number;
+
   @Column({ type: 'boolean', default: true })
   is_active!: boolean;
 

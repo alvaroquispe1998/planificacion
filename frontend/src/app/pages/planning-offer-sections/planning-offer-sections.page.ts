@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { catchError, finalize, forkJoin, of } from 'rxjs';
 import { ApiService } from '../../core/api.service';
+import { AuthService } from '../../core/auth.service';
+import { DialogService } from '../../core/dialog.service';
 
 type CreateSectionMode = 'SINGLE' | 'MULTIPLE';
 
@@ -90,6 +92,8 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     private readonly route: ActivatedRoute,
     private readonly router: Router,
     private readonly cdr: ChangeDetectorRef,
+    private readonly dialog: DialogService,
+    readonly auth: AuthService,
   ) {}
 
   ngOnInit(): void {
@@ -121,7 +125,15 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   }
 
   get canCreateSection() {
-    return Boolean(this.offer) && !this.saving;
+    return Boolean(this.offer) && !this.saving && !this.isWorkflowReadOnly;
+  }
+
+  get planRule() {
+    return this.offer?.plan_rule ?? null;
+  }
+
+  get isWorkflowReadOnly() {
+    return ['IN_REVIEW', 'APPROVED'].includes(this.planRule?.workflow_status ?? '');
   }
 
   get activeSection() {
@@ -152,6 +164,13 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     const items = this.catalog.course_modalities ?? [];
     const filtered = items.filter((item: any) => preferredCodes.has(item.code));
     return filtered.length > 0 ? filtered : items;
+  }
+
+  get campusBuildings() {
+    if (!this.offer?.campus_id) {
+      return [];
+    }
+    return this.buildings.filter((item: any) => item.campus_id === this.offer.campus_id);
   }
 
   loadPage() {
@@ -217,7 +236,25 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     });
   }
 
+  openChangeLog() {
+    if (!this.offerId) {
+      return;
+    }
+    this.router.navigate(['/planning/change-log'], {
+      queryParams: {
+        offer_id: this.offerId,
+        semester_id: this.offer?.semester_id ?? null,
+        campus_id: this.offer?.campus_id ?? null,
+        faculty_id: this.offer?.faculty_id ?? null,
+        academic_program_id: this.offer?.academic_program_id ?? null,
+      },
+    });
+  }
+
   openCreateSectionModal() {
+    if (this.isWorkflowReadOnly) {
+      return;
+    }
     this.createSectionForm = {
       mode: 'SINGLE',
       subsection_count: 3,
@@ -251,6 +288,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     this.expandedSectionId = section.id;
     this.activeSectionId = section.id;
     this.activeSubsectionId = subsection.id;
+    this.scheduleDraftsBySubsectionId[subsection.id] = this.scheduleDraftFromSubsection(subsection);
     this.drawerOpen = true;
   }
 
@@ -301,7 +339,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   }
 
   createSection() {
-    if (!this.offerId) {
+    if (!this.offerId || this.isWorkflowReadOnly) {
       return;
     }
     const subsectionCount =
@@ -407,6 +445,9 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   }
 
   updateSectionTeacher(section: any, teacherId: string) {
+    if (this.isWorkflowReadOnly) {
+      return;
+    }
     this.saving = true;
     this.api
       .updatePlanningSection(section.id, {
@@ -430,6 +471,9 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   }
 
   updateSectionVacancies(section: any, value: number | string) {
+    if (this.isWorkflowReadOnly) {
+      return;
+    }
     const parsed = Math.max(0, Math.trunc(Number(value || 0)));
     if (Number(section.projected_vacancies ?? 0) === parsed) {
       section.projected_vacancies = parsed;
@@ -458,21 +502,76 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       });
   }
 
-  updateSubsectionVacancies(subsection: any, value: number | string) {
-    const parsed = Math.max(0, Math.trunc(Number(value || 0)));
-    if (Number(subsection.projected_vacancies ?? 0) === parsed) {
-      subsection.projected_vacancies = parsed;
+  async deleteSection(section: any) {
+    if (!section?.id || this.isWorkflowReadOnly || this.saving) {
       return;
     }
-    subsection.projected_vacancies = parsed;
+    if (!this.canDeleteSection(section)) {
+      this.error = this.sectionDeleteHelper(section);
+      this.message = '';
+      this.cdr.detectChanges();
+      return;
+    }
+    const confirmation = await this.dialog.confirm({
+      title: `Eliminar seccion ${section.code}`,
+      message: `Se eliminara la seccion ${section.code} y todas sus subsecciones.\n\nEsta accion no se puede deshacer. Deseas continuar?`,
+      confirmLabel: 'Eliminar seccion',
+      cancelLabel: 'Cancelar',
+      tone: 'danger',
+    });
+    if (!confirmation) {
+      return;
+    }
+
+    this.saving = true;
+    this.error = '';
+    this.message = '';
+    this.api.deletePlanningSection(section.id).subscribe({
+      next: (response) => {
+        const deletedSubsections = Number(response?.deleted_subsection_count ?? 0);
+        const deletedSchedules = Number(response?.deleted_schedule_count ?? 0);
+        this.message = `Seccion ${section.code} eliminada. ${deletedSubsections} subsecciones y ${deletedSchedules} horarios eliminados.`;
+        if (this.expandedSectionId === section.id) {
+          this.expandedSectionId = '';
+        }
+        if (this.activeSectionId === section.id) {
+          this.closeSubsectionDrawer();
+        }
+        this.saving = false;
+        this.reloadOffer();
+      },
+      error: (err) => {
+        this.error = err?.error?.message ?? 'No se pudo eliminar la seccion.';
+        this.saving = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  updateSubsectionVacancies(subsection: any, value: number | string) {
+    const parsed = Math.max(0, Math.trunc(Number(value || 0)));
+    const limit = this.subsectionVacancyLimit(subsection);
+    const normalized = Math.min(parsed, limit);
+    if (parsed > limit) {
+      this.message = '';
+      this.error = `La vacante de ${subsection.code} no puede superar la vacante de la seccion (${limit}).`;
+    }
+    if (Number(subsection.projected_vacancies ?? 0) === normalized) {
+      subsection.projected_vacancies = normalized;
+      return;
+    }
+    subsection.projected_vacancies = normalized;
     this.updateSubsectionField(
       subsection,
-      { projected_vacancies: parsed },
+      { projected_vacancies: normalized },
       `Vacantes actualizadas para ${subsection.code}.`,
     );
   }
 
   updateSubsectionField(subsection: any, payload: Record<string, unknown>, successMessage: string) {
+    if (this.isWorkflowReadOnly) {
+      return;
+    }
     this.saving = true;
     this.api.updatePlanningSubsection(subsection.id, payload).subscribe({
       next: (updatedSubsection) => {
@@ -526,11 +625,48 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     );
   }
 
+  onSubsectionKindChange(subsection: any, value: string) {
+    if (!value || subsection.kind === value) {
+      return;
+    }
+    this.updateSubsectionField(subsection, { kind: value }, `Tipo actualizado para ${subsection.code}.`);
+  }
+
+  subsectionKindOptions(subsection: any) {
+    const section = this.findSectionBySubsection(subsection?.id ?? '');
+    const subsectionCount = Math.max(1, Number(section?.subsections?.length ?? 0));
+    switch (this.offer?.course_type) {
+      case 'TEORICO':
+        return [{ value: 'THEORY', label: 'Teorico' }];
+      case 'PRACTICO':
+        return [{ value: 'PRACTICE', label: 'Practico' }];
+      default:
+        if (subsectionCount <= 1) {
+          return [{ value: 'MIXED', label: 'Mixto' }];
+        }
+        return [
+          { value: 'THEORY', label: 'Teorico' },
+          { value: 'PRACTICE', label: 'Practico' },
+        ];
+    }
+  }
+
+  canEditSubsectionKind(subsection: any) {
+    return this.subsectionKindOptions(subsection).length > 1;
+  }
+
   classroomsForBuilding(buildingId: string | null | undefined) {
     if (!buildingId) {
       return [];
     }
-    return this.classrooms.filter((item: any) => item.building_id === buildingId);
+    return this.classrooms.filter(
+      (item: any) => item.building_id === buildingId && item.campus_id === this.offer?.campus_id,
+    );
+  }
+
+  subsectionVacancyLimit(subsection: any) {
+    const section = this.findSectionBySubsection(subsection?.id ?? '');
+    return Math.max(0, Math.trunc(Number(section?.projected_vacancies ?? 0)));
   }
 
   classroomOptionLabel(classroom: any) {
@@ -607,6 +743,32 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     }
   }
 
+  workflowStatusLabel(status: string | null | undefined) {
+    switch (status) {
+      case 'IN_REVIEW':
+        return 'En revision';
+      case 'APPROVED':
+        return 'Aprobado';
+      case 'IN_CORRECTION':
+        return 'En correccion';
+      default:
+        return 'Borrador';
+    }
+  }
+
+  workflowStatusClass(status: string | null | undefined) {
+    switch (status) {
+      case 'IN_REVIEW':
+        return 'status-review';
+      case 'APPROVED':
+        return 'status-approved';
+      case 'IN_CORRECTION':
+        return 'status-correction';
+      default:
+        return 'status-draft';
+    }
+  }
+
   previewAcademicHours(subsectionId: string) {
     const minutes = this.scheduleMinutes(subsectionId);
     return minutes === null ? '---' : this.formatAcademicHours(minutes / 50);
@@ -639,7 +801,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     if (!draft) {
       return;
     }
-    draft.start_time = value;
+    draft.start_time = this.normalizeScheduleTime(value, draft.start_time || '07:40');
     const endOptions = this.availableEndTimeOptions(subsectionId);
     const currentEndMinutes = this.toMinutes(draft.end_time);
     if (!endOptions.some((option) => option.value === draft.end_time) || currentEndMinutes <= this.toMinutes(value)) {
@@ -647,7 +809,18 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     }
   }
 
+  onScheduleEndTimeChange(subsectionId: string, value: string) {
+    const draft = this.scheduleDraftsBySubsectionId[subsectionId];
+    if (!draft) {
+      return;
+    }
+    draft.end_time = this.normalizeScheduleTime(value, draft.end_time || '08:30');
+  }
+
   saveSchedule(subsection: any) {
+    if (this.isWorkflowReadOnly) {
+      return;
+    }
     const draft = this.scheduleDraftsBySubsectionId[subsection.id];
     if (!this.canCreateSchedule(subsection.id)) {
       return;
@@ -677,7 +850,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   }
 
   deleteSchedule(subsection: any, scheduleId: string) {
-    if (!scheduleId) {
+    if (!scheduleId || this.isWorkflowReadOnly) {
       return;
     }
     this.saving = true;
@@ -853,11 +1026,41 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     return this.offer?.sections?.find((item: any) => item.id === sectionId) ?? null;
   }
 
+  canDeleteSection(section: any) {
+    if (!section?.id) {
+      return false;
+    }
+    const sections = this.offer?.sections ?? [];
+    const highestIndex = sections.reduce((currentMax: number, item: any) => {
+      const index = this.sectionCodeIndex(item?.code);
+      return index === null ? currentMax : Math.max(currentMax, index);
+    }, -1);
+    const currentIndex = this.sectionCodeIndex(section.code);
+    return currentIndex !== null && currentIndex === highestIndex;
+  }
+
+  sectionDeleteHelper(section: any) {
+    if (this.canDeleteSection(section)) {
+      return 'Eliminar esta seccion tambien eliminara sus subsecciones y horarios.';
+    }
+    return 'Solo puedes eliminar la ultima seccion para conservar el correlativo.';
+  }
+
   private findSubsection(subsectionId: string) {
     for (const section of this.offer?.sections ?? []) {
       const found = section.subsections?.find((item: any) => item.id === subsectionId);
       if (found) {
         return found;
+      }
+    }
+    return null;
+  }
+
+  private findSectionBySubsection(subsectionId: string) {
+    for (const section of this.offer?.sections ?? []) {
+      const found = section.subsections?.some((item: any) => item.id === subsectionId);
+      if (found) {
+        return section;
       }
     }
     return null;
@@ -885,7 +1088,9 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
         this.subsectionTeacherMenuOpenById[subsection.id] =
           this.subsectionTeacherMenuOpenById[subsection.id] ?? false;
         nextScheduleDrafts[subsection.id] =
-          nextScheduleDrafts[subsection.id] ?? this.scheduleDraftFromSubsection(subsection);
+          (subsection?.schedules?.length ?? 0) > 0
+            ? this.scheduleDraftFromSubsection(subsection)
+            : nextScheduleDrafts[subsection.id] ?? this.scheduleDraftFromSubsection(subsection);
       }
     }
 
@@ -958,6 +1163,18 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     return String(left?.start_time ?? '').localeCompare(String(right?.start_time ?? ''));
   }
 
+  private sectionCodeIndex(code: string | null | undefined) {
+    const normalized = `${code ?? ''}`.trim().toUpperCase();
+    if (!/^[A-Z]+$/.test(normalized)) {
+      return null;
+    }
+    let index = 0;
+    for (const char of normalized) {
+      index = index * 26 + (char.charCodeAt(0) - 64);
+    }
+    return index - 1;
+  }
+
   private upsertSection(section: any) {
     const currentSections = [...(this.offer?.sections ?? [])].filter((item: any) => item.id !== section.id);
     currentSections.push(this.normalizeSection(section));
@@ -1003,8 +1220,8 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     }
     return {
       day_of_week: schedule.day_of_week ?? 'LUNES',
-      start_time: schedule.start_time ?? '07:40',
-      end_time: schedule.end_time ?? '08:30',
+      start_time: this.normalizeScheduleTime(schedule.start_time, '07:40'),
+      end_time: this.normalizeScheduleTime(schedule.end_time, '08:30'),
     };
   }
 
@@ -1034,6 +1251,11 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   private toMinutes(value: string) {
     const [hours = '0', minutes = '0'] = String(value).split(':');
     return Number(hours) * 60 + Number(minutes);
+  }
+
+  private normalizeScheduleTime(value: string | null | undefined, fallback: string) {
+    const normalized = String(value ?? '').slice(0, 5);
+    return this.scheduleTimeOptions.some((option) => option.value === normalized) ? normalized : fallback;
   }
 
   private isAcademicBlockAligned(minutes: number) {

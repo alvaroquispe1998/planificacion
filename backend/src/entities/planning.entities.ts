@@ -28,6 +28,12 @@ export const ConflictTypeValues = [
 export const ConflictSeverityValues = ['INFO', 'WARNING', 'CRITICAL'] as const;
 export const PlanningOfferStatusValues = ['DRAFT', 'ACTIVE', 'OBSERVED', 'CLOSED'] as const;
 export const PlanningSubsectionKindValues = ['THEORY', 'PRACTICE', 'MIXED'] as const;
+export const PlanningPlanWorkflowStatusValues = [
+  'DRAFT',
+  'IN_REVIEW',
+  'APPROVED',
+  'IN_CORRECTION',
+] as const;
 export const PlanningV2ConflictTypeValues = [
   'TEACHER_OVERLAP',
   'CLASSROOM_OVERLAP',
@@ -334,6 +340,30 @@ export class PlanningCyclePlanRuleEntity {
   @Column({ type: 'boolean', default: true })
   is_active!: boolean;
 
+  @Column({ type: 'enum', enum: PlanningPlanWorkflowStatusValues, default: 'DRAFT' })
+  workflow_status!: (typeof PlanningPlanWorkflowStatusValues)[number];
+
+  @Column({ type: 'datetime', nullable: true })
+  submitted_at!: Date | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  submitted_by_user_id!: string | null;
+
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  submitted_by!: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  reviewed_at!: Date | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  reviewed_by_user_id!: string | null;
+
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  reviewed_by!: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  review_comment!: string | null;
+
   @Column({ type: 'datetime' })
   created_at!: Date;
 
@@ -619,6 +649,9 @@ export class PlanningChangeLogEntity {
 
   @Column({ type: 'json', nullable: true })
   after_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  changed_by_user_id!: string | null;
 
   @Column({ type: 'varchar', length: 80, nullable: true })
   changed_by!: string | null;

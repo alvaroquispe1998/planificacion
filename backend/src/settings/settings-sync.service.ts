@@ -74,6 +74,17 @@ type SourceProbeResult = {
   final_url?: string;
 };
 
+type AulaVirtualAutoLoginConfig = {
+  loginUrl: string;
+  username: string;
+  password: string;
+  usernameField: string;
+  passwordField: string;
+  returnUrlField: string;
+  returnUrlValue: string | null;
+  userAgent: string;
+};
+
 const SOURCE_DEFINITIONS: Array<{
   code: SourceCode;
   name: string;
@@ -329,6 +340,7 @@ const RESOURCE_BY_CODE = new Map(RESOURCE_DEFINITIONS.map((item) => [item.code, 
 @Injectable()
 export class SettingsSyncService {
   private readonly allowInsecureTls: boolean;
+  private readonly sourceAutoLoginInFlight = new Map<SourceCode, Promise<SourceProbeResult>>();
 
   constructor(
     private readonly configService: ConfigService,
@@ -507,90 +519,15 @@ export class SettingsSyncService {
       return { source_code: normalized, ok: false, reason: 'Fuente no configurada.' };
     }
 
-    const source = await this.sourcesRepo.findOne({ where: { code: normalized } });
-    if (!source) {
-      return { source_code: normalized, ok: false, reason: 'Fuente no encontrada en BD.' };
-    }
-
-    const session = await this.sessionsRepo.findOne({ where: { source_id: source.id } });
-    if (!session) {
-      return { source_code: normalized, ok: false, reason: 'No hay cookie guardada.' };
-    }
-
-    const cookie = this.decryptCookieJar(session.cookie_jar_encrypted);
-    const url = new URL(def.validate_path, def.base_url);
-    if (!url.searchParams.has('length')) {
-      url.searchParams.set('length', '1');
-    }
-    const fetchUrl = url.toString();
-
-    console.log(`[VALIDATE ${normalized}] URL: ${fetchUrl}`);
-    console.log(`[VALIDATE ${normalized}] Cookie (first 80): ${cookie.substring(0, 80)}...`);
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-
-    try {
-      const res = await fetch(fetchUrl, {
-        method: 'GET',
-        headers: {
-          accept: 'application/json, text/plain, */*',
-          cookie,
-          'x-requested-with': 'XMLHttpRequest',
-        },
-        redirect: 'follow',
-        signal: controller.signal,
-      });
-
-      const text = await res.text();
-      const contentType = res.headers.get('content-type') ?? '';
-
-      console.log(`[VALIDATE ${normalized}] Status: ${res.status} | Content-Type: ${contentType}`);
-      console.log(`[VALIDATE ${normalized}] Redirected: ${res.redirected} | Final URL: ${res.url}`);
-      console.log(`[VALIDATE ${normalized}] Body preview: ${text.substring(0, 200)}`);
-
-      // If redirected to login or 401/403 → invalid
-      if (res.status === 401 || res.status === 403) {
-        return { source_code: normalized, ok: false, reason: `No autorizado (${res.status}).` };
-      }
-      if (res.redirected && /login|signin/i.test(res.url)) {
-        return { source_code: normalized, ok: false, reason: 'Redirigido a login. Cookie expirada.' };
-      }
-
-      // Try parse JSON
-      try {
-        const json = JSON.parse(text);
-        const hasData =
-          Array.isArray(json) ||
-          (json && (Array.isArray(json.data) || json.data !== undefined || json.recordsTotal !== undefined));
-
-        if (hasData) {
-          await this.sessionsRepo.update({ id: session.id }, {
-            status: 'ACTIVE',
-            last_validated_at: new Date(),
-            error_last: null,
-            updated_at: new Date(),
-          });
-          return { source_code: normalized, ok: true, reason: null };
-        }
-        return { source_code: normalized, ok: false, reason: `JSON sin campo "data" y no es array. Keys: ${Object.keys(json).join(', ')}` };
-      } catch {
-        // Not JSON - maybe HTML login page
-        const bodyPreview = text.substring(0, 120).replace(/\s+/g, ' ').trim();
-        return {
-          source_code: normalized,
-          ok: false,
-          reason: `HTTP ${res.status} - No es JSON (${contentType}). Preview: ${bodyPreview}`,
-        };
-      }
-    } catch (err) {
-      const msg = err instanceof Error && err.name === 'AbortError'
-        ? 'Timeout (5s).' : (err instanceof Error ? err.message : 'Error de conexión.');
-      console.log(`[VALIDATE ${normalized}] Error: ${msg}`);
-      return { source_code: normalized, ok: false, reason: msg };
-    } finally {
-      clearTimeout(timer);
-    }
+    await this.ensureDefaultSources();
+    const result = await this.probeSourceSession(normalized as SourceCode);
+    return {
+      source_code: normalized,
+      ok: result.ok,
+      reason: result.reason ?? null,
+      status_code: result.status_code ?? null,
+      final_url: result.final_url ?? null,
+    };
   }
 
   async validateAllSourceSessions() {
@@ -1500,6 +1437,14 @@ export class SettingsSyncService {
     const source = await this.findSourceOrFail(code);
     const session = await this.sessionsRepo.findOne({ where: { source_id: source.id } });
     if (!session) {
+      const autoLoginResult = await this.tryAutoLoginForSource(
+        source,
+        null,
+        'No existe cookie/sesion configurada.',
+      );
+      if (autoLoginResult) {
+        return autoLoginResult;
+      }
       return { ok: false, source, session: null, reason: 'No existe cookie/sesion configurada.' };
     }
 
@@ -1515,12 +1460,20 @@ export class SettingsSyncService {
     const responseError = this.normalizeErrorText(response.error);
 
     if (response.expired) {
+      const autoLoginResult = await this.tryAutoLoginForSource(
+        source,
+        session,
+        responseError ?? 'Sesion vencida',
+      );
+      if (autoLoginResult?.ok) {
+        return autoLoginResult;
+      }
       await this.markSessionStatus(source.id, 'EXPIRED', responseError ?? 'Sesion vencida');
       return {
         ok: false,
         source,
         session,
-        reason: responseError ?? 'Sesion vencida',
+        reason: autoLoginResult?.reason ?? responseError ?? 'Sesion vencida',
         status_code: response.status,
         final_url: response.final_url,
       };
@@ -1558,6 +1511,264 @@ export class SettingsSyncService {
       status_code: response.status,
       final_url: response.final_url,
     };
+  }
+
+  private async tryAutoLoginForSource(
+    source: ExternalSourceEntity,
+    session: ExternalSessionEntity | null,
+    reason: string,
+  ) {
+    if (source.code !== 'AULAVIRTUAL') {
+      return null;
+    }
+
+    const config = this.getAulaVirtualAutoLoginConfig(source);
+    if (!config) {
+      return null;
+    }
+
+    return this.runAutoLoginOnce('AULAVIRTUAL', () =>
+      this.loginAulaVirtualAndPersistSession(source, session, config, reason),
+    );
+  }
+
+  private async runAutoLoginOnce(code: SourceCode, worker: () => Promise<SourceProbeResult>) {
+    const existing = this.sourceAutoLoginInFlight.get(code);
+    if (existing) {
+      return existing;
+    }
+
+    const current = worker().finally(() => {
+      this.sourceAutoLoginInFlight.delete(code);
+    });
+    this.sourceAutoLoginInFlight.set(code, current);
+    return current;
+  }
+
+  private getAulaVirtualAutoLoginConfig(
+    source: ExternalSourceEntity,
+  ): AulaVirtualAutoLoginConfig | null {
+    const username = this.configService.get<string>('AULA_VIRTUAL_USERNAME', '').trim();
+    const password = this.configService.get<string>('AULA_VIRTUAL_PASSWORD', '').trim();
+    const enabledDefault = username && password ? 'true' : 'false';
+    const enabled =
+      this.configService.get<string>('AULA_VIRTUAL_AUTO_LOGIN_ENABLED', enabledDefault) === 'true';
+
+    if (!enabled || !username || !password) {
+      return null;
+    }
+
+    const loginUrl =
+      this.configService.get<string>('AULA_VIRTUAL_LOGIN_URL', '').trim() ||
+      source.login_url ||
+      this.getSourceDefinition(source.code).login_url ||
+      '';
+    if (!loginUrl) {
+      return null;
+    }
+
+    const parsedLoginUrl = new URL(loginUrl);
+    const returnUrlValue =
+      this.configService.get<string>('AULA_VIRTUAL_LOGIN_RETURN_URL_VALUE', '').trim() ||
+      parsedLoginUrl.searchParams.get('ReturnUrl') ||
+      '/';
+
+    return {
+      loginUrl,
+      username,
+      password,
+      usernameField: this.configService
+        .get<string>('AULA_VIRTUAL_LOGIN_USERNAME_FIELD', 'username')
+        .trim(),
+      passwordField: this.configService
+        .get<string>('AULA_VIRTUAL_LOGIN_PASSWORD_FIELD', 'password')
+        .trim(),
+      returnUrlField: this.configService
+        .get<string>('AULA_VIRTUAL_LOGIN_RETURN_URL_FIELD', 'ReturnUrl')
+        .trim(),
+      returnUrlValue,
+      userAgent: this.configService
+        .get<string>('AULA_VIRTUAL_LOGIN_USER_AGENT', 'Mozilla/5.0 (UAI Sync)')
+        .trim(),
+    };
+  }
+
+  private async loginAulaVirtualAndPersistSession(
+    source: ExternalSourceEntity,
+    existingSession: ExternalSessionEntity | null,
+    config: AulaVirtualAutoLoginConfig,
+    reason: string,
+  ): Promise<SourceProbeResult> {
+    try {
+      const loginPageResponse = await fetch(config.loginUrl, {
+        method: 'GET',
+        headers: {
+          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'user-agent': config.userAgent,
+        },
+        redirect: 'follow',
+      });
+
+      const loginPageHtml = await loginPageResponse.text();
+      const loginPageCookies = getSetCookieValues(loginPageResponse.headers);
+      let cookieHeader = mergeCookieHeaders(
+        buildCookieHeaderFromSetCookies(loginPageCookies),
+      );
+
+      const form = new URLSearchParams();
+      const hiddenFields = extractHiddenInputFields(loginPageHtml);
+      for (const [field, value] of Object.entries(hiddenFields)) {
+        form.set(field, value);
+      }
+      form.set(config.usernameField, config.username);
+      form.set(config.passwordField, config.password);
+      if (config.returnUrlField && config.returnUrlValue && !form.has(config.returnUrlField)) {
+        form.set(config.returnUrlField, config.returnUrlValue);
+      }
+
+      const loginResponse = await fetch(config.loginUrl, {
+        method: 'POST',
+        headers: {
+          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'content-type': 'application/x-www-form-urlencoded',
+          cookie: cookieHeader,
+          origin: new URL(config.loginUrl).origin,
+          referer: config.loginUrl,
+          'user-agent': config.userAgent,
+        },
+        body: form.toString(),
+        redirect: 'manual',
+      });
+
+      const loginCookies = getSetCookieValues(loginResponse.headers);
+      cookieHeader = mergeCookieHeaders(
+        cookieHeader,
+        buildCookieHeaderFromSetCookies(loginCookies),
+      );
+
+      const redirectLocation = loginResponse.headers.get('location');
+      const shouldFollowRedirect =
+        isRedirectStatus(loginResponse.status) && Boolean(redirectLocation);
+
+      if (shouldFollowRedirect && redirectLocation) {
+        const redirectedUrl = new URL(redirectLocation, config.loginUrl).toString();
+        const followResponse = await fetch(redirectedUrl, {
+          method: 'GET',
+          headers: {
+            accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            cookie: cookieHeader,
+            referer: config.loginUrl,
+            'user-agent': config.userAgent,
+          },
+          redirect: 'follow',
+        });
+        cookieHeader = mergeCookieHeaders(
+          cookieHeader,
+          buildCookieHeaderFromSetCookies(getSetCookieValues(followResponse.headers)),
+        );
+      }
+
+      const lauxAuth = getCookieValue(cookieHeader, 'LAUXAUTH');
+      if (!lauxAuth) {
+        await this.markSessionStatus(
+          source.id,
+          'ERROR',
+          'No se obtuvo LAUXAUTH al renovar la sesion de Aula Virtual.',
+        );
+        return {
+          ok: false,
+          source,
+          session: existingSession,
+          reason: 'No se obtuvo LAUXAUTH al renovar la sesion de Aula Virtual.',
+        };
+      }
+
+      const validatePath = this.getSourceDefinition(source.code).validate_path;
+      const validateResponse = await this.requestSource(
+        source,
+        cookieHeader,
+        validatePath,
+        undefined,
+        this.getValidateRequestTimeoutMs(),
+      );
+      const validateError = this.normalizeErrorText(validateResponse.error);
+      if (validateResponse.expired || !validateResponse.ok) {
+        const errorText =
+          validateError ?? 'Login automatico ejecutado, pero la sesion sigue sin validar.';
+        await this.markSessionStatus(source.id, 'ERROR', errorText);
+        return {
+          ok: false,
+          source,
+          session: existingSession,
+          reason: errorText,
+          status_code: validateResponse.status,
+          final_url: validateResponse.final_url,
+        };
+      }
+
+      const expiresAt =
+        validateResponse.expires_at ??
+        extractEarliestExpiry([...loginPageCookies, ...loginCookies]) ??
+        null;
+      const persistedSession = await this.saveSourceSessionCookie(
+        source,
+        existingSession,
+        cookieHeader,
+        expiresAt,
+      );
+
+      return {
+        ok: true,
+        source,
+        session: persistedSession,
+        cookie: cookieHeader,
+        reason,
+        status_code: validateResponse.status,
+        final_url: validateResponse.final_url,
+      };
+    } catch (error) {
+      const errorText = `No se pudo renovar Aula Virtual automaticamente: ${this.toErrorMessage(error)}`;
+      await this.markSessionStatus(source.id, 'ERROR', errorText);
+      return {
+        ok: false,
+        source,
+        session: existingSession,
+        reason: errorText,
+      };
+    }
+  }
+
+  private async saveSourceSessionCookie(
+    source: ExternalSourceEntity,
+    existingSession: ExternalSessionEntity | null,
+    cookie: string,
+    expiresAt: Date | null,
+  ) {
+    const encrypted = this.encryptCookieJar(this.normalizeCookieText(cookie));
+    const now = new Date();
+    const session = existingSession
+      ? this.sessionsRepo.create({
+        ...existingSession,
+        cookie_jar_encrypted: encrypted,
+        status: 'ACTIVE',
+        last_validated_at: now,
+        expires_at: expiresAt,
+        error_last: null,
+        updated_at: now,
+      })
+      : this.sessionsRepo.create({
+        id: newId(),
+        source_id: source.id,
+        cookie_jar_encrypted: encrypted,
+        status: 'ACTIVE',
+        last_validated_at: now,
+        expires_at: expiresAt,
+        error_last: null,
+        created_at: now,
+        updated_at: now,
+      });
+
+    return this.sessionsRepo.save(session);
   }
 
   private async requestSource(
@@ -2645,6 +2856,109 @@ async function runWithConcurrency<T, R>(
 function stableId(partA: string, partB: string) {
   const hash = createHash('sha1').update(`${partA}::${partB}`).digest('hex');
   return hash.slice(0, 36);
+}
+
+function getSetCookieValues(headers: Headers) {
+  const values = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.();
+  if (Array.isArray(values) && values.length > 0) {
+    return values;
+  }
+
+  const single = headers.get('set-cookie');
+  return single ? [single] : [];
+}
+
+function buildCookieHeaderFromSetCookies(cookies: string[]) {
+  const pieces = cookies
+    .map((item) => item.split(';')[0]?.trim() ?? '')
+    .filter((item) => item.includes('='));
+  return mergeCookieHeaders(...pieces);
+}
+
+function mergeCookieHeaders(...headers: Array<string | null | undefined>) {
+  const map = new Map<string, string>();
+  for (const header of headers) {
+    const normalized = `${header ?? ''}`.trim();
+    if (!normalized) {
+      continue;
+    }
+
+    for (const part of normalized.split(';')) {
+      const piece = part.trim();
+      if (!piece || !piece.includes('=')) {
+        continue;
+      }
+      const separatorIndex = piece.indexOf('=');
+      const name = piece.slice(0, separatorIndex).trim();
+      const value = piece.slice(separatorIndex + 1).trim();
+      if (!name) {
+        continue;
+      }
+      map.set(name, value);
+    }
+  }
+
+  return [...map.entries()].map(([name, value]) => `${name}=${value}`).join('; ');
+}
+
+function getCookieValue(cookieHeader: string, cookieName: string) {
+  for (const part of cookieHeader.split(';')) {
+    const piece = part.trim();
+    if (!piece || !piece.includes('=')) {
+      continue;
+    }
+    const separatorIndex = piece.indexOf('=');
+    const name = piece.slice(0, separatorIndex).trim();
+    const value = piece.slice(separatorIndex + 1).trim();
+    if (name === cookieName) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function extractHiddenInputFields(html: string) {
+  const fields: Record<string, string> = {};
+  const inputRegex = /<input\b[^>]*>/gi;
+  const matches = html.match(inputRegex) ?? [];
+
+  for (const tag of matches) {
+    const attributes = parseHtmlAttributes(tag);
+    const type = `${attributes.type ?? ''}`.trim().toLowerCase();
+    const name = `${attributes.name ?? ''}`.trim();
+    if (type !== 'hidden' || !name) {
+      continue;
+    }
+    fields[name] = decodeHtmlEntityValue(attributes.value ?? '');
+  }
+
+  return fields;
+}
+
+function parseHtmlAttributes(tag: string) {
+  const attributes: Record<string, string> = {};
+  const attributeRegex = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
+  let match: RegExpExecArray | null = attributeRegex.exec(tag);
+  while (match) {
+    const name = match[1];
+    const value = match[2] ?? match[3] ?? match[4] ?? '';
+    attributes[name] = value;
+    match = attributeRegex.exec(tag);
+  }
+  return attributes;
+}
+
+function decodeHtmlEntityValue(value: string) {
+  return value
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+}
+
+function isRedirectStatus(status: number) {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
 function extractEarliestExpiry(cookies: string[]) {

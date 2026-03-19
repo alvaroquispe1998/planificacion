@@ -7,11 +7,6 @@
   gap: 1rem;
 }
 
-.compact-toolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .security-hero,
 .panel {
   border: 1px solid #d7e0ea;
@@ -251,22 +246,122 @@ button:not(.ghost):not(.list-item):not(.mini-link) {
   cursor: pointer;
 }
 
-.permissions-grid {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+.permission-summary,
+.permission-groups,
+.permission-actions,
+.permission-actions-global {
+  display: grid;
+  gap: 0.75rem;
 }
 
-.permission-pill {
+.permission-summary {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 180px));
+}
+
+.summary-chip {
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid #d8e3ee;
+  border-radius: 1rem;
+  padding: 0.75rem 0.9rem;
+  background: #f8fbff;
+}
+
+.summary-chip strong {
+  font-size: 1.2rem;
+  color: #173558;
+}
+
+.summary-chip span {
+  color: #66788c;
+  font-size: 0.88rem;
+}
+
+.permission-section {
+  display: grid;
+  gap: 0.85rem;
+  border: 1px solid #dde6ef;
+  border-radius: 1rem;
+  padding: 0.9rem;
+  background: #fbfcfe;
+}
+
+.permission-section-head {
   display: flex;
-  gap: 0.55rem;
-  align-items: center;
-  border: 1px solid #d5dfeb;
-  border-radius: 999px;
-  padding: 0.65rem 0.8rem;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.permission-section-head h4,
+.permission-section-head p {
+  margin: 0;
+}
+
+.permission-section-head p,
+.permission-help {
+  color: #66788c;
+  font-size: 0.9rem;
+}
+
+.permission-group-card {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid #d8e3ee;
+  border-radius: 1rem;
+  padding: 0.85rem;
   background: #fff;
 }
 
-.permission-pill input {
+.permission-group-head,
+.permission-action-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  border: 1px solid #e1e8ef;
+  border-radius: 0.95rem;
+  padding: 0.75rem 0.85rem;
+  background: #fff;
+}
+
+.permission-group-head {
+  border-color: #c9d8e6;
+  background: #f8fbff;
+}
+
+.permission-check {
+  padding-top: 0.15rem;
+}
+
+.permission-check input {
   width: auto;
+}
+
+.permission-copy {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.permission-copy strong {
+  color: #173558;
+}
+
+.permission-copy span,
+.permission-copy small {
+  color: #66788c;
+}
+
+.permission-copy span {
+  font-size: 0.84rem;
+}
+
+.permission-copy small {
+  font-size: 0.82rem;
+}
+
+.permission-help {
+  margin: 0;
 }
 
 .feedback,
@@ -303,5 +398,13 @@ button:not(.ghost):not(.list-item):not(.mini-link) {
 
   .compact-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .permission-groups {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+
+  .permission-actions-global {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   }
 }

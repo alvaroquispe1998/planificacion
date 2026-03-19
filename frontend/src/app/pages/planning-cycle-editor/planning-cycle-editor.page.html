@@ -5,7 +5,7 @@
       <h1>Editor por ciclo</h1>
     </div>
     <div class="hero-actions">
-      <button class="btn btn-secondary btn-sm" (click)="goBackToSummary()">← Volver al resumen</button>
+      <button class="btn btn-secondary btn-sm" (click)="goBackToSummary()"><- Volver al resumen</button>
       <button class="btn btn-primary btn-sm" (click)="reloadPlanningView()" [disabled]="saving || loading">
         {{ saving ? 'Procesando...' : loading ? 'Cargando...' : 'Actualizar' }}
       </button>
@@ -48,24 +48,35 @@
     </select>
   </section>
 
+  <p *ngIf="message" class="flash">{{ message }}</p>
   <p *ngIf="error" class="flash error">{{ error }}</p>
+  <p *ngIf="isWorkflowReadOnly" class="flash">
+    Este plan esta en {{ workflowStatusLabel(currentPlanRule?.workflow_status).toLowerCase() }} y se muestra solo en modo lectura.
+  </p>
+  <p *ngIf="currentPlanRule && !isWorkflowReadOnly && !planReviewReady" class="flash">
+    {{ planReviewProgressLabel }}
+  </p>
 
   <section *ngIf="hasRequiredContext" class="rules-card">
     <div class="rule-form-inline">
       <div class="rule-context">
         <span class="pill neutral">{{ selectedProgram?.name || 'Programa' }}</span>
         <span class="pill neutral">{{ selectedCycleLabel }}</span>
+        <span *ngIf="currentPlanRule" class="pill" [ngClass]="workflowStatusClass(currentPlanRule?.workflow_status)">
+          {{ workflowStatusLabel(currentPlanRule?.workflow_status) }}
+        </span>
       </div>
       <select
         [(ngModel)]="ruleForm.study_plan_id"
         (ngModelChange)="onStudyPlanChange()"
-        [disabled]="!canSelectStudyPlan">
+        [disabled]="!canSelectStudyPlan || canManageOffers">
         <option value="">Plan de estudio</option>
         <option *ngFor="let plan of availableStudyPlans" [value]="plan.id">
           {{ plan.name }}
         </option>
       </select>
       <button
+        *ngIf="!canManageOffers"
         class="btn btn-primary btn-sm"
         (click)="createPlanRule()"
         [disabled]="saving || !hasRequiredContext || !ruleForm.study_plan_id">
@@ -73,14 +84,36 @@
       </button>
     </div>
 
+    <div class="workflow-actions" *ngIf="currentPlanRule">
+      <button *ngIf="canSubmitReview" class="btn btn-secondary btn-sm" (click)="openWorkflowDialog('SUBMIT_REVIEW')">
+        Enviar a revision
+      </button>
+      <button *ngIf="canReviewDecide" class="btn btn-primary btn-sm" (click)="openWorkflowDialog('APPROVE')">
+        Aprobar plan
+      </button>
+      <button *ngIf="canReviewDecide" class="btn btn-secondary btn-sm" (click)="openWorkflowDialog('REQUEST_CORRECTION')">
+        Mandar a correccion
+      </button>
+      <button class="btn-link" type="button" (click)="openTimelineDialog()">
+        Linea de tiempo
+      </button>
+    </div>
+
     <div class="rule-list" *ngIf="visiblePlanRules.length > 0">
       <article *ngFor="let rule of visiblePlanRules" class="rule-item">
-        <div>
+        <div class="rule-item-main">
           <strong>Ciclo {{ formatRuleCycle(rule) }}</strong>
-          &middot;
           <span class="rule-plan-name">{{ rule.study_plan?.name || rule.study_plan_id }}</span>
+          <span class="pill" [ngClass]="workflowStatusClass(rule.workflow_status)">
+            {{ workflowStatusLabel(rule.workflow_status) }}
+          </span>
         </div>
-        <button class="btn btn-ghost btn-sm" (click)="deletePlanRule(rule.id)">Eliminar</button>
+        <button
+          *ngIf="!['IN_REVIEW', 'APPROVED'].includes(rule.workflow_status)"
+          class="btn btn-ghost btn-sm"
+          (click)="deletePlanRule(rule.id)">
+          Eliminar
+        </button>
       </article>
     </div>
   </section>
@@ -117,14 +150,14 @@
             <td>{{ formatCourseType(candidate.course_type) }}</td>
             <td>
               <span class="pill" [ngClass]="trackOfferStatusClass(candidate.offer_status || 'DRAFT')">
-                {{ candidate.offer_status || 'SIN_OFERTA' }}
+                {{ offerStatusLabel(candidate.offer_status || 'SIN_OFERTA') }}
               </span>
             </td>
             <td *ngIf="canManageOffers">
               <button
                 *ngIf="!candidate.has_offer"
                 class="btn btn-primary btn-sm"
-                [disabled]="!canManageOffers || !hasRequiredContext || saving"
+                [disabled]="!canManageOffers || !hasRequiredContext || saving || isWorkflowReadOnly"
                 (click)="createOffer(candidate)">
                 Guardar oferta
               </button>
@@ -133,7 +166,7 @@
                 class="btn btn-secondary btn-sm"
                 [disabled]="!canManageOffers || !hasRequiredContext"
                 (click)="openOffer(candidate.offer_id)">
-                Configurar secciones
+                {{ isWorkflowReadOnly ? 'Ver secciones' : 'Configurar secciones' }}
               </button>
             </td>
           </tr>
@@ -154,4 +187,66 @@
       </div>
     </ng-template>
   </section>
+</div>
+
+<div *ngIf="workflowDialog.open" class="modal-backdrop">
+  <div class="modal-card" (click)="$event.stopPropagation()">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Workflow del plan</p>
+        <h3>{{ workflowActionTitle() }}</h3>
+        <p>{{ workflowActionDescription() }}</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeWorkflowDialog()">Cerrar</button>
+    </div>
+
+    <div class="modal-body">
+      <label class="modal-field">
+        <span>Comentario</span>
+        <textarea [(ngModel)]="workflowDialog.comment" rows="4"></textarea>
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeWorkflowDialog()">Cancelar</button>
+      <button type="button" class="btn btn-primary btn-sm" (click)="confirmWorkflowAction()" [disabled]="saving">
+        Confirmar
+      </button>
+    </div>
+  </div>
+</div>
+
+<div *ngIf="timelineDialog.open" class="modal-backdrop">
+  <div class="modal-card timeline-modal" (click)="$event.stopPropagation()">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Workflow del plan</p>
+        <h3>Linea de tiempo</h3>
+        <p *ngIf="timelineTargetLabel()">{{ timelineTargetLabel() }}</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeTimelineDialog()">Cerrar</button>
+    </div>
+
+    <div class="timeline-list" *ngIf="!timelineDialog.loading && timelineDialog.entries.length > 0; else timelineState">
+      <article class="timeline-item" *ngFor="let item of timelineDialog.entries">
+        <div class="timeline-marker" [ngClass]="workflowStatusClass(item.status)"></div>
+        <div class="timeline-content">
+          <div class="timeline-top">
+            <strong>{{ item.title }}</strong>
+            <span>{{ formatTimelineDate(item.changed_at) }}</span>
+          </div>
+          <p class="timeline-meta">{{ item.actor }} · {{ timelineStatusLabel(item.status) }}</p>
+          <p class="timeline-comment" *ngIf="item.comment">{{ item.comment }}</p>
+        </div>
+      </article>
+    </div>
+
+    <ng-template #timelineState>
+      <div class="empty-block">
+        <p *ngIf="timelineDialog.loading">Cargando linea de tiempo...</p>
+        <p *ngIf="!timelineDialog.loading && timelineDialog.error">{{ timelineDialog.error }}</p>
+        <p *ngIf="!timelineDialog.loading && !timelineDialog.error">No hay eventos de workflow registrados para este plan.</p>
+      </div>
+    </ng-template>
+  </div>
 </div>

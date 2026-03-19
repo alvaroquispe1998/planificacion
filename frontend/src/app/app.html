@@ -2,8 +2,7 @@
   <main class="layout" *ngIf="session$ | async as session; else loginLayout">
     <header class="shell-header">
       <div class="brand-block">
-        <p class="brand-tag">UAI Platform</p>
-        <h1>Academic Scheduling Console</h1>
+        <h1>Planificacion UAI</h1>
       </div>
 
       <div class="session-block">
@@ -11,23 +10,60 @@
         <p class="session-meta">{{ getRoleNames(session) }}</p>
         <button type="button" class="session-logout" (click)="logout()">Salir</button>
       </div>
-
-      <nav>
-        <a
-          *ngFor="let item of navItems"
-          routerLink="{{ item.path }}"
-          routerLinkActive="active"
-          [class.hidden-link]="!canAccessNav(item)"
-          [attr.aria-hidden]="!canAccessNav(item) ? 'true' : null"
-          [hidden]="!canAccessNav(item)"
-        >
-          {{ item.label }}
-        </a>
-      </nav>
     </header>
 
-    <section class="content">
-      <router-outlet></router-outlet>
+    <section class="shell-body">
+      <aside class="sidebar" *ngIf="navGroups.length > 0">
+        <div class="sidebar-panel">
+          <section class="nav-group" *ngFor="let group of navGroups">
+            <p class="nav-group-title">{{ group.label }}</p>
+            <article
+              *ngFor="let module of group.modules"
+              class="module-accordion"
+              [class.active]="isModuleActive(module)"
+              [class.expanded]="isModuleExpanded(module)">
+              <button type="button" class="module-trigger" (click)="toggleModule(module)">
+                <span class="module-trigger-main">
+                  <span class="module-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path [attr.d]="iconPath(module.icon)"></path>
+                    </svg>
+                  </span>
+                  <span class="module-copy">
+                    <span class="module-label">{{ module.label }}</span>
+                  </span>
+                </span>
+                <span class="module-chevron" [class.expanded]="isModuleExpanded(module)" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path [attr.d]="iconPath('chevron')"></path>
+                  </svg>
+                </span>
+              </button>
+
+              <div class="module-children" *ngIf="isModuleExpanded(module)">
+                <a
+                  *ngFor="let item of visibleModuleChildren(module)"
+                  class="module-child-link"
+                  [class.active]="isSecondaryActive(item)"
+                  [routerLink]="item.path">
+                  <span class="child-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path [attr.d]="iconPath(item.icon)"></path>
+                    </svg>
+                  </span>
+                  <span>{{ item.label }}</span>
+                </a>
+              </div>
+            </article>
+          </section>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <section class="content">
+          <router-outlet></router-outlet>
+        </section>
+      </section>
     </section>
   </main>
 </ng-container>
@@ -35,3 +71,5 @@
 <ng-template #loginLayout>
   <router-outlet></router-outlet>
 </ng-template>
+
+<app-dialog></app-dialog>

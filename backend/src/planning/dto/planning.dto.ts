@@ -597,6 +597,39 @@ export class UpdatePlanningCyclePlanRuleDto {
   is_active?: boolean;
 }
 
+export class SubmitPlanningPlanReviewDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  review_comment?: string;
+}
+
+export class BulkSubmitPlanningPlanReviewDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  ids!: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  review_comment?: string;
+}
+
+export class ApprovePlanningPlanDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  review_comment?: string;
+}
+
+export class RequestPlanningPlanCorrectionDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  review_comment!: string;
+}
+
 export class CreatePlanningOfferDto {
   @IsOptional()
   @IsString()

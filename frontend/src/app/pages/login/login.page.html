@@ -1,14 +1,14 @@
 <section class="login-shell">
   <article class="login-card">
-    <p class="eyebrow">UAI Platform</p>
-    <h1>Ingreso al Console</h1>
-    <p class="intro">
-      Accede con tu usuario interno para cargar solo las ventanas y alcances que te correspondan.
-    </p>
+    <!-- <p class="eyebrow">UAI Platform</p> -->
+    <h1>Planificación UAI</h1>
+    <!-- <p class="intro">
+      Consola para organizar planes, secciones, cruces y accesos academicos.
+    </p> -->
 
     <label>
       Usuario
-      <input [(ngModel)]="username" type="text" autocomplete="username" />
+      <input [(ngModel)]="username" type="text" autocomplete="username" placeholder="Usuario" />
     </label>
 
     <label>
@@ -17,6 +17,7 @@
         [(ngModel)]="password"
         type="password"
         autocomplete="current-password"
+        placeholder="********"
         (keyup.enter)="submit()"
       />
     </label>

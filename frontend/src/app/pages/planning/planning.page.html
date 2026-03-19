@@ -4,7 +4,15 @@
       <p class="eyebrow">Planificacion manual</p>
       <h1>Ciclos configurados</h1>
     </div>
-    <button class="btn btn-primary btn-sm" (click)="openNewOffer()">+ Nueva configuracion</button>
+    <div class="hero-actions">
+      <button
+        *ngIf="auth.hasPermission('action.planning.change_log.view')"
+        class="btn btn-secondary btn-sm"
+        (click)="openChangeLog()">
+        Historial de cambios
+      </button>
+      <button class="btn btn-primary btn-sm" (click)="openNewOffer()">+ Nueva configuracion</button>
+    </div>
   </header>
 
   <section class="filters-card">
@@ -38,6 +46,15 @@
   <section class="panel">
     <div class="section-head">
       <h2>Configuraciones guardadas <span class="count">({{ rows.length }})</span></h2>
+      <div class="section-actions">
+        <button
+          *ngIf="canBulkSubmitReview"
+          type="button"
+          class="btn btn-secondary btn-sm"
+          (click)="openBulkSubmitReviewDialog()">
+          Enviar visibles a revision
+        </button>
+      </div>
     </div>
 
     <div class="table-wrap" *ngIf="rows.length > 0; else emptyState">
@@ -50,6 +67,8 @@
             <th>Programa</th>
             <th>Ciclo</th>
             <th>Plan de estudio</th>
+            <th>Estado</th>
+            <th>Workflow</th>
             <th></th>
           </tr>
         </thead>
@@ -61,8 +80,48 @@
             <td>{{ row.academic_program?.name || row.study_plan?.career || row.career_name || '---' }}</td>
             <td><span class="pill-cycle">{{ row.cycle }}</span></td>
             <td>{{ row.study_plan?.name || row.study_plan_id }}</td>
+            <td>
+              <span class="pill" [ngClass]="workflowStatusClass(row.workflow_status)">
+                {{ workflowStatusLabel(row.workflow_status) }}
+              </span>
+            </td>
+            <td class="td-workflow">
+              <div class="workflow-stack">
+                <div class="row-actions" *ngIf="canSubmitReview(row) || canReviewDecide(row)">
+                  <button
+                    *ngIf="canSubmitReview(row)"
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    (click)="openWorkflowDialog($event, row, 'SUBMIT_REVIEW')">
+                    Enviar a revision
+                  </button>
+                  <button
+                    *ngIf="canReviewDecide(row)"
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    (click)="openWorkflowDialog($event, row, 'APPROVE')">
+                    Aprobar
+                  </button>
+                  <button
+                    *ngIf="canReviewDecide(row)"
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    (click)="openWorkflowDialog($event, row, 'REQUEST_CORRECTION')">
+                    Corregir
+                  </button>
+                </div>
+                <span
+                  *ngIf="!canSubmitReview(row) && !canReviewDecide(row) && ['DRAFT', 'IN_CORRECTION'].includes(row.workflow_status)"
+                  class="workflow-note">
+                  {{ reviewReadinessLabel(row) }}
+                </span>
+                <button type="button" class="btn-link" (click)="openTimelineDialog($event, row)">
+                  Linea de tiempo
+                </button>
+              </div>
+            </td>
             <td class="td-action">
-              <span class="link-action">Ver cursos →</span>
+              <span class="link-action">Ver cursos -></span>
             </td>
           </tr>
         </tbody>
@@ -71,8 +130,78 @@
 
     <ng-template #emptyState>
       <div class="empty-block">
-        <p>{{ loading ? 'Cargando configuraciones...' : 'No hay configuraciones guardadas para los filtros seleccionados.' }}</p>
+        <p>
+          {{
+            loading
+              ? 'Cargando configuraciones...'
+              : 'No hay configuraciones guardadas para los filtros seleccionados.'
+          }}
+        </p>
       </div>
     </ng-template>
   </section>
+</div>
+
+<div *ngIf="workflowDialog.open" class="modal-backdrop">
+  <div class="modal-card" (click)="$event.stopPropagation()">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Workflow del plan</p>
+        <h3>{{ workflowActionTitle() }}</h3>
+        <p>{{ workflowActionDescription() }}</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeWorkflowDialog()">Cerrar</button>
+    </div>
+
+    <div class="modal-body">
+      <p class="workflow-target" *ngIf="workflowTargetLabel()">{{ workflowTargetLabel() }}</p>
+
+      <label class="modal-field">
+        <span>Comentario</span>
+        <textarea [(ngModel)]="workflowDialog.comment" rows="4"></textarea>
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeWorkflowDialog()">Cancelar</button>
+      <button type="button" class="btn btn-primary btn-sm" (click)="confirmWorkflowAction()" [disabled]="loading">
+        Confirmar
+      </button>
+    </div>
+  </div>
+</div>
+
+<div *ngIf="timelineDialog.open" class="modal-backdrop">
+  <div class="modal-card timeline-modal" (click)="$event.stopPropagation()">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Workflow del plan</p>
+        <h3>Linea de tiempo</h3>
+        <p *ngIf="timelineTargetLabel()" class="workflow-target">{{ timelineTargetLabel() }}</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeTimelineDialog()">Cerrar</button>
+    </div>
+
+    <div class="timeline-list" *ngIf="!timelineDialog.loading && timelineDialog.entries.length > 0; else timelineState">
+      <article class="timeline-item" *ngFor="let item of timelineDialog.entries">
+        <div class="timeline-marker" [ngClass]="workflowStatusClass(item.status)"></div>
+        <div class="timeline-content">
+          <div class="timeline-top">
+            <strong>{{ item.title }}</strong>
+            <span>{{ formatTimelineDate(item.changed_at) }}</span>
+          </div>
+          <p class="timeline-meta">{{ item.actor }} · {{ timelineStatusLabel(item.status) }}</p>
+          <p class="timeline-comment" *ngIf="item.comment">{{ item.comment }}</p>
+        </div>
+      </article>
+    </div>
+
+    <ng-template #timelineState>
+      <div class="empty-block">
+        <p *ngIf="timelineDialog.loading">Cargando linea de tiempo...</p>
+        <p *ngIf="!timelineDialog.loading && timelineDialog.error">{{ timelineDialog.error }}</p>
+        <p *ngIf="!timelineDialog.loading && !timelineDialog.error">No hay eventos de workflow registrados para este plan.</p>
+      </div>
+    </ng-template>
+  </div>
 </div>

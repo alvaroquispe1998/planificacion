@@ -528,11 +528,12 @@ export class PlanningService {
     };
   }
 
-  listConflicts(semesterId?: string) {
-    return this.conflictsRepo.find({
+  async listConflicts(semesterId?: string) {
+    const conflicts = await this.conflictsRepo.find({
       where: semesterId ? { semester_id: semesterId } : {},
       order: { detected_at: 'DESC' },
     });
+    return this.enrichConflicts(conflicts);
   }
 
   async detectConflicts(semesterId: string) {
@@ -1467,6 +1468,113 @@ export class PlanningService {
     return candidate.slice(0, 20);
   }
 
+  private async enrichConflicts(conflicts: ScheduleConflictEntity[]) {
+    if (conflicts.length === 0) {
+      return [];
+    }
+
+    const meetingIds = uniqueIds(
+      conflicts.flatMap((item) => [item.meeting_a_id, item.meeting_b_id]),
+    );
+    const meetings = await this.findManyByIds(this.meetingsRepo, meetingIds);
+    const meetingMap = toMap(meetings);
+
+    const offeringIds = uniqueIds([
+      ...conflicts.map((item) => item.class_offering_id),
+      ...meetings.map((item) => item.class_offering_id),
+    ]);
+    const groupIds = uniqueIds([
+      ...conflicts.map((item) => item.class_group_id),
+      ...meetings.map((item) => item.class_group_id),
+    ]);
+    const teacherIds = uniqueIds(conflicts.map((item) => item.teacher_id));
+    const classroomIds = uniqueIds([
+      ...conflicts.map((item) => item.classroom_id),
+      ...meetings.map((item) => item.classroom_id),
+    ]);
+
+    const [offerings, groups, teachers, classrooms, semesters] = await Promise.all([
+      this.findManyByIds(this.offeringsRepo, offeringIds),
+      this.findManyByIds(this.groupsRepo, groupIds),
+      this.findManyByIds(this.teachersRepo, teacherIds),
+      this.findManyByIds(this.classroomsRepo, classroomIds),
+      this.findManyByIds(this.semestersRepo, uniqueIds(conflicts.map((item) => item.semester_id))),
+    ]);
+
+    const [programs, campuses, courses, courseSections] = await Promise.all([
+      this.findManyByIds(this.programsRepo, uniqueIds(offerings.map((item) => item.academic_program_id))),
+      this.findManyByIds(this.campusesRepo, uniqueIds(offerings.map((item) => item.campus_id))),
+      this.findManyByIds(this.coursesRepo, uniqueIds(offerings.map((item) => item.course_id))),
+      this.findManyByIds(this.courseSectionsRepo, uniqueIds(offerings.map((item) => item.course_section_id))),
+    ]);
+
+    const offeringMap = toMap(offerings);
+    const groupMap = toMap(groups);
+    const teacherMap = toMap(teachers);
+    const classroomMap = toMap(classrooms);
+    const semesterMap = toMap(semesters);
+    const programMap = toMap(programs);
+    const campusMap = toMap(campuses);
+    const courseMap = toMap(courses);
+    const courseSectionMap = toMap(courseSections);
+
+    return conflicts.map((conflict) => {
+      const meetingA = meetingMap.get(conflict.meeting_a_id);
+      const meetingB = meetingMap.get(conflict.meeting_b_id);
+      const offering =
+        offeringMap.get(
+          conflict.class_offering_id ?? meetingA?.class_offering_id ?? meetingB?.class_offering_id ?? '',
+        ) ?? null;
+      const group =
+        groupMap.get(conflict.class_group_id ?? meetingA?.class_group_id ?? meetingB?.class_group_id ?? '') ?? null;
+      const teacher = teacherMap.get(conflict.teacher_id ?? '') ?? null;
+      const classroom = classroomMap.get(conflict.classroom_id ?? '') ?? null;
+      const semester = semesterMap.get(conflict.semester_id) ?? null;
+      const program = offering ? programMap.get(offering.academic_program_id) ?? null : null;
+      const campus = offering ? campusMap.get(offering.campus_id) ?? null : null;
+      const course = offering ? courseMap.get(offering.course_id) ?? null : null;
+      const courseSection = offering ? courseSectionMap.get(offering.course_section_id) ?? null : null;
+      const detail = (conflict.detail_json ?? {}) as Record<string, unknown>;
+
+      return {
+        ...conflict,
+        semester_name: semester?.name ?? null,
+        academic_program_id: offering?.academic_program_id ?? null,
+        academic_program_name: program?.name ?? null,
+        campus_name: campus?.name ?? null,
+        teacher_name: formatTeacherDisplay(teacher),
+        classroom_name: classroom?.name ?? null,
+        course_code: course?.code ?? null,
+        course_name: course?.name ?? null,
+        section_name: courseSection?.text ?? courseSection?.section_id ?? null,
+        affected_label: buildConflictAffectedLabel(conflict, teacher, course, courseSection, group),
+        overlap_day: (detail['day_of_week'] as string | undefined) ?? meetingA?.day_of_week ?? meetingB?.day_of_week ?? null,
+        overlap_start: (detail['overlap_start'] as string | undefined) ?? null,
+        overlap_end: (detail['overlap_end'] as string | undefined) ?? null,
+        meeting_a: buildConflictMeetingDetail(
+          meetingA,
+          offeringMap,
+          groupMap,
+          classroomMap,
+          campusMap,
+          programMap,
+          courseMap,
+          courseSectionMap,
+        ),
+        meeting_b: buildConflictMeetingDetail(
+          meetingB,
+          offeringMap,
+          groupMap,
+          classroomMap,
+          campusMap,
+          programMap,
+          courseMap,
+          courseSectionMap,
+        ),
+      };
+    });
+  }
+
   private async findManyByIds<T extends { id: string }>(repo: Repository<T>, ids: string[]) {
     if (ids.length === 0) {
       return [] as T[];
@@ -1541,6 +1649,129 @@ function describeConflict(conflict: ScheduleConflictEntity) {
     default:
       return 'Cruce detectado';
   }
+}
+
+function formatTeacherDisplay(teacher: TeacherEntity | null) {
+  if (!teacher) {
+    return null;
+  }
+  const name = teacher.full_name || teacher.name || null;
+  if (!name) {
+    return teacher.dni || null;
+  }
+  return teacher.dni ? `${teacher.dni} - ${name}` : name;
+}
+
+function buildConflictAffectedLabel(
+  conflict: ScheduleConflictEntity,
+  teacher: TeacherEntity | null,
+  course: CourseEntity | null,
+  courseSection: CourseSectionEntity | null,
+  group: ClassGroupEntity | null,
+) {
+  if (conflict.conflict_type === 'TEACHER_OVERLAP') {
+    return formatTeacherDisplay(teacher) ?? 'Docente sin asignar';
+  }
+  if (conflict.conflict_type === 'SECTION_OVERLAP') {
+    const courseLabel = buildCourseLabel(course);
+    const sectionLabel = buildSectionLabel(courseSection);
+    return [courseLabel, sectionLabel].filter(Boolean).join(' · ') || group?.code || 'Seccion sin referencia';
+  }
+  return describeConflict(conflict);
+}
+
+function buildConflictMeetingDetail(
+  meeting: ClassMeetingEntity | undefined,
+  offeringMap: Map<string, ClassOfferingEntity>,
+  groupMap: Map<string, ClassGroupEntity>,
+  classroomMap: Map<string, ClassroomEntity>,
+  campusMap: Map<string, CampusEntity>,
+  programMap: Map<string, AcademicProgramEntity>,
+  courseMap: Map<string, CourseEntity>,
+  courseSectionMap: Map<string, CourseSectionEntity>,
+) {
+  if (!meeting) {
+    return null;
+  }
+  const offering = offeringMap.get(meeting.class_offering_id) ?? null;
+  const group = groupMap.get(meeting.class_group_id) ?? null;
+  const classroom = classroomMap.get(meeting.classroom_id ?? '') ?? null;
+  const campus = offering ? campusMap.get(offering.campus_id) ?? null : null;
+  const program = offering ? programMap.get(offering.academic_program_id) ?? null : null;
+  const course = offering ? courseMap.get(offering.course_id) ?? null : null;
+  const courseSection = offering ? courseSectionMap.get(offering.course_section_id) ?? null : null;
+  const courseLabel = buildCourseLabel(course);
+  const sectionLabel = buildSectionLabel(courseSection);
+  const summary = [
+    courseLabel,
+    sectionLabel,
+    group?.code ? `Grupo ${group.code}` : null,
+    `${displayDay(meeting.day_of_week)} ${compactTime(meeting.start_time)}-${compactTime(meeting.end_time)}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return {
+    id: meeting.id,
+    offering_id: offering?.id ?? null,
+    group_id: group?.id ?? null,
+    academic_program_id: offering?.academic_program_id ?? null,
+    academic_program_name: program?.name ?? null,
+    campus_name: campus?.name ?? null,
+    course_code: course?.code ?? null,
+    course_name: course?.name ?? null,
+    course_label: courseLabel,
+    section_name: sectionLabel,
+    group_code: group?.code ?? null,
+    day_of_week: meeting.day_of_week,
+    start_time: meeting.start_time,
+    end_time: meeting.end_time,
+    classroom_id: meeting.classroom_id ?? null,
+    classroom_name: classroom?.name ?? null,
+    summary,
+  };
+}
+
+function buildCourseLabel(course: CourseEntity | null) {
+  if (!course) {
+    return null;
+  }
+  if (course.code && course.name) {
+    return `${course.code} - ${course.name}`;
+  }
+  return course.code || course.name || null;
+}
+
+function buildSectionLabel(courseSection: CourseSectionEntity | null) {
+  return courseSection?.text || courseSection?.section_id || null;
+}
+
+function displayDay(value: string | null | undefined) {
+  switch (value) {
+    case 'LUNES':
+      return 'Lunes';
+    case 'MARTES':
+      return 'Martes';
+    case 'MIERCOLES':
+      return 'Miercoles';
+    case 'JUEVES':
+      return 'Jueves';
+    case 'VIERNES':
+      return 'Viernes';
+    case 'SABADO':
+      return 'Sabado';
+    case 'DOMINGO':
+      return 'Domingo';
+    default:
+      return value || 'Sin dia';
+  }
+}
+
+function compactTime(value: string | null | undefined) {
+  if (!value) {
+    return '--:--';
+  }
+  return String(value).slice(0, 5);
 }
 
 function toHoursKey(groupType: string): 'theory' | 'practice' | 'lab' {

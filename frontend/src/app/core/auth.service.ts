@@ -151,7 +151,10 @@ export class AuthService {
   }
 
   firstAllowedPath() {
-    return firstAllowedPath(this.sessionSubject.value?.windows ?? []);
+    return firstAllowedPath(
+      this.sessionSubject.value?.windows ?? [],
+      this.sessionSubject.value?.permissions ?? [],
+    );
   }
 
   redirectAfterLogin() {

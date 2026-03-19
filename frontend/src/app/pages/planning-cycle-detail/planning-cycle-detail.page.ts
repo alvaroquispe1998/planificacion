@@ -121,7 +121,14 @@ export class PlanningCycleDetailPageComponent implements OnInit {
   }
 
   goBack() {
-    this.router.navigate(['/planning']);
+    this.router.navigate(['/planning'], {
+      queryParams: {
+        semester_id: this.filters.semester_id || null,
+        campus_id: this.filters.campus_id || null,
+        faculty_id: this.filters.faculty_id || null,
+        academic_program_id: this.filters.academic_program_id || null,
+      },
+    });
   }
 
   editCycle() {
