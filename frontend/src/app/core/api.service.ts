@@ -177,6 +177,28 @@ export class ApiService {
     return this.http.patch<any>(`${this.baseUrl}/planning/offers/${id}`, payload);
   }
 
+  listPlanningVcMatchRows(filters: Record<string, string>) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) {
+        params = params.set(key, value);
+      }
+    });
+    return this.http.get<any[]>(`${this.baseUrl}/planning/vc-match`, { params });
+  }
+
+  recalculatePlanningVcMatches(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/vc-match/recalculate`, payload);
+  }
+
+  updatePlanningSubsectionVcMatch(id: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/subsections/${id}/vc-match`, payload);
+  }
+
+  updatePlanningCampusVcLocation(campusId: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/campus-vc-locations/${campusId}`, payload);
+  }
+
   createPlanningSection(offerId: string, payload: any) {
     return this.http.post<any>(`${this.baseUrl}/planning/offers/${offerId}/sections`, payload);
   }

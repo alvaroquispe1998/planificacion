@@ -26,6 +26,9 @@
   <p *ngIf="isWorkflowReadOnly" class="flash">
     Este plan esta en {{ workflowStatusLabel(planRule?.workflow_status).toLowerCase() }}. Puedes revisar la configuracion, pero no editarla.
   </p>
+  <p *ngIf="canEditApprovedPlan" class="flash">
+    Este plan esta aprobado. Puedes actualizar secciones, subsecciones y horarios, y luego devolverlo a correccion si hace falta.
+  </p>
   <p *ngIf="supportDataLoading && offer" class="flash">
     Cargando catalogos auxiliares. Ya puedes crear la primera seccion.
   </p>

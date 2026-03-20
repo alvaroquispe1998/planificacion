@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Param,
   Patch,
@@ -24,6 +25,7 @@ import {
   CreatePlanningSubsectionDto,
   CreatePlanningSubsectionScheduleDto,
   ApprovePlanningPlanDto,
+  RecalculatePlanningVcMatchesDto,
   CreateClassGroupDto,
   CreateClassGroupTeacherDto,
   CreateClassMeetingDto,
@@ -36,6 +38,8 @@ import {
   UpdatePlanningOfferDto,
   UpdatePlanningSectionDto,
   UpdatePlanningSubsectionDto,
+  UpdatePlanningSubsectionVcMatchDto,
+  UpdatePlanningCampusVcLocationMappingDto,
   UpdatePlanningSubsectionScheduleDto,
   UpdateClassGroupDto,
   UpdateClassGroupTeacherDto,
@@ -211,6 +215,7 @@ export class PlanningController {
     const rule = current.find((item) => item.id === id);
     if (rule) {
       this.authService.assertScopeAccess(authUser, rule.faculty_id ?? null, rule.academic_program_id ?? null);
+      await this.assertApprovedPlanMutationAllowed(authUser, rule);
     }
     if (dto.faculty_id || dto.academic_program_id) {
       this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
@@ -275,7 +280,13 @@ export class PlanningController {
     @Body() dto: CreatePlanningOfferDto,
   ) {
     this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
-    return this.planningManualService.createOffer(idActor(authUser), dto);
+    return this.assertApprovedPlanMutationAllowed(authUser, {
+      semester_id: dto.semester_id,
+      campus_id: dto.campus_id,
+      academic_program_id: dto.academic_program_id ?? null,
+      study_plan_id: dto.study_plan_id,
+      cycle: dto.cycle,
+    }).then(() => this.planningManualService.createOffer(idActor(authUser), dto));
   }
 
   @Get('offers')
@@ -324,6 +335,7 @@ export class PlanningController {
   ) {
     const offer = await this.planningManualService.getOffer(id);
     this.authService.assertScopeAccess(authUser, offer.faculty_id ?? null, offer.academic_program_id ?? null);
+    await this.assertApprovedPlanMutationAllowed(authUser, offer.plan_rule ?? null);
     return this.planningManualService.updateOffer(idActor(authUser), id, dto);
   }
 
@@ -335,6 +347,7 @@ export class PlanningController {
   ) {
     const offer = await this.planningManualService.getOffer(id);
     this.authService.assertScopeAccess(authUser, offer.faculty_id ?? null, offer.academic_program_id ?? null);
+    await this.assertApprovedPlanMutationAllowed(authUser, offer.plan_rule ?? null);
     return this.planningManualService.createSection(idActor(authUser), id, dto);
   }
 
@@ -364,6 +377,7 @@ export class PlanningController {
       section.offer?.faculty_id ?? null,
       section.offer?.academic_program_id ?? null,
     );
+    await this.assertApprovedPlanMutationAllowed(authUser, section.offer ?? null);
     return this.planningManualService.updateSection(idActor(authUser), id, dto);
   }
 
@@ -378,6 +392,7 @@ export class PlanningController {
       section.offer?.faculty_id ?? null,
       section.offer?.academic_program_id ?? null,
     );
+    await this.assertApprovedPlanMutationAllowed(authUser, section.offer ?? null);
     return this.planningManualService.deleteSection(idActor(authUser), id);
   }
 
@@ -393,6 +408,7 @@ export class PlanningController {
       section.offer?.faculty_id ?? null,
       section.offer?.academic_program_id ?? null,
     );
+    await this.assertApprovedPlanMutationAllowed(authUser, section.offer ?? null);
     return this.planningManualService.createSubsection(idActor(authUser), id, dto);
   }
 
@@ -422,6 +438,7 @@ export class PlanningController {
       subsection.offer?.faculty_id ?? null,
       subsection.offer?.academic_program_id ?? null,
     );
+    await this.assertApprovedPlanMutationAllowed(authUser, subsection.offer ?? null);
     return this.planningManualService.updateSubsection(idActor(authUser), id, dto);
   }
 
@@ -431,12 +448,13 @@ export class PlanningController {
     @Param('id') id: string,
     @Body() dto: CreatePlanningSubsectionScheduleDto,
   ) {
-    return this.planningManualService.getSubsection(id).then((subsection) => {
+    return this.planningManualService.getSubsection(id).then(async (subsection) => {
       this.authService.assertScopeAccess(
         authUser,
         subsection.offer?.faculty_id ?? null,
         subsection.offer?.academic_program_id ?? null,
       );
+      await this.assertApprovedPlanMutationAllowed(authUser, subsection.offer ?? null);
       return this.planningManualService.createSubsectionSchedule(idActor(authUser), id, dto);
     });
   }
@@ -447,12 +465,13 @@ export class PlanningController {
     @Param('id') id: string,
     @Body() dto: UpdatePlanningSubsectionScheduleDto,
   ) {
-    return this.planningManualService.getSubsectionBySchedule(id).then((schedule) => {
+    return this.planningManualService.getSubsectionBySchedule(id).then(async (schedule) => {
       this.authService.assertScopeAccess(
         authUser,
         schedule.offer?.faculty_id ?? null,
         schedule.offer?.academic_program_id ?? null,
       );
+      await this.assertApprovedPlanMutationAllowed(authUser, schedule.offer ?? null);
       return this.planningManualService.updateSubsectionSchedule(idActor(authUser), id, dto);
     });
   }
@@ -462,14 +481,82 @@ export class PlanningController {
     @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Param('id') id: string,
   ) {
-    return this.planningManualService.getSubsectionBySchedule(id).then((schedule) => {
+    return this.planningManualService.getSubsectionBySchedule(id).then(async (schedule) => {
       this.authService.assertScopeAccess(
         authUser,
         schedule.offer?.faculty_id ?? null,
         schedule.offer?.academic_program_id ?? null,
       );
+      await this.assertApprovedPlanMutationAllowed(authUser, schedule.offer ?? null);
       return this.planningManualService.deleteSubsectionSchedule(idActor(authUser), id);
     });
+  }
+
+  @Get('vc-match')
+  listVcMatchRows(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Query('semester_id') semesterId?: string,
+    @Query('campus_id') campusId?: string,
+    @Query('faculty_id') facultyId?: string,
+    @Query('academic_program_id') academicProgramId?: string,
+    @Query('cycle') cycle?: string,
+    @Query('study_plan_id') studyPlanId?: string,
+    @Query('offer_id') offerId?: string,
+  ) {
+    if (facultyId || academicProgramId) {
+      this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
+    }
+    return this.planningManualService
+      .listVcMatchRows({
+        semester_id: semesterId,
+        campus_id: campusId,
+        faculty_id: facultyId,
+        academic_program_id: academicProgramId,
+        cycle: cycle ? Number(cycle) : undefined,
+        study_plan_id: studyPlanId,
+        offer_id: offerId,
+      })
+      .then((rows) =>
+        this.authService.filterByScope(authUser, rows, (item: any) => ({
+          faculty_id: item.faculty?.id ?? item.offer?.faculty_id ?? null,
+          academic_program_id: item.academic_program?.id ?? item.offer?.academic_program_id ?? null,
+        })),
+      );
+  }
+
+  @Patch('subsections/:id/vc-match')
+  async updateSubsectionVcMatch(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: UpdatePlanningSubsectionVcMatchDto,
+  ) {
+    const subsection = await this.planningManualService.getSubsection(id);
+    this.authService.assertScopeAccess(
+      authUser,
+      subsection.offer?.faculty_id ?? null,
+      subsection.offer?.academic_program_id ?? null,
+    );
+    await this.assertApprovedPlanMutationAllowed(authUser, subsection.offer ?? null);
+    return this.planningManualService.updateSubsectionVcMatch(idActor(authUser), id, dto);
+  }
+
+  @Patch('campus-vc-locations/:campusId')
+  upsertCampusVcLocationMapping(
+    @Param('campusId') campusId: string,
+    @Body() dto: UpdatePlanningCampusVcLocationMappingDto,
+  ) {
+    return this.planningManualService.upsertCampusVcLocationMapping(campusId, dto);
+  }
+
+  @Post('vc-match/recalculate')
+  recalculateVcMatches(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Body() dto: RecalculatePlanningVcMatchesDto,
+  ) {
+    if (dto.faculty_id || dto.academic_program_id) {
+      this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
+    }
+    return this.planningManualService.recalculateVcMatches(idActor(authUser), dto);
   }
 
   @Get('conflicts')
@@ -766,6 +853,50 @@ export class PlanningController {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  private async assertApprovedPlanMutationAllowed(
+    authUser: AuthenticatedRequestUser,
+    ruleOrContext:
+      | {
+          workflow_status?: string | null;
+          semester_id?: string;
+          campus_id?: string | null;
+          academic_program_id?: string | null;
+          study_plan_id?: string;
+          cycle?: number;
+        }
+      | null,
+  ) {
+    if (!ruleOrContext) {
+      return;
+    }
+
+    let workflowStatus = ruleOrContext.workflow_status ?? null;
+    if (
+      !workflowStatus &&
+      ruleOrContext.semester_id &&
+      ruleOrContext.study_plan_id &&
+      ruleOrContext.cycle !== undefined
+    ) {
+      const rule = await this.planningManualService.getPlanRuleForOfferContext({
+        semester_id: ruleOrContext.semester_id,
+        campus_id: ruleOrContext.campus_id ?? null,
+        academic_program_id: ruleOrContext.academic_program_id ?? null,
+        study_plan_id: ruleOrContext.study_plan_id,
+        cycle: ruleOrContext.cycle,
+      });
+      workflowStatus = rule?.workflow_status ?? null;
+    }
+
+    if (
+      workflowStatus === 'APPROVED' &&
+      !authUser.permissions.includes(ACTION_PERMISSIONS.PLANNING_PLAN_REVIEW_DECIDE)
+    ) {
+      throw new ForbiddenException(
+        'Solo un usuario con permiso de revision puede editar un plan aprobado o devolverlo a correccion.',
+      );
     }
   }
 }

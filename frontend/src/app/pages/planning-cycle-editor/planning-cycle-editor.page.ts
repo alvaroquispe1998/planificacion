@@ -220,8 +220,22 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     return Boolean(this.currentPlanRule?.id);
   }
 
+  get canEditApprovedPlan() {
+    return (
+      this.currentPlanRule?.workflow_status === 'APPROVED' &&
+      this.auth.hasPermission('action.planning.plan.review_decide')
+    );
+  }
+
   get isWorkflowReadOnly() {
-    return ['IN_REVIEW', 'APPROVED'].includes(this.currentPlanRule?.workflow_status ?? '');
+    const status = this.currentPlanRule?.workflow_status ?? '';
+    if (status === 'IN_REVIEW') {
+      return true;
+    }
+    if (status === 'APPROVED') {
+      return !this.canEditApprovedPlan;
+    }
+    return false;
   }
 
   get canSubmitReview() {
@@ -233,11 +247,19 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     );
   }
 
-  get canReviewDecide() {
+  get canApprovePlan() {
     return (
       Boolean(this.currentPlanRule?.id) &&
       this.auth.hasPermission('action.planning.plan.review_decide') &&
       this.currentPlanRule?.workflow_status === 'IN_REVIEW'
+    );
+  }
+
+  get canRequestCorrection() {
+    return (
+      Boolean(this.currentPlanRule?.id) &&
+      this.auth.hasPermission('action.planning.plan.review_decide') &&
+      ['IN_REVIEW', 'APPROVED'].includes(this.currentPlanRule?.workflow_status ?? '')
     );
   }
 
@@ -904,7 +926,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
   workflowActionDescription() {
     switch (this.workflowDialog.action) {
       case 'APPROVE':
-        return 'El plan quedara cerrado y solo se mostrara en modo lectura.';
+        return 'El plan quedara aprobado. Un revisor con permiso podra reabrirlo a correccion si hace falta.';
       case 'REQUEST_CORRECTION':
         return 'El comentario sera visible y el plan volvera a edicion.';
       default:

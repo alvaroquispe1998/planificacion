@@ -9,6 +9,7 @@ import { PlanningCycleDetailPageComponent } from './pages/planning-cycle-detail/
 import { PlanningCycleEditorPageComponent } from './pages/planning-cycle-editor/planning-cycle-editor.page';
 import { PlanningChangeLogPageComponent } from './pages/planning-change-log/planning-change-log.page';
 import { PlanningOfferSectionsPageComponent } from './pages/planning-offer-sections/planning-offer-sections.page';
+import { PlanningVcMatchPageComponent } from './pages/planning-vc-match/planning-vc-match.page';
 import { SecurityPageComponent } from './pages/security/security.page';
 import { SettingsPageComponent } from './pages/settings/settings.page';
 
@@ -43,6 +44,12 @@ export const routes: Routes = [
       requiredWindow: 'window.planning',
       requiredPermission: 'action.planning.change_log.view',
     },
+  },
+  {
+    path: 'planning/vc-match',
+    component: PlanningVcMatchPageComponent,
+    canActivate: [windowGuard],
+    data: { requiredWindow: 'window.planning' },
   },
   {
     path: 'planning/offers/:offerId/sections',

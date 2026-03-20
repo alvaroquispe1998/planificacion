@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { Repository } from 'typeorm';
 import { newId } from '../common';
 import {
@@ -141,8 +142,8 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('Refresh token expirado.');
     }
 
-    const matches = await bcrypt.compare(dto.refresh_token, session.token_hash);
-    if (!matches) {
+    const tokenHash = hashToken(dto.refresh_token);
+    if (tokenHash !== session.token_hash) {
       throw new UnauthorizedException('Refresh token invalido.');
     }
 
@@ -228,55 +229,54 @@ export class AuthService implements OnModuleInit {
   }
 
   async buildAuthenticatedUser(userId: string, cachedUser?: AuthUserEntity): Promise<AuthenticatedRequestUser> {
-    const user = cachedUser ?? await this.requireActiveUser(userId);
-    const assignments = await this.assignmentsRepo.find({
-      where: { user_id: userId, is_active: true },
-      order: { created_at: 'ASC' },
-    });
+    // Fetch user + assignments + all roles + all permissions + all role-permissions in parallel
+    // This avoids sequential DB round-trips that were causing slow logins
+    const [user, assignments, allRoles, allPermissions, allRolePermissions, allFaculties, allPrograms] = await Promise.all([
+      cachedUser ? Promise.resolve(cachedUser) : this.requireActiveUser(userId),
+      this.assignmentsRepo.find({
+        where: { user_id: userId, is_active: true },
+        order: { created_at: 'ASC' },
+      }),
+      this.rolesRepo.find({ where: { is_active: true } }),
+      this.permissionsRepo.find({ where: { is_active: true } }),
+      this.rolePermissionsRepo.find(),
+      this.facultiesRepo.find(),
+      this.programsRepo.find(),
+    ]);
+
     if (assignments.length === 0) {
       throw new ForbiddenException('El usuario no tiene roles activos asignados.');
     }
 
-    const roleIds = uniqueIds(assignments.map((item) => item.role_id));
-    const facultyIds = uniqueIds(assignments.map((item) => item.faculty_id));
-    const programIds = uniqueIds(assignments.map((item) => item.academic_program_id));
-    const [roles, faculties, programs] = await Promise.all([
-      roleIds.length
-        ? this.rolesRepo.find({ where: roleIds.map((id) => ({ id, is_active: true })) })
-        : [],
-      facultyIds.length
-        ? this.facultiesRepo.find({ where: facultyIds.map((id) => ({ id })) })
-        : [],
-      programIds.length
-        ? this.programsRepo.find({ where: programIds.map((id) => ({ id })) })
-        : [],
-    ]);
-    const roleMap = new Map(roles.map((item) => [item.id, item]));
-    const facultyMap = new Map(faculties.map((item) => [item.id, item]));
-    const programMap = new Map(programs.map((item) => [item.id, item]));
-    const activeRoleIds = assignments
-      .map((item) => item.role_id)
-      .filter((roleId) => roleMap.has(roleId));
+    const roleMap = new Map(allRoles.map((item) => [item.id, item]));
+    const facultyMap = new Map(allFaculties.map((item) => [item.id, item]));
+    const programMap = new Map(allPrograms.map((item) => [item.id, item]));
+    const permissionMap = new Map(allPermissions.map((item) => [item.id, item]));
 
-    const rolePermissions = activeRoleIds.length
-      ? await this.rolePermissionsRepo.find({
-          where: activeRoleIds.map((roleId) => ({ role_id: roleId })),
-        })
-      : [];
-    const permissionIds = uniqueIds(rolePermissions.map((item) => item.permission_id));
-    const permissions = permissionIds.length
-      ? await this.permissionsRepo.find({
-          where: permissionIds.map((id) => ({ id, is_active: true })),
-        })
-      : [];
-    const permissionMap = new Map(permissions.map((item) => [item.id, item]));
-    const permissionCodes = [
-      ...new Set(
-        rolePermissions
-          .map((item) => permissionMap.get(item.permission_id)?.code ?? null)
-          .filter((item): item is string => Boolean(item)),
-      ),
-    ].sort();
+    // Build role-permission lookup from in-memory data
+    const rolePermissionsByRole = new Map<string, string[]>();
+    for (const rp of allRolePermissions) {
+      const arr = rolePermissionsByRole.get(rp.role_id) || [];
+      arr.push(rp.permission_id);
+      rolePermissionsByRole.set(rp.role_id, arr);
+    }
+
+    const activeRoleIds = new Set(
+      assignments.map((item) => item.role_id).filter((roleId) => roleMap.has(roleId)),
+    );
+
+    // Gather all permission codes from active roles
+    const permissionCodeSet = new Set<string>();
+    for (const roleId of activeRoleIds) {
+      const permIds = rolePermissionsByRole.get(roleId) || [];
+      for (const permId of permIds) {
+        const perm = permissionMap.get(permId);
+        if (perm) {
+          permissionCodeSet.add(perm.code);
+        }
+      }
+    }
+    const permissionCodes = [...permissionCodeSet].sort();
 
     const scopes: AccessScope[] = assignments
       .map((assignment) => {
@@ -304,8 +304,12 @@ export class AuthService implements OnModuleInit {
       .filter((item): item is AccessScope => Boolean(item));
 
     const roleSummaries = [
-      ...new Map(roles.map((role) => [role.id, { id: role.id, code: role.code, name: role.name }]))
-        .values(),
+      ...new Map(
+        assignments
+          .map((a) => roleMap.get(a.role_id))
+          .filter((r): r is AuthRoleEntity => Boolean(r))
+          .map((role) => [role.id, { id: role.id, code: role.code, name: role.name }]),
+      ).values(),
     ];
     const isAdmin = roleSummaries.some((item) => item.code === ROLE_CODES.ADMIN);
     const isGlobal = isAdmin || scopes.some((item) => item.is_global);
@@ -593,7 +597,7 @@ export class AuthService implements OnModuleInit {
       this.refreshTokensRepo.create({
         id: refreshId,
         user_id: userId,
-        token_hash: await bcrypt.hash(refreshToken, 5),
+        token_hash: hashToken(refreshToken),
         expires_at: new Date(now.getTime() + this.refreshExpiresDays * 24 * 60 * 60 * 1000),
         revoked_at: null,
         created_at: now,
@@ -667,4 +671,8 @@ function emptyToNull(value: string | null | undefined) {
   }
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
+}
+
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
 }

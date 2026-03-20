@@ -164,6 +164,12 @@ export class PlanningPageComponent implements OnInit {
     });
   }
 
+  openVcMatch() {
+    this.router.navigate(['/planning/vc-match'], {
+      queryParams: this.summaryQueryParams(),
+    });
+  }
+
   openCycleDetail(row: any) {
     this.router.navigate(['/planning/cycle-editor'], {
       queryParams: {
@@ -216,6 +222,13 @@ export class PlanningPageComponent implements OnInit {
     return (
       this.auth.hasPermission('action.planning.plan.review_decide') &&
       row?.workflow_status === 'IN_REVIEW'
+    );
+  }
+
+  canRequestCorrection(row: any) {
+    return (
+      this.auth.hasPermission('action.planning.plan.review_decide') &&
+      ['IN_REVIEW', 'APPROVED'].includes(row?.workflow_status ?? '')
     );
   }
 
@@ -380,7 +393,7 @@ export class PlanningPageComponent implements OnInit {
   workflowActionDescription() {
     switch (this.workflowDialog.action) {
       case 'APPROVE':
-        return 'El plan quedara cerrado y ya no podra editarse.';
+        return 'El plan quedara aprobado. Un revisor con permiso podra reabrirlo a correccion si hace falta.';
       case 'REQUEST_CORRECTION':
         return 'El comentario sera visible para que el plan vuelva a edicion.';
       default:

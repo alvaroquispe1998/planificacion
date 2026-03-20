@@ -41,6 +41,7 @@ export const PlanningV2ConflictTypeValues = [
   'SECTION_OVERLAP',
 ] as const;
 export const PlanningChangeActionValues = ['CREATE', 'UPDATE', 'DELETE'] as const;
+export const PlanningVcLocationCodeValues = ['CH', 'HU', 'SU', 'IC'] as const;
 
 @Entity({ name: 'class_offerings' })
 export class ClassOfferingEntity {
@@ -337,6 +338,15 @@ export class PlanningCyclePlanRuleEntity {
   @Column({ type: 'varchar', length: 36 })
   study_plan_id!: string;
 
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  vc_period_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  vc_faculty_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  vc_academic_program_id!: string | null;
+
   @Column({ type: 'boolean', default: true })
   is_active!: boolean;
 
@@ -398,6 +408,18 @@ export class PlanningOfferEntity {
 
   @Column({ type: 'varchar', length: 36 })
   study_plan_course_id!: string;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  vc_period_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  vc_faculty_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  vc_academic_program_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  vc_course_id!: string | null;
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   course_code!: string | null;
@@ -536,6 +558,9 @@ export class PlanningSubsectionEntity {
   @Column({ type: 'varchar', length: 255, nullable: true })
   denomination!: string | null;
 
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  vc_section_id!: string | null;
+
   @Column({ type: 'enum', enum: PlanningOfferStatusValues, default: 'DRAFT' })
   status!: (typeof PlanningOfferStatusValues)[number];
 
@@ -569,6 +594,25 @@ export class PlanningSubsectionScheduleEntity {
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   academic_hours!: number;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_campus_vc_location_mappings' })
+@Index(['campus_id'], { unique: true })
+export class PlanningCampusVcLocationMappingEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  campus_id!: string;
+
+  @Column({ type: 'enum', enum: PlanningVcLocationCodeValues })
+  vc_location_code!: (typeof PlanningVcLocationCodeValues)[number];
 
   @Column({ type: 'datetime' })
   created_at!: Date;

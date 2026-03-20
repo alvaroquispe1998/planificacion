@@ -53,6 +53,9 @@
   <p *ngIf="isWorkflowReadOnly" class="flash">
     Este plan esta en {{ workflowStatusLabel(currentPlanRule?.workflow_status).toLowerCase() }} y se muestra solo en modo lectura.
   </p>
+  <p *ngIf="canEditApprovedPlan" class="flash">
+    Este plan esta aprobado. Puedes ajustarlo y, si corresponde, devolverlo a correccion.
+  </p>
   <p *ngIf="currentPlanRule && !isWorkflowReadOnly && !planReviewReady" class="flash">
     {{ planReviewProgressLabel }}
   </p>
@@ -88,10 +91,10 @@
       <button *ngIf="canSubmitReview" class="btn btn-secondary btn-sm" (click)="openWorkflowDialog('SUBMIT_REVIEW')">
         Enviar a revision
       </button>
-      <button *ngIf="canReviewDecide" class="btn btn-primary btn-sm" (click)="openWorkflowDialog('APPROVE')">
+      <button *ngIf="canApprovePlan" class="btn btn-primary btn-sm" (click)="openWorkflowDialog('APPROVE')">
         Aprobar plan
       </button>
-      <button *ngIf="canReviewDecide" class="btn btn-secondary btn-sm" (click)="openWorkflowDialog('REQUEST_CORRECTION')">
+      <button *ngIf="canRequestCorrection" class="btn btn-secondary btn-sm" (click)="openWorkflowDialog('REQUEST_CORRECTION')">
         Mandar a correccion
       </button>
       <button class="btn-link" type="button" (click)="openTimelineDialog()">

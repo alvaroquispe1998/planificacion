@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -21,6 +22,7 @@ import {
   PlanningChangeActionValues,
   PlanningOfferStatusValues,
   PlanningSubsectionKindValues,
+  PlanningVcLocationCodeValues,
   DayOfWeekValues,
   GroupTypeValues,
 } from '../../entities/planning.entities';
@@ -557,6 +559,18 @@ export class CreatePlanningCyclePlanRuleDto {
   study_plan_id!: string;
 
   @IsOptional()
+  @IsString()
+  vc_period_id?: string;
+
+  @IsOptional()
+  @IsString()
+  vc_faculty_id?: string;
+
+  @IsOptional()
+  @IsString()
+  vc_academic_program_id?: string;
+
+  @IsOptional()
   @IsBoolean()
   is_active?: boolean;
 }
@@ -591,6 +605,18 @@ export class UpdatePlanningCyclePlanRuleDto {
   @IsOptional()
   @IsString()
   study_plan_id?: string;
+
+  @IsOptional()
+  @IsString()
+  vc_period_id?: string;
+
+  @IsOptional()
+  @IsString()
+  vc_faculty_id?: string;
+
+  @IsOptional()
+  @IsString()
+  vc_academic_program_id?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -673,6 +699,10 @@ export class UpdatePlanningOfferDto {
   @IsOptional()
   @IsString()
   study_type_id?: string;
+
+  @IsOptional()
+  @IsString()
+  vc_course_id?: string;
 
   @IsOptional()
   @IsEnum(PlanningOfferStatusValues)
@@ -851,8 +881,61 @@ export class UpdatePlanningSubsectionDto {
   denomination?: string;
 
   @IsOptional()
+  @IsString()
+  vc_section_id?: string;
+
+  @IsOptional()
   @IsEnum(PlanningOfferStatusValues)
   status?: (typeof PlanningOfferStatusValues)[number];
+}
+
+export class UpdatePlanningSubsectionVcMatchDto {
+  @IsOptional()
+  @IsString()
+  vc_section_id?: string;
+}
+
+export class UpdatePlanningCampusVcLocationMappingDto {
+  @IsOptional()
+  @IsIn(PlanningVcLocationCodeValues)
+  vc_location_code?: (typeof PlanningVcLocationCodeValues)[number];
+}
+
+export class RecalculatePlanningVcMatchesDto {
+  @IsOptional()
+  @IsString()
+  semester_id?: string;
+
+  @IsOptional()
+  @IsString()
+  campus_id?: string;
+
+  @IsOptional()
+  @IsString()
+  faculty_id?: string;
+
+  @IsOptional()
+  @IsString()
+  academic_program_id?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cycle?: number;
+
+  @IsOptional()
+  @IsString()
+  study_plan_id?: string;
+
+  @IsOptional()
+  @IsString()
+  offer_id?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  subsection_ids?: string[];
 }
 
 export class CreatePlanningSubsectionScheduleDto {

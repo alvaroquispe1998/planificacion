@@ -24,6 +24,7 @@ import {
   CourseModalityEntity,
   DayOfWeekValues,
   PlanningChangeLogEntity,
+  PlanningCampusVcLocationMappingEntity,
   PlanningCyclePlanRuleEntity,
   PlanningOfferEntity,
   PlanningOfferStatusValues,
@@ -32,19 +33,30 @@ import {
   PlanningSubsectionEntity,
   PlanningSubsectionKindValues,
   PlanningSubsectionScheduleEntity,
+  PlanningVcLocationCodeValues,
   PlanningV2ConflictTypeValues,
   StudyTypeEntity,
 } from '../entities/planning.entities';
 import {
+  VcAcademicProgramEntity,
+  VcCourseEntity,
+  VcFacultyEntity,
+  VcPeriodEntity,
+  VcSectionEntity,
+} from '../videoconference/videoconference.entity';
+import {
   CreatePlanningCyclePlanRuleDto,
   CreatePlanningOfferDto,
+  RecalculatePlanningVcMatchesDto,
   CreatePlanningSectionDto,
   CreatePlanningSubsectionDto,
   CreatePlanningSubsectionScheduleDto,
   UpdatePlanningCyclePlanRuleDto,
+  UpdatePlanningCampusVcLocationMappingDto,
   UpdatePlanningOfferDto,
   UpdatePlanningSectionDto,
   UpdatePlanningSubsectionDto,
+  UpdatePlanningSubsectionVcMatchDto,
   UpdatePlanningSubsectionScheduleDto,
 } from './dto/planning.dto';
 
@@ -53,6 +65,7 @@ type PlanningSubsectionKind = (typeof PlanningSubsectionKindValues)[number];
 type PlanningConflictType = (typeof PlanningV2ConflictTypeValues)[number];
 type ConflictSeverity = (typeof ConflictSeverityValues)[number];
 type DayOfWeek = (typeof DayOfWeekValues)[number];
+type PlanningVcLocationCode = (typeof PlanningVcLocationCodeValues)[number];
 
 type CourseCandidateFilters = {
   semester_id?: string;
@@ -68,6 +81,16 @@ type ConfiguredCycleFilters = {
   campus_id?: string;
   faculty_id?: string;
   academic_program_id?: string;
+};
+
+type PlanningVcMatchFilters = {
+  semester_id?: string;
+  campus_id?: string;
+  faculty_id?: string;
+  academic_program_id?: string;
+  cycle?: number;
+  study_plan_id?: string;
+  offer_id?: string;
 };
 
 type ChangeLogActor = {
@@ -104,10 +127,17 @@ type PlanningContext = {
   subsections: PlanningSubsectionEntity[];
   schedules: PlanningSubsectionScheduleEntity[];
   teachers: TeacherEntity[];
+  modalities: CourseModalityEntity[];
   buildings: BuildingEntity[];
   classrooms: ClassroomEntity[];
   conflicts: PlanningScheduleConflictV2Entity[];
   changeLogs: PlanningChangeLogEntity[];
+  vcPeriods: VcPeriodEntity[];
+  vcFaculties: VcFacultyEntity[];
+  vcAcademicPrograms: VcAcademicProgramEntity[];
+  vcCourses: VcCourseEntity[];
+  vcSections: VcSectionEntity[];
+  campusVcLocations: PlanningCampusVcLocationMappingEntity[];
 };
 
 type PlanningOfferBlueprint = {
@@ -150,6 +180,16 @@ export class PlanningManualService {
     private readonly studyTypesRepo: Repository<StudyTypeEntity>,
     @InjectRepository(CourseModalityEntity)
     private readonly courseModalitiesRepo: Repository<CourseModalityEntity>,
+    @InjectRepository(VcPeriodEntity)
+    private readonly vcPeriodsRepo: Repository<VcPeriodEntity>,
+    @InjectRepository(VcFacultyEntity)
+    private readonly vcFacultiesRepo: Repository<VcFacultyEntity>,
+    @InjectRepository(VcAcademicProgramEntity)
+    private readonly vcAcademicProgramsRepo: Repository<VcAcademicProgramEntity>,
+    @InjectRepository(VcCourseEntity)
+    private readonly vcCoursesRepo: Repository<VcCourseEntity>,
+    @InjectRepository(VcSectionEntity)
+    private readonly vcSectionsRepo: Repository<VcSectionEntity>,
     @InjectRepository(PlanningCyclePlanRuleEntity)
     private readonly planRulesRepo: Repository<PlanningCyclePlanRuleEntity>,
     @InjectRepository(PlanningOfferEntity)
@@ -164,6 +204,8 @@ export class PlanningManualService {
     private readonly conflictsRepo: Repository<PlanningScheduleConflictV2Entity>,
     @InjectRepository(PlanningChangeLogEntity)
     private readonly changeLogsRepo: Repository<PlanningChangeLogEntity>,
+    @InjectRepository(PlanningCampusVcLocationMappingEntity)
+    private readonly campusVcLocationMappingsRepo: Repository<PlanningCampusVcLocationMappingEntity>,
   ) {}
 
   async listCatalogFilters() {
@@ -179,6 +221,10 @@ export class PlanningManualService {
       rules,
       studyTypes,
       modalities,
+      vcPeriods,
+      vcFaculties,
+      vcAcademicPrograms,
+      campusVcLocations,
     ] =
       await Promise.all([
         this.semestersRepo.find({ order: { name: 'DESC' } }),
@@ -198,6 +244,10 @@ export class PlanningManualService {
         }),
         this.studyTypesRepo.find({ where: { is_active: true }, order: { name: 'ASC' } }),
         this.courseModalitiesRepo.find({ where: { is_active: true }, order: { name: 'ASC' } }),
+        this.vcPeriodsRepo.find({ where: { is_active: true }, order: { text: 'DESC' } }),
+        this.vcFacultiesRepo.find({ order: { name: 'ASC' } }),
+        this.vcAcademicProgramsRepo.find({ order: { name: 'ASC' } }),
+        this.campusVcLocationMappingsRepo.find({ order: { campus_id: 'ASC' } }),
       ]);
     const derivedCatalog = this.buildStudyPlanCatalog(studyPlans, faculties, academicPrograms);
     const cycles = buildStudyPlanCycles(studyPlanCourses, studyPlanCourseDetails);
@@ -213,6 +263,10 @@ export class PlanningManualService {
       plan_rules: rules,
       study_types: studyTypes,
       course_modalities: modalities,
+      vc_periods: vcPeriods,
+      vc_faculties: vcFaculties,
+      vc_academic_programs: vcAcademicPrograms,
+      campus_vc_locations: campusVcLocations,
     };
   }
 
@@ -469,6 +523,9 @@ export class PlanningManualService {
       career_name: dto.career_name ?? null,
       cycle: dto.cycle,
       study_plan_id: dto.study_plan_id,
+      vc_period_id: emptyToNull(dto.vc_period_id),
+      vc_faculty_id: emptyToNull(dto.vc_faculty_id),
+      vc_academic_program_id: emptyToNull(dto.vc_academic_program_id),
       is_active: dto.is_active ?? true,
       workflow_status: 'DRAFT',
       submitted_at: null,
@@ -502,10 +559,18 @@ export class PlanningManualService {
 
   async updatePlanRule(actor: ChangeLogActor | null | undefined, id: string, dto: UpdatePlanningCyclePlanRuleDto) {
     const current = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
-    this.ensurePlanRuleEditable(current);
+    this.ensurePlanRuleEditable(current, { allowApproved: true });
     const next = {
       ...current,
       ...dto,
+      vc_period_id:
+        dto.vc_period_id !== undefined ? emptyToNull(dto.vc_period_id) : current.vc_period_id,
+      vc_faculty_id:
+        dto.vc_faculty_id !== undefined ? emptyToNull(dto.vc_faculty_id) : current.vc_faculty_id,
+      vc_academic_program_id:
+        dto.vc_academic_program_id !== undefined
+          ? emptyToNull(dto.vc_academic_program_id)
+          : current.vc_academic_program_id,
       updated_at: new Date(),
     };
     await this.ensureStudyPlanMatchesContext(
@@ -517,6 +582,7 @@ export class PlanningManualService {
     await this.ensureNoOverlappingRule(next, id);
     await this.planRulesRepo.save(next);
     const saved = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
+    await this.syncVcReferencesForRule(saved, actor);
     await this.logChange(
       'planning_cycle_plan_rule',
       id,
@@ -666,8 +732,8 @@ export class PlanningManualService {
     reviewComment: string,
   ) {
     const current = await this.requireEntity(this.planRulesRepo, id, 'planning_cycle_plan_rule');
-    if (current.workflow_status !== 'IN_REVIEW') {
-      throw new BadRequestException('Solo puedes mandar a correccion planes que estan en revision.');
+    if (!['IN_REVIEW', 'APPROVED'].includes(current.workflow_status)) {
+      throw new BadRequestException('Solo puedes mandar a correccion planes en revision o aprobados.');
     }
     const next = this.planRulesRepo.create({
       ...current,
@@ -855,7 +921,7 @@ export class PlanningManualService {
       study_plan_id: dto.study_plan_id,
       cycle: dto.cycle,
     });
-    this.ensurePlanRuleEditable(planRule);
+    this.ensurePlanRuleEditable(planRule, { allowApproved: true });
     const existing = await this.offersRepo.findOne({
       where: {
         semester_id: dto.semester_id,
@@ -890,6 +956,15 @@ export class PlanningManualService {
         `El curso seleccionado no pertenece al ciclo ${dto.cycle}.`,
       );
     }
+    const vcPeriodId = planRule?.vc_period_id ?? null;
+    const vcFacultyId = planRule?.vc_faculty_id ?? null;
+    const vcAcademicProgramId = planRule?.vc_academic_program_id ?? null;
+    const vcCourseId = await this.resolveVcCourseId({
+      course_name: blueprint.course_name,
+      course_code: blueprint.course_code,
+      study_plan_id: dto.study_plan_id,
+      vc_academic_program_id: vcAcademicProgramId,
+    });
     const now = new Date();
     const entity = this.offersRepo.create({
       id: dto.id ?? newId(),
@@ -900,6 +975,10 @@ export class PlanningManualService {
       study_plan_id: dto.study_plan_id,
       cycle: dto.cycle,
       study_plan_course_id: dto.study_plan_course_id,
+      vc_period_id: vcPeriodId,
+      vc_faculty_id: vcFacultyId,
+      vc_academic_program_id: vcAcademicProgramId,
+      vc_course_id: vcCourseId,
       course_code: blueprint.course_code,
       course_name: blueprint.course_name,
       study_type_id: dto.study_type_id ?? (await this.defaultStudyTypeId()),
@@ -968,6 +1047,8 @@ export class PlanningManualService {
     const next = this.offersRepo.create({
       ...current,
       ...dto,
+      vc_course_id:
+        dto.vc_course_id !== undefined ? emptyToNull(dto.vc_course_id) : current.vc_course_id,
       updated_at: new Date(),
     });
     await this.offersRepo.save(next);
@@ -981,6 +1062,7 @@ export class PlanningManualService {
       this.buildOfferLogContext(saved),
       actor,
     );
+    await this.syncOfferVcReferences(saved.id, actor, { preserveManualCourse: true });
     return this.getOffer(id);
   }
 
@@ -1083,6 +1165,7 @@ export class PlanningManualService {
         actor,
       );
     }
+    await this.syncSectionVcMatches(saved.id, actor);
     await this.refreshOfferStatus(offerId, undefined, actor);
     return this.getSection(saved.id);
   }
@@ -1104,7 +1187,7 @@ export class PlanningManualService {
       where: { planning_section_id: id },
       order: { detected_at: 'DESC' },
     });
-    const [teachers, modalities, buildings, classrooms] = await Promise.all([
+    const [teachers, modalities, buildings, classrooms, vcSections, campusVcLocations] = await Promise.all([
       this.findManyByIds(
         this.teachersRepo,
         uniqueIds([section.teacher_id, ...subsections.map((item) => item.responsible_teacher_id)]),
@@ -1115,7 +1198,14 @@ export class PlanningManualService {
       ),
       this.findManyByIds(this.buildingsRepo, uniqueIds(subsections.map((item) => item.building_id))),
       this.findManyByIds(this.classroomsRepo, uniqueIds(subsections.map((item) => item.classroom_id))),
+      this.findManyByIds(this.vcSectionsRepo, uniqueIds(subsections.map((item) => item.vc_section_id))),
+      this.findManyByField(this.campusVcLocationMappingsRepo, 'campus_id', [offer.campus_id]),
     ]);
+    const vcSectionMap = mapById(vcSections);
+    const contextForExpectedName = {
+      modalities,
+      campusVcLocations,
+    };
 
     return {
       ...section,
@@ -1130,6 +1220,13 @@ export class PlanningManualService {
           buildings,
           classrooms,
           conflicts,
+          vcSection: vcSectionMap.get(subsection.vc_section_id ?? '') ?? null,
+          expectedVcSectionName: this.buildExpectedVcSectionNameForSubsection(
+            subsection,
+            section,
+            offer,
+            contextForExpectedName,
+          ),
         }),
       ),
     };
@@ -1207,6 +1304,7 @@ export class PlanningManualService {
       this.buildSectionLogContext(saved, currentOffer),
       actor,
     );
+    await this.syncSectionVcMatches(id, actor);
     await this.refreshOfferStatus(saved.planning_offer_id, undefined, actor);
     return this.getSection(id);
   }
@@ -1370,6 +1468,7 @@ export class PlanningManualService {
       this.buildSubsectionLogContext(saved, section, offer),
       actor,
     );
+    await this.syncSubsectionVcMatch(saved.id, actor);
     await this.refreshOfferStatus(section.planning_offer_id, undefined, actor);
     return this.getSubsection(saved.id);
   }
@@ -1382,7 +1481,8 @@ export class PlanningManualService {
       'planning_section',
     );
     const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
-    const [schedules, conflicts, teachers, modalities, buildings, classrooms] = await Promise.all([
+    const [schedules, conflicts, teachers, modalities, buildings, classrooms, vcSections, campusVcLocations] =
+      await Promise.all([
       this.schedulesRepo.find({
         where: { planning_subsection_id: id },
         order: { day_of_week: 'ASC', start_time: 'ASC' },
@@ -1395,6 +1495,8 @@ export class PlanningManualService {
       this.findManyByIds(this.courseModalitiesRepo, uniqueIds([subsection.course_modality_id])),
       this.findManyByIds(this.buildingsRepo, uniqueIds([subsection.building_id])),
       this.findManyByIds(this.classroomsRepo, uniqueIds([subsection.classroom_id])),
+      this.findManyByIds(this.vcSectionsRepo, uniqueIds([subsection.vc_section_id])),
+      this.findManyByField(this.campusVcLocationMappingsRepo, 'campus_id', [offer.campus_id]),
     ]);
 
     return this.buildSubsectionDetail(subsection, {
@@ -1406,6 +1508,11 @@ export class PlanningManualService {
       modalities,
       buildings,
       classrooms,
+      vcSection: mapById(vcSections).get(subsection.vc_section_id ?? '') ?? null,
+      expectedVcSectionName: this.buildExpectedVcSectionNameForSubsection(subsection, section, offer, {
+        modalities,
+        campusVcLocations,
+      }),
     });
   }
 
@@ -1503,6 +1610,7 @@ export class PlanningManualService {
       this.buildSubsectionLogContext(saved, section, offer),
       actor,
     );
+    await this.syncSubsectionVcMatch(id, actor);
     await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id, actor);
     return this.getSubsection(id);
   }
@@ -1577,8 +1685,6 @@ export class PlanningManualService {
       academic_hours: roundToTwo(minutes / 50),
       updated_at: new Date(),
     });
-    await this.schedulesRepo.save(next);
-    const saved = await this.requireEntity(this.schedulesRepo, id, 'planning_subsection_schedule');
     const subsection = await this.requireEntity(
       this.subsectionsRepo,
       current.planning_subsection_id,
@@ -1591,6 +1697,8 @@ export class PlanningManualService {
     );
     const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
     await this.assertOfferPlanEditable(offer);
+    await this.schedulesRepo.save(next);
+    const saved = await this.requireEntity(this.schedulesRepo, id, 'planning_subsection_schedule');
     await this.logChange(
       'planning_subsection_schedule',
       id,
@@ -1643,6 +1751,197 @@ export class PlanningManualService {
     );
     await this.rebuildConflictsForSemesterByOffer(section.planning_offer_id, actor);
     return this.getSubsection(subsection.id);
+  }
+
+  async listVcMatchRows(filters: PlanningVcMatchFilters = {}) {
+    const offers = await this.offersRepo.find({
+      where: {
+        ...(filters.semester_id ? { semester_id: filters.semester_id } : {}),
+        ...(filters.campus_id ? { campus_id: filters.campus_id } : {}),
+        ...(filters.faculty_id ? { faculty_id: filters.faculty_id } : {}),
+        ...(filters.academic_program_id ? { academic_program_id: filters.academic_program_id } : {}),
+        ...(filters.cycle ? { cycle: filters.cycle } : {}),
+        ...(filters.study_plan_id ? { study_plan_id: filters.study_plan_id } : {}),
+        ...(filters.offer_id ? { id: filters.offer_id } : {}),
+      },
+      order: { course_name: 'ASC', updated_at: 'DESC' },
+    });
+    if (offers.length === 0) {
+      return [];
+    }
+
+    const context = await this.buildContext(offers.map((item) => item.id));
+    const [semesters, campuses, faculties, academicPrograms, studyPlans, candidateVcSections] =
+      await Promise.all([
+        this.findManyByIds(this.semestersRepo, uniqueIds(offers.map((item) => item.semester_id))),
+        this.findManyByIds(this.campusesRepo, uniqueIds(offers.map((item) => item.campus_id))),
+        this.findManyByIds(this.facultiesRepo, uniqueIds(offers.map((item) => item.faculty_id))),
+        this.findManyByIds(
+          this.programsRepo,
+          uniqueIds(offers.map((item) => item.academic_program_id)),
+        ),
+        this.findManyByIds(this.studyPlansRepo, uniqueIds(offers.map((item) => item.study_plan_id))),
+        this.findManyByField(
+          this.vcSectionsRepo,
+          'course_id',
+          uniqueIds(offers.map((item) => item.vc_course_id)),
+        ),
+      ]);
+
+    const sectionsByOfferId = groupBy(context.sections, (item) => item.planning_offer_id);
+    const subsectionsBySectionId = groupBy(context.subsections, (item) => item.planning_section_id);
+    const semesterMap = mapById(semesters);
+    const campusMap = mapById(campuses);
+    const facultyMap = mapById(faculties);
+    const programMap = mapById(academicPrograms);
+    const studyPlanMap = mapById(studyPlans);
+    const vcCourseMap = mapById(context.vcCourses);
+    const vcSectionMap = mapById([...context.vcSections, ...candidateVcSections]);
+    const candidateSectionsByCourseId = groupBy(candidateVcSections, (item) => item.course_id);
+
+    return offers
+      .flatMap((offer) => {
+        const offerSections = sectionsByOfferId.get(offer.id) ?? [];
+        return offerSections.flatMap((section) =>
+          (subsectionsBySectionId.get(section.id) ?? []).map((subsection) => {
+            const expectedVcSectionName = this.buildExpectedVcSectionNameForSubsection(
+              subsection,
+              section,
+              offer,
+              {
+                modalities: context.modalities,
+                campusVcLocations: context.campusVcLocations,
+              },
+            );
+            const sectionCandidates = candidateSectionsByCourseId.get(offer.vc_course_id ?? '__none__') ?? [];
+            const suggestedMatches = expectedVcSectionName
+              ? this.findMatchingVcSections(sectionCandidates, expectedVcSectionName)
+              : [];
+            return {
+              id: subsection.id,
+              semester: semesterMap.get(offer.semester_id) ?? null,
+              campus: campusMap.get(offer.campus_id) ?? null,
+              faculty: facultyMap.get(offer.faculty_id ?? '') ?? null,
+              academic_program: programMap.get(offer.academic_program_id ?? '') ?? null,
+              study_plan: studyPlanMap.get(offer.study_plan_id) ?? null,
+              offer: {
+                id: offer.id,
+                cycle: offer.cycle,
+                course_code: offer.course_code,
+                course_name: offer.course_name,
+                vc_course_id: offer.vc_course_id,
+                vc_course: vcCourseMap.get(offer.vc_course_id ?? '') ?? null,
+              },
+              section: {
+                id: section.id,
+                code: section.code,
+              },
+              subsection: {
+                id: subsection.id,
+                code: subsection.code,
+                vc_section_id: subsection.vc_section_id,
+              },
+              expected_vc_section_name: expectedVcSectionName,
+              vc_section: vcSectionMap.get(subsection.vc_section_id ?? '') ?? null,
+              vc_section_candidates: sectionCandidates,
+              suggested_vc_sections: suggestedMatches,
+              match_status: resolveDetailedVcMatchStatus(
+                subsection.vc_section_id,
+                expectedVcSectionName,
+                suggestedMatches.length,
+              ),
+            };
+          }),
+        );
+      })
+      .sort((left, right) => {
+        const offerDelta = compareCatalogLabels(
+          left.offer?.course_name ?? left.offer?.course_code,
+          right.offer?.course_name ?? right.offer?.course_code,
+        );
+        if (offerDelta !== 0) {
+          return offerDelta;
+        }
+        const sectionDelta = compareCatalogLabels(left.section?.code, right.section?.code);
+        if (sectionDelta !== 0) {
+          return sectionDelta;
+        }
+        return compareCatalogLabels(left.subsection?.code, right.subsection?.code);
+      });
+  }
+
+  async updateSubsectionVcMatch(
+    actor: ChangeLogActor | null | undefined,
+    id: string,
+    dto: UpdatePlanningSubsectionVcMatchDto,
+  ) {
+    const current = await this.requireEntity(this.subsectionsRepo, id, 'planning_subsection');
+    const section = await this.requireEntity(this.sectionsRepo, current.planning_section_id, 'planning_section');
+    const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
+    await this.assertOfferPlanEditable(offer);
+
+    const nextVcSectionId = emptyToNull(dto.vc_section_id);
+    if (nextVcSectionId) {
+      const vcSection = await this.requireEntity(this.vcSectionsRepo, nextVcSectionId, 'vc_section');
+      if (offer.vc_course_id && vcSection.course_id !== offer.vc_course_id) {
+        throw new BadRequestException(
+          'La seccion VC seleccionada no pertenece al curso VC asociado a la oferta.',
+        );
+      }
+    }
+
+    const next = this.subsectionsRepo.create({
+      ...current,
+      vc_section_id: nextVcSectionId,
+      updated_at: new Date(),
+    });
+    await this.subsectionsRepo.save(next);
+    const saved = await this.requireEntity(this.subsectionsRepo, id, 'planning_subsection');
+    await this.logChange(
+      'planning_subsection',
+      id,
+      'UPDATE',
+      current,
+      saved,
+      { ...this.buildSubsectionLogContext(saved, section, offer), vc_match_action: 'manual_override' },
+      actor,
+    );
+    return this.getSubsection(id);
+  }
+
+  async upsertCampusVcLocationMapping(campusId: string, dto: UpdatePlanningCampusVcLocationMappingDto) {
+    const campus = await this.requireEntity(this.campusesRepo, campusId, 'campus');
+    if (!dto.vc_location_code) {
+      throw new BadRequestException('Debes indicar el codigo VC para el campus.');
+    }
+    const now = new Date();
+    const current = await this.campusVcLocationMappingsRepo.findOne({ where: { campus_id: campusId } });
+    const next = this.campusVcLocationMappingsRepo.create({
+      id: current?.id ?? newId(),
+      campus_id: campus.id,
+      vc_location_code: dto.vc_location_code,
+      created_at: current?.created_at ?? now,
+      updated_at: now,
+    });
+    return this.campusVcLocationMappingsRepo.save(next);
+  }
+
+  async recalculateVcMatches(actor: ChangeLogActor | null | undefined, dto: RecalculatePlanningVcMatchesDto) {
+    const offerIds = dto.subsection_ids?.length
+      ? await this.resolveOfferIdsFromSubsectionIds(dto.subsection_ids)
+      : await this.resolveOfferIdsForVcRecalculation(dto);
+    let updatedOfferCount = 0;
+    let updatedSubsectionCount = 0;
+    for (const offerId of offerIds) {
+      const result = await this.syncOfferVcReferences(offerId, actor);
+      updatedOfferCount += result.offer_updated ? 1 : 0;
+      updatedSubsectionCount += result.updated_subsection_count;
+    }
+    return {
+      offer_count: offerIds.length,
+      updated_offer_count: updatedOfferCount,
+      updated_subsection_count: updatedSubsectionCount,
+    };
   }
 
   async listConflicts(semesterId?: string, offerId?: string) {
@@ -2019,18 +2318,36 @@ export class PlanningManualService {
   }
 
   private async enrichPlanRules(rules: PlanningCyclePlanRuleEntity[]) {
-    const [semesters, campuses, programs, plans, faculties] = await Promise.all([
+    const [
+      semesters,
+      campuses,
+      programs,
+      plans,
+      faculties,
+      vcPeriods,
+      vcFaculties,
+      vcAcademicPrograms,
+    ] = await Promise.all([
       this.findManyByIds(this.semestersRepo, uniqueIds(rules.map((item) => item.semester_id))),
       this.findManyByIds(this.campusesRepo, uniqueIds(rules.map((item) => item.campus_id))),
       this.findManyByIds(this.programsRepo, uniqueIds(rules.map((item) => item.academic_program_id))),
       this.findManyByIds(this.studyPlansRepo, uniqueIds(rules.map((item) => item.study_plan_id))),
       this.findManyByIds(this.facultiesRepo, uniqueIds(rules.map((item) => item.faculty_id))),
+      this.findManyByIds(this.vcPeriodsRepo, uniqueIds(rules.map((item) => item.vc_period_id))),
+      this.findManyByIds(this.vcFacultiesRepo, uniqueIds(rules.map((item) => item.vc_faculty_id))),
+      this.findManyByIds(
+        this.vcAcademicProgramsRepo,
+        uniqueIds(rules.map((item) => item.vc_academic_program_id)),
+      ),
     ]);
     const semesterMap = mapById(semesters);
     const campusMap = mapById(campuses);
     const programMap = mapById(programs);
     const planMap = mapById(plans);
     const facultyMap = mapById(faculties);
+    const vcPeriodMap = mapById(vcPeriods);
+    const vcFacultyMap = mapById(vcFaculties);
+    const vcAcademicProgramMap = mapById(vcAcademicPrograms);
     return rules.map((rule) => {
       const plan = planMap.get(rule.study_plan_id) ?? null;
       const fallbackFacultyName = coalesceCatalogLabel(plan?.faculty);
@@ -2067,6 +2384,9 @@ export class PlanningManualService {
           (fallbackFacultyName && fallbackFacultyId
             ? { id: fallbackFacultyId, name: fallbackFacultyName }
             : null),
+        vc_period: vcPeriodMap.get(rule.vc_period_id ?? '') ?? null,
+        vc_faculty: vcFacultyMap.get(rule.vc_faculty_id ?? '') ?? null,
+        vc_academic_program: vcAcademicProgramMap.get(rule.vc_academic_program_id ?? '') ?? null,
       };
     });
   }
@@ -2161,6 +2481,18 @@ export class PlanningManualService {
     );
     const studyTypeId = await this.defaultStudyTypeId();
     const now = new Date();
+    const vcCourseIdByStudyPlanCourseId = new Map<string, string | null>();
+    for (const blueprint of blueprints) {
+      vcCourseIdByStudyPlanCourseId.set(
+        blueprint.study_plan_course_id,
+        await this.resolveVcCourseId({
+          course_name: blueprint.course_name,
+          course_code: blueprint.course_code,
+          study_plan_id: rule.study_plan_id,
+          vc_academic_program_id: rule.vc_academic_program_id,
+        }),
+      );
+    }
     const newOffers = blueprints
       .filter((item) => !existingByCourseId.has(item.study_plan_course_id))
       .map((item) =>
@@ -2173,6 +2505,10 @@ export class PlanningManualService {
           study_plan_id: rule.study_plan_id,
           cycle: rule.cycle,
           study_plan_course_id: item.study_plan_course_id,
+          vc_period_id: rule.vc_period_id ?? null,
+          vc_faculty_id: rule.vc_faculty_id ?? null,
+          vc_academic_program_id: rule.vc_academic_program_id ?? null,
+          vc_course_id: vcCourseIdByStudyPlanCourseId.get(item.study_plan_course_id) ?? null,
           course_code: item.course_code,
           course_name: item.course_name,
           study_type_id: studyTypeId,
@@ -2246,10 +2582,17 @@ export class PlanningManualService {
         subsections: [],
         schedules: [],
         teachers: [],
+        modalities: [],
         buildings: [],
         classrooms: [],
         conflicts: [],
         changeLogs: [],
+        vcPeriods: [],
+        vcFaculties: [],
+        vcAcademicPrograms: [],
+        vcCourses: [],
+        vcSections: [],
+        campusVcLocations: [],
       };
     }
     const offers = await this.offersRepo.find({ where: { id: In(offerIds) } });
@@ -2285,31 +2628,68 @@ export class PlanningManualService {
       where: { entity_id: In(entityIds) },
       order: { changed_at: 'DESC' },
     });
-    const teachers = await this.findManyByIds(
-      this.teachersRepo,
-      uniqueIds([
-        ...sections.map((item) => item.teacher_id),
-        ...subsections.map((item) => item.responsible_teacher_id),
-      ]),
-    );
-    const buildings = await this.findManyByIds(
-      this.buildingsRepo,
-      uniqueIds(subsections.map((item) => item.building_id)),
-    );
-    const classrooms = await this.findManyByIds(
-      this.classroomsRepo,
-      uniqueIds(subsections.map((item) => item.classroom_id)),
-    );
+    const [
+      teachers,
+      modalities,
+      buildings,
+      classrooms,
+      vcPeriods,
+      vcFaculties,
+      vcAcademicPrograms,
+      vcCourses,
+      vcSections,
+      campusVcLocations,
+    ] = await Promise.all([
+      this.findManyByIds(
+        this.teachersRepo,
+        uniqueIds([
+          ...sections.map((item) => item.teacher_id),
+          ...subsections.map((item) => item.responsible_teacher_id),
+        ]),
+      ),
+      this.findManyByIds(
+        this.courseModalitiesRepo,
+        uniqueIds(subsections.map((item) => item.course_modality_id)),
+      ),
+      this.findManyByIds(
+        this.buildingsRepo,
+        uniqueIds(subsections.map((item) => item.building_id)),
+      ),
+      this.findManyByIds(
+        this.classroomsRepo,
+        uniqueIds(subsections.map((item) => item.classroom_id)),
+      ),
+      this.findManyByIds(this.vcPeriodsRepo, uniqueIds(offers.map((item) => item.vc_period_id))),
+      this.findManyByIds(this.vcFacultiesRepo, uniqueIds(offers.map((item) => item.vc_faculty_id))),
+      this.findManyByIds(
+        this.vcAcademicProgramsRepo,
+        uniqueIds(offers.map((item) => item.vc_academic_program_id)),
+      ),
+      this.findManyByIds(this.vcCoursesRepo, uniqueIds(offers.map((item) => item.vc_course_id))),
+      this.findManyByIds(this.vcSectionsRepo, uniqueIds(subsections.map((item) => item.vc_section_id))),
+      this.findManyByField(
+        this.campusVcLocationMappingsRepo,
+        'campus_id',
+        uniqueIds(offers.map((item) => item.campus_id)),
+      ),
+    ]);
     return {
       offers,
       sections,
       subsections,
       schedules,
       teachers,
+      modalities,
       buildings,
       classrooms,
       conflicts,
       changeLogs,
+      vcPeriods,
+      vcFaculties,
+      vcAcademicPrograms,
+      vcCourses,
+      vcSections,
+      campusVcLocations,
     };
   }
 
@@ -2320,8 +2700,20 @@ export class PlanningManualService {
     const subsectionIds = subsections.map((item) => item.id);
     const schedules = context.schedules.filter((item) => subsectionIds.includes(item.planning_subsection_id));
     const conflicts = context.conflicts.filter((item) => item.planning_offer_id === offer.id);
+    const vcPeriodMap = mapById(context.vcPeriods);
+    const vcFacultyMap = mapById(context.vcFaculties);
+    const vcAcademicProgramMap = mapById(context.vcAcademicPrograms);
+    const vcCourseMap = mapById(context.vcCourses);
+    const campusVcLocationMap = new Map(
+      context.campusVcLocations.map((item) => [item.campus_id, item]),
+    );
     return {
       ...offer,
+      vc_period: vcPeriodMap.get(offer.vc_period_id ?? '') ?? null,
+      vc_faculty: vcFacultyMap.get(offer.vc_faculty_id ?? '') ?? null,
+      vc_academic_program: vcAcademicProgramMap.get(offer.vc_academic_program_id ?? '') ?? null,
+      vc_course: vcCourseMap.get(offer.vc_course_id ?? '') ?? null,
+      campus_vc_location: campusVcLocationMap.get(offer.campus_id) ?? null,
       section_count: sections.length,
       subsection_count: subsections.length,
       schedule_count: schedules.length,
@@ -2336,6 +2728,7 @@ export class PlanningManualService {
     const teacherMap = mapById(context.teachers);
     const buildingMap = mapById(context.buildings);
     const classroomMap = mapById(context.classrooms);
+    const vcSectionMap = mapById(context.vcSections);
     const sectionConflicts = groupBy(context.conflicts, (item) => item.planning_section_id ?? '__null__');
     const subsectionConflicts = groupBy(
       context.conflicts,
@@ -2352,8 +2745,14 @@ export class PlanningManualService {
             schedules: scheduleMap.get(subsection.id) ?? [],
             conflicts: subsectionConflicts.get(subsection.id) ?? [],
             teachers: context.teachers,
+            modalities: context.modalities,
             buildings: context.buildings,
             classrooms: context.classrooms,
+            vcSection: vcSectionMap.get(subsection.vc_section_id ?? '') ?? null,
+            expectedVcSectionName: this.buildExpectedVcSectionNameForSubsection(subsection, section, offer, {
+              modalities: context.modalities,
+              campusVcLocations: context.campusVcLocations,
+            }),
           }),
         ),
         conflicts: sectionConflicts.get(section.id) ?? [],
@@ -2505,6 +2904,8 @@ export class PlanningManualService {
       modalities?: CourseModalityEntity[];
       buildings: BuildingEntity[];
       classrooms: ClassroomEntity[];
+      vcSection?: VcSectionEntity | null;
+      expectedVcSectionName?: string | null;
     },
   ) {
     const teacherMap = mapById(input.teachers);
@@ -2520,6 +2921,9 @@ export class PlanningManualService {
       modality: modalityMap.get(subsection.course_modality_id ?? '') ?? null,
       building: buildingMap.get(subsection.building_id ?? '') ?? null,
       classroom: classroomMap.get(subsection.classroom_id ?? '') ?? null,
+      vc_section: input.vcSection ?? null,
+      expected_vc_section_name: input.expectedVcSectionName ?? null,
+      vc_match_status: resolveVcMatchStatus(subsection.vc_section_id, input.expectedVcSectionName, input.vcSection),
       schedules: ownSchedules,
       conflicts: input.conflicts.filter((item) => item.planning_subsection_id === subsection.id),
     };
@@ -2548,11 +2952,25 @@ export class PlanningManualService {
     });
   }
 
-  private ensurePlanRuleEditable(rule: PlanningCyclePlanRuleEntity | null) {
+  async getPlanRuleForOfferContext(input: {
+    semester_id: string;
+    campus_id: string | null;
+    academic_program_id: string | null;
+    study_plan_id: string;
+    cycle: number;
+  }) {
+    return this.findPlanRuleForOfferContext(input);
+  }
+
+  private ensurePlanRuleEditable(
+    rule: PlanningCyclePlanRuleEntity | null,
+    options?: { allowApproved?: boolean },
+  ) {
     if (!rule) {
       return;
     }
-    if (rule.workflow_status === 'IN_REVIEW' || rule.workflow_status === 'APPROVED') {
+    const allowApproved = Boolean(options?.allowApproved);
+    if (rule.workflow_status === 'IN_REVIEW' || (!allowApproved && rule.workflow_status === 'APPROVED')) {
       throw new BadRequestException(
         'Este plan esta bloqueado por workflow. Solo puede editarse si vuelve a correccion.',
       );
@@ -2567,8 +2985,272 @@ export class PlanningManualService {
       study_plan_id: offer.study_plan_id,
       cycle: offer.cycle,
     });
-    this.ensurePlanRuleEditable(rule);
+    this.ensurePlanRuleEditable(rule, { allowApproved: true });
     return rule;
+  }
+
+  private async syncVcReferencesForRule(
+    rule: PlanningCyclePlanRuleEntity,
+    actor?: ChangeLogActor | null,
+  ) {
+    const offers = await this.offersRepo.find({
+      where: {
+        semester_id: rule.semester_id,
+        campus_id: rule.campus_id ?? undefined,
+        academic_program_id: rule.academic_program_id,
+        study_plan_id: rule.study_plan_id,
+        cycle: rule.cycle,
+      },
+    });
+    for (const offer of offers) {
+      await this.syncOfferVcReferences(offer.id, actor);
+    }
+  }
+
+  private async syncOfferVcReferences(
+    offerId: string,
+    actor?: ChangeLogActor | null,
+    options?: { preserveManualCourse?: boolean },
+  ) {
+    const current = await this.requireEntity(this.offersRepo, offerId, 'planning_offer');
+    const rule = await this.findPlanRuleForOfferContext({
+      semester_id: current.semester_id,
+      campus_id: current.campus_id,
+      academic_program_id: current.academic_program_id ?? null,
+      study_plan_id: current.study_plan_id,
+      cycle: current.cycle,
+    });
+    const nextVcPeriodId = rule?.vc_period_id ?? current.vc_period_id ?? null;
+    const nextVcFacultyId = rule?.vc_faculty_id ?? current.vc_faculty_id ?? null;
+    const nextVcAcademicProgramId =
+      rule?.vc_academic_program_id ?? current.vc_academic_program_id ?? null;
+    const nextVcCourseId =
+      options?.preserveManualCourse && current.vc_course_id
+        ? current.vc_course_id
+        : await this.resolveVcCourseId({
+            course_name: current.course_name,
+            course_code: current.course_code,
+            study_plan_id: current.study_plan_id,
+            vc_academic_program_id: nextVcAcademicProgramId,
+          });
+
+    const next = this.offersRepo.create({
+      ...current,
+      vc_period_id: nextVcPeriodId,
+      vc_faculty_id: nextVcFacultyId,
+      vc_academic_program_id: nextVcAcademicProgramId,
+      vc_course_id: nextVcCourseId,
+      updated_at: new Date(),
+    });
+
+    let offerUpdated = false;
+    if (
+      current.vc_period_id !== next.vc_period_id ||
+      current.vc_faculty_id !== next.vc_faculty_id ||
+      current.vc_academic_program_id !== next.vc_academic_program_id ||
+      current.vc_course_id !== next.vc_course_id
+    ) {
+      await this.offersRepo.save(next);
+      const saved = await this.requireEntity(this.offersRepo, offerId, 'planning_offer');
+      await this.logChange(
+        'planning_offer',
+        offerId,
+        'UPDATE',
+        current,
+        saved,
+        { ...this.buildOfferLogContext(saved), vc_match_action: 'sync_offer_refs' },
+        actor,
+      );
+      offerUpdated = true;
+    }
+
+    const sections = await this.sectionsRepo.find({ where: { planning_offer_id: offerId } });
+    let updatedSubsectionCount = 0;
+    for (const section of sections) {
+      updatedSubsectionCount += await this.syncSectionVcMatches(section.id, actor);
+    }
+
+    return {
+      offer_updated: offerUpdated,
+      updated_subsection_count: updatedSubsectionCount,
+    };
+  }
+
+  private async syncSectionVcMatches(sectionId: string, actor?: ChangeLogActor | null) {
+    const subsections = await this.subsectionsRepo.find({
+      where: { planning_section_id: sectionId },
+      order: { code: 'ASC' },
+    });
+    let updatedCount = 0;
+    for (const subsection of subsections) {
+      updatedCount += await this.syncSubsectionVcMatch(subsection.id, actor);
+    }
+    return updatedCount;
+  }
+
+  private async syncSubsectionVcMatch(subsectionId: string, actor?: ChangeLogActor | null) {
+    const current = await this.requireEntity(this.subsectionsRepo, subsectionId, 'planning_subsection');
+    const section = await this.requireEntity(this.sectionsRepo, current.planning_section_id, 'planning_section');
+    const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
+    const modalities = await this.findManyByIds(this.courseModalitiesRepo, [current.course_modality_id]);
+    const campusVcLocations = await this.findManyByField(
+      this.campusVcLocationMappingsRepo,
+      'campus_id',
+      [offer.campus_id],
+    );
+    const expectedVcSectionName = this.buildExpectedVcSectionNameForSubsection(current, section, offer, {
+      modalities,
+      campusVcLocations,
+    });
+    const candidateSections = offer.vc_course_id
+      ? await this.findManyByField(this.vcSectionsRepo, 'course_id', [offer.vc_course_id])
+      : [];
+    const suggestedMatches = expectedVcSectionName
+      ? this.findMatchingVcSections(candidateSections, expectedVcSectionName)
+      : [];
+    const currentVcSection =
+      current.vc_section_id
+        ? await this.vcSectionsRepo.findOne({ where: { id: current.vc_section_id } })
+        : null;
+
+    let nextVcSectionId = current.vc_section_id ?? null;
+    if (currentVcSection && offer.vc_course_id && currentVcSection.course_id !== offer.vc_course_id) {
+      nextVcSectionId = suggestedMatches.length === 1 ? suggestedMatches[0].id : null;
+    } else if (!currentVcSection) {
+      nextVcSectionId = suggestedMatches.length === 1 ? suggestedMatches[0].id : null;
+    }
+
+    if (nextVcSectionId === current.vc_section_id) {
+      return 0;
+    }
+
+    const next = this.subsectionsRepo.create({
+      ...current,
+      vc_section_id: nextVcSectionId,
+      updated_at: new Date(),
+    });
+    await this.subsectionsRepo.save(next);
+    const saved = await this.requireEntity(this.subsectionsRepo, subsectionId, 'planning_subsection');
+    await this.logChange(
+      'planning_subsection',
+      subsectionId,
+      'UPDATE',
+      current,
+      saved,
+      { ...this.buildSubsectionLogContext(saved, section, offer), vc_match_action: 'auto_sync' },
+      actor,
+    );
+    return 1;
+  }
+
+  private async resolveVcCourseId(input: {
+    course_name: string | null | undefined;
+    course_code: string | null | undefined;
+    study_plan_id: string;
+    vc_academic_program_id: string | null;
+  }) {
+    const normalizedCourseName = normalizeCourseNameForMatch(input.course_name);
+    if (!normalizedCourseName || !input.vc_academic_program_id) {
+      return null;
+    }
+    const [studyPlan, candidates] = await Promise.all([
+      this.studyPlansRepo.findOne({ where: { id: input.study_plan_id } }),
+      this.vcCoursesRepo.find({
+        where: { program_id: input.vc_academic_program_id },
+        order: { name: 'ASC' },
+      }),
+    ]);
+    const nameMatches = candidates.filter(
+      (item) => normalizeCourseNameForMatch(item.name) === normalizedCourseName,
+    );
+    if (nameMatches.length === 0) {
+      return null;
+    }
+
+    const normalizedStudyPlanYear = normalizeMatchValue(studyPlan?.year);
+    if (normalizedStudyPlanYear) {
+      const yearMatches = nameMatches.filter((item) =>
+        vcCourseCodeMatchesStudyPlanYear(item.code, normalizedStudyPlanYear),
+      );
+      if (yearMatches.length === 1) {
+        return yearMatches[0].id;
+      }
+      if (yearMatches.length > 1) {
+        return null;
+      }
+    }
+
+    const normalizedCourseCode = normalizeMatchValue(input.course_code);
+    if (normalizedCourseCode) {
+      const directCodeMatches = nameMatches.filter(
+        (item) => normalizeMatchValue(item.code) === normalizedCourseCode,
+      );
+      if (directCodeMatches.length === 1) {
+        return directCodeMatches[0].id;
+      }
+      if (directCodeMatches.length > 1) {
+        return null;
+      }
+    }
+
+    return nameMatches.length === 1 ? nameMatches[0].id : null;
+  }
+
+  private buildExpectedVcSectionNameForSubsection(
+    subsection: PlanningSubsectionEntity,
+    section: PlanningSectionEntity,
+    offer: PlanningOfferEntity,
+    input: { modalities?: CourseModalityEntity[]; campusVcLocations?: PlanningCampusVcLocationMappingEntity[] },
+  ) {
+    const campusVcLocation = (input.campusVcLocations ?? []).find(
+      (item) => item.campus_id === offer.campus_id,
+    );
+    if (!campusVcLocation) {
+      return null;
+    }
+    const modality = (input.modalities ?? []).find((item) => item.id === subsection.course_modality_id) ?? null;
+    const modalityCode = `${modality?.code ?? ''}`.toUpperCase();
+    const modalityPrefix = modalityCode.includes('VIRTUAL') ? 'V' : 'P';
+    const sectionLetters = `${section.code ?? ''}`.trim().toUpperCase().replace(/[^A-Z]/g, '');
+    if (!sectionLetters) {
+      return null;
+    }
+    const numericSuffixMatch = `${subsection.code ?? ''}`.trim().toUpperCase().match(/(\d+)$/);
+    const numericSuffix =
+      numericSuffixMatch && numericSuffixMatch[1] !== '0' ? numericSuffixMatch[1] : '';
+    return `${sectionLetters}${modalityPrefix}${numericSuffix} - ${campusVcLocation.vc_location_code}`;
+  }
+
+  private findMatchingVcSections(candidates: VcSectionEntity[], expectedName: string) {
+    const normalizedExpectedName = normalizeMatchValue(expectedName);
+    if (!normalizedExpectedName) {
+      return [];
+    }
+    return candidates.filter((item) => normalizeMatchValue(item.name) === normalizedExpectedName);
+  }
+
+  private async resolveOfferIdsFromSubsectionIds(subsectionIds: string[]) {
+    const subsections = await this.findManyByIds(this.subsectionsRepo, subsectionIds);
+    const sections = await this.findManyByIds(
+      this.sectionsRepo,
+      uniqueIds(subsections.map((item) => item.planning_section_id)),
+    );
+    return uniqueIds(sections.map((item) => item.planning_offer_id));
+  }
+
+  private async resolveOfferIdsForVcRecalculation(dto: RecalculatePlanningVcMatchesDto) {
+    const offers = await this.offersRepo.find({
+      where: {
+        ...(dto.semester_id ? { semester_id: dto.semester_id } : {}),
+        ...(dto.campus_id ? { campus_id: dto.campus_id } : {}),
+        ...(dto.faculty_id ? { faculty_id: dto.faculty_id } : {}),
+        ...(dto.academic_program_id ? { academic_program_id: dto.academic_program_id } : {}),
+        ...(dto.cycle ? { cycle: dto.cycle } : {}),
+        ...(dto.study_plan_id ? { study_plan_id: dto.study_plan_id } : {}),
+        ...(dto.offer_id ? { id: dto.offer_id } : {}),
+      },
+    });
+    return uniqueIds(offers.map((item) => item.id));
   }
 
   private ensureSubsectionKindAllowed(
@@ -3077,6 +3759,9 @@ export class PlanningManualService {
       faculty_id: rule.faculty_id ?? null,
       academic_program_id: rule.academic_program_id,
       study_plan_id: rule.study_plan_id,
+      vc_period_id: rule.vc_period_id ?? null,
+      vc_faculty_id: rule.vc_faculty_id ?? null,
+      vc_academic_program_id: rule.vc_academic_program_id ?? null,
       career_name: rule.career_name ?? null,
       cycle: rule.cycle,
     };
@@ -3090,6 +3775,10 @@ export class PlanningManualService {
       faculty_id: offer.faculty_id ?? null,
       academic_program_id: offer.academic_program_id ?? null,
       study_plan_id: offer.study_plan_id,
+      vc_period_id: offer.vc_period_id ?? null,
+      vc_faculty_id: offer.vc_faculty_id ?? null,
+      vc_academic_program_id: offer.vc_academic_program_id ?? null,
+      vc_course_id: offer.vc_course_id ?? null,
       course_code: offer.course_code ?? null,
       course_name: offer.course_name ?? null,
       cycle: offer.cycle,
@@ -3558,6 +4247,67 @@ function buildDenomination(
   campusId: string,
 ) {
   return [courseCode, courseName, sectionCode, subsectionCode, campusId].filter(Boolean).join(' | ');
+}
+
+function normalizeMatchValue(value: string | null | undefined) {
+  return `${value ?? ''}`
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function normalizeCourseNameForMatch(value: string | null | undefined) {
+  const raw = `${value ?? ''}`.trim();
+  if (!raw) {
+    return '';
+  }
+  const parts = raw.split(/\s-\s/);
+  const courseNameOnly = parts.length > 1 ? parts.slice(1).join(' - ') : raw;
+  return normalizeMatchValue(courseNameOnly);
+}
+
+function vcCourseCodeMatchesStudyPlanYear(
+  vcCourseCode: string | null | undefined,
+  normalizedStudyPlanYear: string,
+) {
+  const normalizedCode = normalizeMatchValue(vcCourseCode);
+  if (!normalizedCode || !normalizedStudyPlanYear) {
+    return false;
+  }
+  return (
+    normalizedCode === normalizedStudyPlanYear ||
+    normalizedCode.startsWith(`${normalizedStudyPlanYear}-`)
+  );
+}
+
+function resolveVcMatchStatus(
+  vcSectionId: string | null | undefined,
+  expectedVcSectionName: string | null | undefined,
+  vcSection: VcSectionEntity | null | undefined,
+) {
+  if (vcSectionId && vcSection) {
+    return 'MATCHED';
+  }
+  if (!expectedVcSectionName) {
+    return 'UNMATCHED';
+  }
+  return 'UNMATCHED';
+}
+
+function resolveDetailedVcMatchStatus(
+  vcSectionId: string | null | undefined,
+  expectedVcSectionName: string | null | undefined,
+  suggestedMatchCount: number,
+) {
+  if (vcSectionId) {
+    return 'MATCHED';
+  }
+  if (!expectedVcSectionName) {
+    return 'UNMATCHED';
+  }
+  return suggestedMatchCount > 1 ? 'AMBIGUOUS' : 'UNMATCHED';
 }
 
 function emptyToNull(value: string | null | undefined) {

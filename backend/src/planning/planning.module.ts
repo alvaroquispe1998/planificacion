@@ -24,6 +24,7 @@ import {
   CourseSectionHourRequirementEntity,
   CourseModalityEntity,
   PlanningChangeLogEntity,
+  PlanningCampusVcLocationMappingEntity,
   PlanningCyclePlanRuleEntity,
   PlanningOfferEntity,
   PlanningScheduleConflictV2Entity,
@@ -33,6 +34,13 @@ import {
   ScheduleConflictEntity,
   StudyTypeEntity,
 } from '../entities/planning.entities';
+import {
+  VcAcademicProgramEntity,
+  VcCourseEntity,
+  VcFacultyEntity,
+  VcPeriodEntity,
+  VcSectionEntity,
+} from '../videoconference/videoconference.entity';
 import { PlanningController } from './planning.controller';
 import { PlanningManualService } from './planning-manual.service';
 import { PlanningService } from './planning.service';
@@ -50,6 +58,7 @@ import { PlanningService } from './planning.service';
       ScheduleConflictEntity,
       StudyTypeEntity,
       CourseModalityEntity,
+      PlanningCampusVcLocationMappingEntity,
       PlanningCyclePlanRuleEntity,
       PlanningOfferEntity,
       PlanningSectionEntity,
@@ -69,6 +78,11 @@ import { PlanningService } from './planning.service';
       BuildingEntity,
       ClassroomEntity,
       CourseSectionEntity,
+      VcPeriodEntity,
+      VcFacultyEntity,
+      VcAcademicProgramEntity,
+      VcCourseEntity,
+      VcSectionEntity,
     ]),
   ],
   controllers: [PlanningController],

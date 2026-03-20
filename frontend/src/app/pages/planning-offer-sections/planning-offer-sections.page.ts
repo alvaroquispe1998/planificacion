@@ -132,8 +132,22 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     return this.offer?.plan_rule ?? null;
   }
 
+  get canEditApprovedPlan() {
+    return (
+      this.planRule?.workflow_status === 'APPROVED' &&
+      this.auth.hasPermission('action.planning.plan.review_decide')
+    );
+  }
+
   get isWorkflowReadOnly() {
-    return ['IN_REVIEW', 'APPROVED'].includes(this.planRule?.workflow_status ?? '');
+    const status = this.planRule?.workflow_status ?? '';
+    if (status === 'IN_REVIEW') {
+      return true;
+    }
+    if (status === 'APPROVED') {
+      return !this.canEditApprovedPlan;
+    }
+    return false;
   }
 
   get activeSection() {

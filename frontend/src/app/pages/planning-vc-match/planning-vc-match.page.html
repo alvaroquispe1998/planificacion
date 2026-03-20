@@ -1,0 +1,150 @@
+<div class="planning-shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Integracion VC</p>
+      <h1>Match de secciones</h1>
+      <p class="subtle">Relaciona subsecciones planificadas con `vc_sections` y corrige los casos pendientes.</p>
+    </div>
+    <div class="hero-actions">
+      <button class="btn btn-secondary btn-sm" (click)="loadRows()" [disabled]="saving || loading">Actualizar</button>
+      <button class="btn btn-primary btn-sm" (click)="recalculateVisible()" [disabled]="saving || loading">
+        Recalcular visibles
+      </button>
+    </div>
+  </header>
+
+  <section class="filters-card">
+    <select [(ngModel)]="filters.semester_id" (ngModelChange)="loadRows()">
+      <option value="">Semestre</option>
+      <option *ngFor="let item of catalog.semesters" [value]="item.id">{{ item.name }}</option>
+    </select>
+    <select [(ngModel)]="filters.campus_id" (ngModelChange)="loadRows()">
+      <option value="">Todos los locales</option>
+      <option *ngFor="let item of catalog.campuses" [value]="item.id">{{ item.name }}</option>
+    </select>
+    <select [(ngModel)]="filters.faculty_id" (ngModelChange)="onFacultyChange()">
+      <option value="">Todas las facultades</option>
+      <option *ngFor="let item of catalog.faculties" [value]="item.id">{{ item.name }}</option>
+    </select>
+    <select [(ngModel)]="filters.academic_program_id" (ngModelChange)="loadRows()">
+      <option value="">Todos los programas</option>
+      <option *ngFor="let item of filteredPrograms" [value]="item.id">{{ item.name }}</option>
+    </select>
+    <select [(ngModel)]="filters.cycle" (ngModelChange)="loadRows()">
+      <option value="">Todos los ciclos</option>
+      <option *ngFor="let item of availableCycles" [value]="item.value">{{ item.label }}</option>
+    </select>
+    <input
+      type="text"
+      [(ngModel)]="filters.offer_id"
+      (change)="loadRows()"
+      placeholder="Offer ID (opcional)" />
+  </section>
+
+  <p *ngIf="message" class="flash success">{{ message }}</p>
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+
+  <section class="panel mapping-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Configuracion base</p>
+        <h2>Mapa de locales VC</h2>
+      </div>
+      <span class="count">{{ catalog.campuses?.length || 0 }} locales</span>
+    </div>
+
+    <div class="mapping-grid">
+      <article class="mapping-card" *ngFor="let campus of catalog.campuses">
+        <div>
+          <strong>{{ campus.name }}</strong>
+          <p>{{ campus.code || campus.id }}</p>
+        </div>
+        <div class="mapping-actions">
+          <select [(ngModel)]="campusVcLocationDraftByCampusId[campus.id]">
+            <option value="">Codigo VC</option>
+            <option *ngFor="let code of vcLocationCodes" [value]="code">{{ code }}</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" (click)="saveCampusMapping(campus.id)" [disabled]="saving">
+            Guardar
+          </button>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Resultados</p>
+        <h2>Subsecciones evaluadas</h2>
+      </div>
+      <span class="count">{{ rows.length }} filas</span>
+    </div>
+
+    <div class="table-wrap" *ngIf="rows.length > 0; else emptyState">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Contexto</th>
+            <th>Curso VC</th>
+            <th>Nombre esperado</th>
+            <th>Estado</th>
+            <th>Match actual</th>
+            <th>Seleccion manual</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of rows">
+            <td>
+              <div class="context-stack">
+                <strong>{{ row.offer?.course_code || '---' }} - {{ row.offer?.course_name || 'Curso' }}</strong>
+                <span>{{ row.campus?.name || 'Sin local' }} · {{ row.academic_program?.name || 'Sin programa' }}</span>
+                <span>{{ row.section?.code }} / {{ row.subsection?.code }}</span>
+              </div>
+            </td>
+            <td>{{ row.offer?.vc_course?.name || 'Sin vc_course_id' }}</td>
+            <td>{{ row.expected_vc_section_name || 'Sin nombre esperado' }}</td>
+            <td>
+              <span class="pill" [ngClass]="matchStatusClass(row.match_status)">
+                {{ matchStatusLabel(row.match_status) }}
+              </span>
+            </td>
+            <td>{{ currentVcSectionLabel(row) }}</td>
+            <td>
+              <select
+                [(ngModel)]="vcSectionSelectionBySubsectionId[row.id]"
+                [disabled]="saving || !row.vc_section_candidates?.length">
+                <option value="">Sin match</option>
+                <option *ngFor="let candidate of row.vc_section_candidates" [value]="candidate.id">
+                  {{ candidateLabel(candidate) }}
+                </option>
+              </select>
+            </td>
+            <td class="row-actions">
+              <button class="btn btn-secondary btn-sm" (click)="saveRowMatch(row)" [disabled]="saving">
+                Guardar
+              </button>
+              <button class="btn btn-secondary btn-sm" (click)="clearRowMatch(row)" [disabled]="saving">
+                Limpiar
+              </button>
+              <button class="btn btn-secondary btn-sm" (click)="recalculateRow(row)" [disabled]="saving">
+                Recalcular
+              </button>
+              <button class="btn btn-link btn-sm" (click)="openOffer(row)">
+                Abrir oferta
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ng-template #emptyState>
+      <div class="empty-block">
+        <h3>{{ loading ? 'Cargando matches...' : 'Sin resultados para estos filtros' }}</h3>
+        <p>Ajusta filtros, completa el mapa de locales VC o recalcula las sugerencias visibles.</p>
+      </div>
+    </ng-template>
+  </section>
+</div>

@@ -5,6 +5,7 @@
       <h1>Ciclos configurados</h1>
     </div>
     <div class="hero-actions">
+      <button class="btn btn-secondary btn-sm" (click)="openVcMatch()">Match VC</button>
       <button
         *ngIf="auth.hasPermission('action.planning.change_log.view')"
         class="btn btn-secondary btn-sm"
@@ -87,7 +88,7 @@
             </td>
             <td class="td-workflow">
               <div class="workflow-stack">
-                <div class="row-actions" *ngIf="canSubmitReview(row) || canReviewDecide(row)">
+                <div class="row-actions" *ngIf="canSubmitReview(row) || canReviewDecide(row) || canRequestCorrection(row)">
                   <button
                     *ngIf="canSubmitReview(row)"
                     type="button"
@@ -103,7 +104,7 @@
                     Aprobar
                   </button>
                   <button
-                    *ngIf="canReviewDecide(row)"
+                    *ngIf="canRequestCorrection(row)"
                     type="button"
                     class="btn btn-secondary btn-sm"
                     (click)="openWorkflowDialog($event, row, 'REQUEST_CORRECTION')">
@@ -111,7 +112,7 @@
                   </button>
                 </div>
                 <span
-                  *ngIf="!canSubmitReview(row) && !canReviewDecide(row) && ['DRAFT', 'IN_CORRECTION'].includes(row.workflow_status)"
+                  *ngIf="!canSubmitReview(row) && !canReviewDecide(row) && !canRequestCorrection(row) && ['DRAFT', 'IN_CORRECTION'].includes(row.workflow_status)"
                   class="workflow-note">
                   {{ reviewReadinessLabel(row) }}
                 </span>

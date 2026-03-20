@@ -59,6 +59,15 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             },
           },
           {
+            label: 'Match VC',
+            path: '/planning/vc-match',
+            icon: 'link',
+            window: 'window.planning',
+            match: {
+              exact: ['/planning/vc-match'],
+            },
+          },
+          {
             label: 'Historial',
             path: '/planning/change-log',
             icon: 'history',
