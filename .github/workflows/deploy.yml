@@ -40,14 +40,14 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p ${{ secrets.DEPLOY_PORT }} -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
+      - name: Limpiar frontend antiguo (remover remote browser si existe)
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'rm -rf /home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/browser || true'
+
       - name: Sync frontend to server (rsync)
         run: |
           cd frontend
           rsync -avz --delete ./browser/. ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no"
-
-      - name: Limpiar frontend antiguo (si rsync falla)
-        run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'rm -rf /home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/browser || true'
 
       - name: Copy backend package files
         run: |
