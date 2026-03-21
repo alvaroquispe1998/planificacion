@@ -40,15 +40,15 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p ${{ secrets.DEPLOY_PORT }} -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Limpiar frontend antiguo (remover remote browser si existe)
+      - name: Limpiar frontend completo
         run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'rm -rf /home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/browser || true'
-
+          ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'rm -rf /home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/*'
+           
       - name: Sync frontend to server (rsync)
         run: |
           cd frontend
-          rsync -avz --delete ./browser/. ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no"
-
+          rsync -avz ./browser/. ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no" || true                                     
+        
       - name: Copy backend package files
         run: |
           scp -i ~/.ssh/deploy_key -P ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no backend/package.json backend/package-lock.json ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/software-uai/planificacion-academica/api/
