@@ -15,24 +15,24 @@ services:
       timeout: 3s
       retries: 20
 
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: uai-backend
-    environment:
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_USER: root
-      DB_PASSWORD: root
-      DB_NAME: uai_planning
-      DB_SYNCHRONIZE: 'true'
-      PORT: 3000
-    depends_on:
-      mysql:
-        condition: service_healthy
-    ports:
-      - '3000:3000'
+  # backend:
+  #   build:
+  #     context: ./backend
+  #     dockerfile: Dockerfile
+  #   container_name: uai-backend
+  #   environment:
+  #     DB_HOST: mysql
+  #     DB_PORT: 3306
+  #     DB_USER: root
+  #     DB_PASSWORD: root
+  #     DB_NAME: uai_planning
+  #     DB_SYNCHRONIZE: 'true'
+  #     PORT: 3000
+  #   depends_on:
+  #     mysql:
+  #       condition: service_healthy
+  #   ports:
+  #     - '3000:3000'
 
   # seed:
   #   build:
@@ -51,16 +51,16 @@ services:
   #   command: ['node', 'dist/seed/seed.js']
   #   restart: 'no'
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: uai-frontend
-    depends_on:
-      backend:
-        condition: service_started
-    ports:
-      - '4200:80'
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: uai-frontend
+  #   depends_on:
+  #     backend:
+  #       condition: service_started
+  #   ports:
+  #     - '4200:80'
 
 volumes:
   mysql_data:

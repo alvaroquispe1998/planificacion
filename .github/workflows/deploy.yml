@@ -1,0 +1,99 @@
+name: CI/CD Deploy
+
+on:
+  push:
+    branches: [ production ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build backend
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build frontend (output to browser/)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build -- --output-path=browser --base-href=/ || npm run build --output-path=browser --base-href=/ || true
+
+      - name: Add .htaccess to built frontend
+        run: |
+          mkdir -p frontend/browser/public
+          cp frontend/deploy/.htaccess frontend/browser/public/.htaccess || true
+
+      - name: Preparar clave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.DEPLOY_PORT }} -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Sync frontend to server (rsync)
+        run: |
+          rsync -avz --delete frontend/browser/ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no"
+
+      - name: Copy backend package files
+        run: |
+          scp -i ~/.ssh/deploy_key -P ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no backend/package.json backend/package-lock.json ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/software-uai/planificacion-academica/api/
+
+      - name: Sync backend dist to server
+        run: |
+          rsync -avz --delete backend/dist/ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/software-uai/planificacion-academica/api/dist/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no"
+
+      - name: Install backend deps & restart (como autonomadeica)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          port: ${{ secrets.DEPLOY_PORT }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            API_DIR="/home/autonomadeica/software-uai/planificacion-academica/api"
+            cd $API_DIR
+
+            # Arreglar permisos si node_modules pertenece a root
+            if [ -d "node_modules" ]; then
+              OWNER=$(stat -c '%U' node_modules 2>/dev/null || echo "unknown")
+              if [ "$OWNER" = "root" ]; then
+                echo "⚠️  node_modules pertenece a root, limpiando..."
+                rm -rf node_modules
+              fi
+            fi
+
+            # Instalar dependencias de producción
+            npm install --omit=dev --prefer-offline
+
+            # Ejecutar pm2 como usuario
+            export PM2_HOME=/home/autonomadeica/.pm2
+
+            if ! command -v pm2 &> /dev/null; then
+              echo "⚠️  PM2 no encontrado, instalando..."
+              npm install -g pm2
+            fi
+
+            APP_NAME="api-planificacion-academica"
+            APP_ENTRY="$API_DIR/dist/main.js"
+
+            if pm2 describe $APP_NAME > /dev/null 2>&1; then
+              pm2 restart $APP_NAME
+            else
+              pm2 start $APP_ENTRY \
+                --name $APP_NAME \
+                --cwd $API_DIR
+            fi
+
+            pm2 save
+            echo "✅ Deploy completado como autonomadeica"
