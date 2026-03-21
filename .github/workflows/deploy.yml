@@ -22,11 +22,15 @@ jobs:
           npm ci
           npm run build
 
-      - name: Build frontend (output to browser/)
+      - name: Build frontend
         working-directory: frontend
         run: |
           npm ci
-          npm run build -- --output-path=browser --base-href=/ || npm run build --output-path=browser --base-href=/ || true
+          npm run build
+
+      - name: Ver estructura dist
+        run: |
+          ls -R frontend/dist
 
       - name: Add .htaccess to built frontend
         run: |
@@ -46,8 +50,7 @@ jobs:
            
       - name: Sync frontend to server (rsync)
         run: |
-          cd frontend
-          rsync -avz ./browser/. ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no" || true                                     
+          rsync -avz frontend/dist/*/browser/. ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no"                                     
         
       - name: Copy backend package files
         run: |
