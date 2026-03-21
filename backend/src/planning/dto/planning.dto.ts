@@ -12,6 +12,7 @@ import {
   IsString,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import {
   ClassGroupTeacherRoleValues,
@@ -20,6 +21,7 @@ import {
   ConflictTypeValues,
   CourseFormatValues,
   PlanningChangeActionValues,
+  PlanningImportScopeDecisionValues,
   PlanningOfferStatusValues,
   PlanningSubsectionKindValues,
   PlanningVcLocationCodeValues,
@@ -716,6 +718,10 @@ export class CreatePlanningSectionDto {
 
   @IsOptional()
   @IsString()
+  code?: string;
+
+  @IsOptional()
+  @IsString()
   teacher_id?: string;
 
   @IsOptional()
@@ -727,6 +733,10 @@ export class CreatePlanningSectionDto {
   @IsInt()
   @Min(0)
   projected_vacancies?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_cepea?: boolean;
 
   @Type(() => Number)
   @IsInt()
@@ -752,6 +762,10 @@ export class UpdatePlanningSectionDto {
   @IsInt()
   @Min(0)
   projected_vacancies?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_cepea?: boolean;
 
   @IsOptional()
   @IsBoolean()
@@ -965,4 +979,74 @@ export class UpdatePlanningSubsectionScheduleDto {
   @IsOptional()
   @IsString()
   end_time?: string;
+}
+
+export class PlanningImportScopeDecisionInputDto {
+  @IsString()
+  scope_key!: string;
+
+  @IsEnum(PlanningImportScopeDecisionValues)
+  decision!: (typeof PlanningImportScopeDecisionValues)[number];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string;
+}
+
+export class UpdatePlanningImportScopeDecisionsDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => PlanningImportScopeDecisionInputDto)
+  decisions!: PlanningImportScopeDecisionInputDto[];
+}
+
+export class CreatePlanningImportAliasDto {
+  @IsString()
+  @MaxLength(80)
+  namespace!: string;
+
+  @IsString()
+  @MaxLength(200)
+  source_value!: string;
+
+  @IsString()
+  @MaxLength(120)
+  target_id!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  target_label?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string;
+}
+
+export class UpdatePlanningImportAliasDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  target_id?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  target_label?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  notes?: string;
 }

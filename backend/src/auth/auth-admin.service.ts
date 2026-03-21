@@ -109,6 +109,7 @@ export class AuthAdminService {
         updated_at: now,
       }),
     );
+    this.authService.invalidateAccessProfileCache(user.id);
     return this.serializeUser(user);
   }
 
@@ -128,6 +129,7 @@ export class AuthAdminService {
       user.password_hash = await bcrypt.hash(dto.password, 10);
     }
     await this.usersRepo.save(user);
+    this.authService.invalidateAccessProfileCache(user.id);
     return this.serializeUser(user);
   }
 
@@ -197,6 +199,7 @@ export class AuthAdminService {
     role.is_editable = dto.is_editable ?? role.is_editable;
     role.updated_at = new Date();
     await this.rolesRepo.save(role);
+    this.authService.invalidateAccessProfileCache();
     return role;
   }
 
@@ -246,6 +249,7 @@ export class AuthAdminService {
         ),
       );
     }
+    this.authService.invalidateAccessProfileCache();
     return { updated: true, role_id: roleId };
   }
 
@@ -299,6 +303,7 @@ export class AuthAdminService {
         });
       }),
     );
+    this.authService.invalidateAccessProfileCache(userId);
     return { updated: true, user_id: userId };
   }
 

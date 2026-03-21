@@ -103,6 +103,7 @@
 
                   <div class="detail-meta">
                     <span><strong>Actor:</strong> {{ actorLabel(row) }}</span>
+                    <span><strong>IP:</strong> {{ ipLabel(row) }}</span>
                     <span><strong>Fecha:</strong> {{ row.changed_at | date:'yyyy-MM-dd HH:mm:ss' }}</span>
                     <span><strong>Contexto:</strong> {{ contextLabel(row) }}</span>
                   </div>

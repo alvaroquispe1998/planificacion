@@ -5,6 +5,10 @@ import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // ✅ IMPORTANTE: proxy (nginx, apache, cloudflare, etc.)
+  app.getHttpAdapter().getInstance().set('trust proxy', true);
+  
+  // ✅ CORS dinámico
   const configService = app.get(ConfigService);
   const corsEnv = configService.get<string>('CORS_ORIGINS');
   if (corsEnv && `${corsEnv}`.trim() !== '') {
@@ -17,6 +21,7 @@ async function bootstrap() {
   } else {
     app.enableCors();
   }
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

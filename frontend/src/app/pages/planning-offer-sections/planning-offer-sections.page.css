@@ -317,6 +317,14 @@
   min-width: 0;
 }
 
+.checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #14213d;
+  font-weight: 600;
+}
+
 .field-emphasis input,
 .field-emphasis select {
   background: #fff;
@@ -688,12 +696,31 @@ input[disabled] {
   line-height: 1.45;
 }
 
+.hours-warning {
+  display: grid;
+  gap: 0.18rem;
+  margin-top: 0.7rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  color: #334155;
+  font-size: 0.86rem;
+}
+
+.hours-warning-alert {
+  background: #fff7ed;
+  border-color: rgba(249, 115, 22, 0.28);
+  color: #9a3412;
+}
+
 .drawer-schedule-form {
   grid-template-columns: 1fr 1fr;
 }
 
 .drawer-schedule-form .schedule-actions,
-.drawer-schedule-form .schedule-form-note {
+.drawer-schedule-form .schedule-form-note,
+.drawer-schedule-form .hours-warning {
   grid-column: 1 / -1;
 }
 

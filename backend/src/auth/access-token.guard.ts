@@ -35,7 +35,32 @@ export class AccessTokenGuard implements CanActivate {
       throw new UnauthorizedException('Token invalido.');
     }
 
-    request.authUser = await this.authService.authenticateAccessToken(token);
+    request.authUser = {
+      ...(await this.authService.authenticateAccessToken(token)),
+      request_ip: resolveRequestIp(request),
+    };
     return true;
   }
+}
+
+function resolveRequestIp(request: any) {
+  const forwardedFor = `${request?.headers?.['x-forwarded-for'] ?? ''}`
+    .split(',')
+    .map((item) => item.trim())
+    .find(Boolean);
+  const candidates = [
+    forwardedFor,
+    request?.headers?.['cf-connecting-ip'],
+    request?.headers?.['x-real-ip'],
+    request?.headers?.['true-client-ip'],
+    request?.ip,
+    request?.socket?.remoteAddress,
+  ];
+  for (const candidate of candidates) {
+    const normalized = `${candidate ?? ''}`.trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
 }

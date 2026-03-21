@@ -94,6 +94,50 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/planning/catalog/filters`);
   }
 
+  previewPlanningImport(file: File) {
+    const formData = new FormData();
+    formData.set('file', file);
+    return this.http.post<any>(`${this.baseUrl}/planning/imports/excel/preview`, formData);
+  }
+
+  getPlanningImportBatch(batchId: string) {
+    return this.http.get<any>(`${this.baseUrl}/planning/imports/${batchId}`);
+  }
+
+  getPlanningImportReport(batchId: string) {
+    return this.http.get<any>(`${this.baseUrl}/planning/imports/${batchId}/report`);
+  }
+
+  updatePlanningImportScopeDecisions(batchId: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/imports/${batchId}/scope-decisions`, payload);
+  }
+
+  executePlanningImportBatch(batchId: string) {
+    return this.http.post<any>(`${this.baseUrl}/planning/imports/${batchId}/execute`, {});
+  }
+
+  listPlanningImportAliases(filters: Record<string, string> = {}) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) {
+        params = params.set(key, value);
+      }
+    });
+    return this.http.get<any[]>(`${this.baseUrl}/planning/import-aliases`, { params });
+  }
+
+  getPlanningImportAliasCatalog() {
+    return this.http.get<any>(`${this.baseUrl}/planning/import-aliases/catalog`);
+  }
+
+  createPlanningImportAlias(payload: any) {
+    return this.http.post<any>(`${this.baseUrl}/planning/import-aliases`, payload);
+  }
+
+  updatePlanningImportAlias(id: string, payload: any) {
+    return this.http.patch<any>(`${this.baseUrl}/planning/import-aliases/${id}`, payload);
+  }
+
   listPlanningPlanRules(semesterId?: string, campusId?: string, academicProgramId?: string) {
     let params = new HttpParams();
     if (semesterId) {

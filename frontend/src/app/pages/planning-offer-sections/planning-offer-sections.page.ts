@@ -55,6 +55,8 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   createSectionForm = {
     mode: 'SINGLE' as CreateSectionMode,
     subsection_count: 3,
+    code: 'A',
+    is_cepea: false,
     teacher_id: '',
     projected_vacancies: 0,
   };
@@ -272,6 +274,8 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     this.createSectionForm = {
       mode: 'SINGLE',
       subsection_count: 3,
+      code: this.nextSectionCodeSuggestion(),
+      is_cepea: false,
       teacher_id: '',
       projected_vacancies: 0,
     };
@@ -328,6 +332,10 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     this.createSectionForm.subsection_count = numericValue <= 1 ? 2 : numericValue;
   }
 
+  onCreateSectionCodeChange(value: string) {
+    this.createSectionForm.code = this.normalizeSectionCode(value);
+  }
+
   onCreateTeacherFocus() {
     this.showCreateTeacherOptions = true;
   }
@@ -356,6 +364,13 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     if (!this.offerId || this.isWorkflowReadOnly) {
       return;
     }
+    const sectionCode = this.normalizeSectionCode(this.createSectionForm.code) || this.nextSectionCodeSuggestion();
+    if (!sectionCode) {
+      this.error = 'Debes indicar un codigo valido para la seccion.';
+      this.message = '';
+      this.cdr.detectChanges();
+      return;
+    }
     const subsectionCount =
       this.createSectionForm.mode === 'SINGLE'
         ? 1
@@ -365,6 +380,8 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     this.saving = true;
     this.api
       .createPlanningSection(this.offerId, {
+        code: sectionCode,
+        is_cepea: this.createSectionForm.is_cepea,
         teacher_id: this.createSectionForm.teacher_id || undefined,
         subsection_count: subsectionCount,
         projected_vacancies: projectedVacancies,
@@ -656,7 +673,10 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
         return [{ value: 'PRACTICE', label: 'Practico' }];
       default:
         if (subsectionCount <= 1) {
-          return [{ value: 'MIXED', label: 'Mixto' }];
+          return [
+            { value: 'MIXED', label: 'Teorico practico' },
+            { value: 'MIXED_PRACTICE_THEORY', label: 'Practico teorico' },
+          ];
         }
         return [
           { value: 'THEORY', label: 'Teorico' },
@@ -738,7 +758,9 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       case 'PRACTICE':
         return 'Practico';
       case 'MIXED':
-        return 'Mixto';
+        return 'Teorico practico';
+      case 'MIXED_PRACTICE_THEORY':
+        return 'Practico teorico';
       default:
         return kind || '---';
     }
@@ -751,9 +773,44 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       case 'PRACTICE':
         return 'kind-practice';
       case 'MIXED':
+      case 'MIXED_PRACTICE_THEORY':
         return 'kind-mixed';
       default:
         return 'kind-default';
+    }
+  }
+
+  subsectionExpectedHoursLabel(subsection: any) {
+    const expected = this.expectedAssignedHours(subsection?.kind);
+    return `HT ${this.formatAcademicHours(expected.theoretical_hours)} · HP ${this.formatAcademicHours(expected.practical_hours)} · Total ${this.formatAcademicHours(expected.total_hours)}`;
+  }
+
+  subsectionCurrentHoursLabel(subsection: any) {
+    return `Actual: HT ${this.formatAcademicHours(subsection?.assigned_theoretical_hours)} · HP ${this.formatAcademicHours(subsection?.assigned_practical_hours)} · Total ${this.formatAcademicHours(subsection?.assigned_total_hours)}`;
+  }
+
+  subsectionAssignedHoursMismatch(subsection: any) {
+    const expected = this.expectedAssignedHours(subsection?.kind);
+    return !(
+      this.sameHourValue(subsection?.assigned_theoretical_hours, expected.theoretical_hours) &&
+      this.sameHourValue(subsection?.assigned_practical_hours, expected.practical_hours) &&
+      this.sameHourValue(subsection?.assigned_total_hours, expected.total_hours)
+    );
+  }
+
+  subsectionKindGuidance(subsection: any) {
+    const section = this.findSectionBySubsection(subsection?.id ?? '');
+    const subsectionCount = Math.max(1, Number(section?.subsections?.length ?? 0));
+    switch (this.offer?.course_type) {
+      case 'TEORICO':
+        return 'Este curso solo admite subsecciones teoricas.';
+      case 'PRACTICO':
+        return 'Este curso solo admite subsecciones practicas.';
+      default:
+        if (subsectionCount <= 1) {
+          return 'Si solo existe una subseccion, puedes definirla como teorico practico o practico teorico.';
+        }
+        return 'En cursos teorico practico con varias subsecciones debe quedar al menos una teorica y una practica.';
     }
   }
 
@@ -1134,6 +1191,9 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   private normalizeOffer(offer: any) {
     return {
       ...offer,
+      theoretical_hours: Number(offer?.theoretical_hours ?? 0),
+      practical_hours: Number(offer?.practical_hours ?? 0),
+      total_hours: Number(offer?.total_hours ?? 0),
       sections: [...(offer?.sections ?? [])]
         .map((section: any) => this.normalizeSection(section))
         .sort((a: any, b: any) => String(a.code).localeCompare(String(b.code))),
@@ -1143,6 +1203,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   private normalizeSection(section: any) {
     return {
       ...section,
+      is_cepea: Boolean(section?.is_cepea),
       teacher_id: section.teacher_id ?? '',
       projected_vacancies: Number(section.projected_vacancies ?? 0),
       teacher: section.teacher ?? null,
@@ -1162,6 +1223,9 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       classroom_id: subsection.classroom_id ?? '',
       projected_vacancies: Number(subsection.projected_vacancies ?? 0),
       shift: subsection.shift ?? '',
+      assigned_theoretical_hours: Number(subsection.assigned_theoretical_hours ?? 0),
+      assigned_practical_hours: Number(subsection.assigned_practical_hours ?? 0),
+      assigned_total_hours: Number(subsection.assigned_total_hours ?? 0),
       modality: subsection.modality ?? null,
       responsible_teacher: subsection.responsible_teacher ?? null,
       schedules: [...(subsection.schedules ?? [])].sort((a: any, b: any) => this.compareSchedules(a, b)),
@@ -1187,6 +1251,61 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       index = index * 26 + (char.charCodeAt(0) - 64);
     }
     return index - 1;
+  }
+
+  nextSectionCodeSuggestion() {
+    const highestIndex = (this.offer?.sections ?? []).reduce((currentMax: number, item: any) => {
+      const index = this.sectionCodeIndex(item?.code);
+      return index === null ? currentMax : Math.max(currentMax, index);
+    }, -1);
+    return this.sectionCodeFromIndex(highestIndex + 1);
+  }
+
+  private sectionCodeFromIndex(index: number) {
+    let value = Math.max(0, Math.trunc(index));
+    let code = '';
+    do {
+      code = String.fromCharCode(65 + (value % 26)) + code;
+      value = Math.floor(value / 26) - 1;
+    } while (value >= 0);
+    return code;
+  }
+
+  private normalizeSectionCode(value: string | null | undefined) {
+    return `${value ?? ''}`
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, '')
+      .replace(/[^A-Z0-9_-]/g, '');
+  }
+
+  private expectedAssignedHours(kind: string | null | undefined) {
+    const theoreticalHours = Number(this.offer?.theoretical_hours ?? 0);
+    const practicalHours = Number(this.offer?.practical_hours ?? 0);
+    const totalHours = Number(this.offer?.total_hours ?? theoreticalHours + practicalHours);
+    if (kind === 'THEORY') {
+      return {
+        theoretical_hours: theoreticalHours,
+        practical_hours: 0,
+        total_hours: theoreticalHours,
+      };
+    }
+    if (kind === 'PRACTICE') {
+      return {
+        theoretical_hours: 0,
+        practical_hours: practicalHours,
+        total_hours: practicalHours,
+      };
+    }
+    return {
+      theoretical_hours: theoreticalHours,
+      practical_hours: practicalHours,
+      total_hours: totalHours,
+    };
+  }
+
+  private sameHourValue(left: unknown, right: unknown) {
+    return Math.abs(Number(left ?? 0) - Number(right ?? 0)) < 0.01;
   }
 
   private upsertSection(section: any) {

@@ -8,7 +8,10 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ACTION_PERMISSIONS, WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { CurrentAuthUser } from '../auth/current-auth-user.decorator';
 import { AuthService } from '../auth/auth.service';
@@ -19,6 +22,7 @@ import {
   BulkAssignTeacherDto,
   BulkDuplicateDto,
   BulkSubmitPlanningPlanReviewDto,
+  CreatePlanningImportAliasDto,
   CreatePlanningCyclePlanRuleDto,
   CreatePlanningOfferDto,
   CreatePlanningSectionDto,
@@ -40,6 +44,8 @@ import {
   UpdatePlanningSubsectionDto,
   UpdatePlanningSubsectionVcMatchDto,
   UpdatePlanningCampusVcLocationMappingDto,
+  UpdatePlanningImportAliasDto,
+  UpdatePlanningImportScopeDecisionsDto,
   UpdatePlanningSubsectionScheduleDto,
   UpdateClassGroupDto,
   UpdateClassGroupTeacherDto,
@@ -49,6 +55,7 @@ import {
   UpdateCourseSectionHourRequirementDto,
   UpdatePlanningWorkspaceRowDto,
 } from './dto/planning.dto';
+import { PlanningImportService } from './planning-import.service';
 import { PlanningManualService } from './planning-manual.service';
 import { PlanningService } from './planning.service';
 
@@ -58,6 +65,7 @@ export class PlanningController {
   constructor(
     private readonly planningService: PlanningService,
     private readonly planningManualService: PlanningManualService,
+    private readonly planningImportService: PlanningImportService,
     private readonly authService: AuthService,
   ) {}
 
@@ -88,6 +96,86 @@ export class PlanningController {
       study_plans: studyPlans,
       plan_rules: planRules,
     };
+  }
+
+  @Post('imports/excel/preview')
+  @UseInterceptors(FileInterceptor('file'))
+  async previewPlanningImport(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @UploadedFile() file?: any,
+  ) {
+    const result = await this.planningImportService.previewExcelImport(file, idActor(authUser));
+    this.assertImportBatchScopeAccess(authUser, result);
+    return result;
+  }
+
+  @Get('imports/:batchId')
+  async getPlanningImportBatch(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('batchId') batchId: string,
+  ) {
+    const result = await this.planningImportService.getBatch(batchId);
+    this.assertImportBatchScopeAccess(authUser, result);
+    return result;
+  }
+
+  @Get('imports/:batchId/report')
+  async getPlanningImportReport(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('batchId') batchId: string,
+  ) {
+    const result = await this.planningImportService.getBatchReport(batchId);
+    this.assertImportBatchScopeAccess(authUser, result);
+    return result;
+  }
+
+  @Patch('imports/:batchId/scope-decisions')
+  async updatePlanningImportScopeDecisions(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('batchId') batchId: string,
+    @Body() dto: UpdatePlanningImportScopeDecisionsDto,
+  ) {
+    const current = await this.planningImportService.getBatch(batchId);
+    this.assertImportBatchScopeAccess(authUser, current);
+    const result = await this.planningImportService.updateScopeDecisions(batchId, dto);
+    this.assertImportBatchScopeAccess(authUser, result);
+    return result;
+  }
+
+  @Post('imports/:batchId/execute')
+  async executePlanningImportBatch(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('batchId') batchId: string,
+  ) {
+    const current = await this.planningImportService.getBatch(batchId);
+    this.assertImportBatchScopeAccess(authUser, current);
+    return this.planningImportService.executeBatch(batchId, idActor(authUser));
+  }
+
+  @Get('import-aliases')
+  listPlanningImportAliases(
+    @Query('namespace') namespace?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.planningImportService.listAliasMappings(namespace, search);
+  }
+
+  @Get('import-aliases/catalog')
+  getPlanningImportAliasCatalog() {
+    return this.planningImportService.getAliasCatalog();
+  }
+
+  @Post('import-aliases')
+  createPlanningImportAlias(@Body() dto: CreatePlanningImportAliasDto) {
+    return this.planningImportService.createAliasMapping(dto);
+  }
+
+  @Patch('import-aliases/:id')
+  updatePlanningImportAlias(
+    @Param('id') id: string,
+    @Body() dto: UpdatePlanningImportAliasDto,
+  ) {
+    return this.planningImportService.updateAliasMapping(id, dto);
   }
 
   @Get('plan-rules')
@@ -843,6 +931,21 @@ export class PlanningController {
     return this.planningService.detectConflicts(semesterId);
   }
 
+  private assertImportBatchScopeAccess(
+    authUser: AuthenticatedRequestUser,
+    payload: { scope_decisions?: Array<{ scope?: any }> } | null | undefined,
+  ) {
+    for (const item of payload?.scope_decisions ?? []) {
+      const scope = item?.scope ?? {};
+      const facultyId = scope?.faculty_id ?? null;
+      const academicProgramId = scope?.academic_program_id ?? null;
+      if (!facultyId && !academicProgramId) {
+        continue;
+      }
+      this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
+    }
+  }
+
   private matchesScope(
     authUser: AuthenticatedRequestUser,
     facultyId?: string | null,
@@ -906,6 +1009,7 @@ function idActor(authUser: AuthenticatedRequestUser) {
     user_id: authUser.id,
     username: authUser.username,
     display_name: authUser.display_name,
+    ip_address: authUser.request_ip ?? null,
   };
 }
 

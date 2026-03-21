@@ -753,7 +753,9 @@ export class PlanningCycleEditorPageComponent implements OnInit {
       case 'PRACTICE':
         return 'Practica';
       case 'MIXED':
-        return 'Mixta';
+        return 'Teorico practico';
+      case 'MIXED_PRACTICE_THEORY':
+        return 'Practico teorico';
       default:
         return value || '---';
     }

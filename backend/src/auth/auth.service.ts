@@ -11,7 +11,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { newId } from '../common';
 import {
   AcademicProgramEntity,
@@ -61,11 +61,7 @@ type AccessScope = {
   is_global: boolean;
 };
 
-export type AuthenticatedRequestUser = {
-  id: string;
-  username: string;
-  display_name: string;
-  email: string | null;
+type AuthAccessProfile = {
   permissions: string[];
   windows: string[];
   roles: Array<{ id: string; code: string; name: string }>;
@@ -76,9 +72,32 @@ export type AuthenticatedRequestUser = {
   is_admin: boolean;
 };
 
+export type AuthenticatedRequestUser = {
+  id: string;
+  username: string;
+  display_name: string;
+  email: string | null;
+  request_ip?: string | null;
+  permissions: string[];
+  windows: string[];
+  roles: Array<{ id: string; code: string; name: string }>;
+  scopes: AccessScope[];
+  allowed_faculty_ids: string[];
+  allowed_academic_program_ids: string[];
+  is_global: boolean;
+  is_admin: boolean;
+};
+
+type CachedAuthAccessProfile = {
+  value: AuthAccessProfile;
+  expires_at: number;
+};
+
 @Injectable()
 export class AuthService implements OnModuleInit {
   private readonly logger = new Logger(AuthService.name);
+  private readonly accessProfileCache = new Map<string, CachedAuthAccessProfile>();
+  private readonly accessProfileRequests = new Map<string, Promise<AuthAccessProfile>>();
 
   constructor(
     @InjectRepository(AuthUserEntity)
@@ -118,7 +137,7 @@ export class AuthService implements OnModuleInit {
     }
 
     const [authUser, tokens] = await Promise.all([
-      this.buildAuthenticatedUser(user.id, user),
+      this.buildAuthenticatedUser(user.id, user, { bypassCache: true }),
       this.issueTokens(user.id, user.username),
     ]);
     return {
@@ -152,7 +171,7 @@ export class AuthService implements OnModuleInit {
     await this.refreshTokensRepo.save(session);
 
     const user = await this.requireActiveUser(payload.sub);
-    const authUser = await this.buildAuthenticatedUser(user.id);
+    const authUser = await this.buildAuthenticatedUser(user.id, user, { bypassCache: true });
     const tokens = await this.issueTokens(user.id, user.username);
     return {
       ...tokens,
@@ -198,17 +217,8 @@ export class AuthService implements OnModuleInit {
     return { logged_out: true };
   }
 
-  async me(userId: string) {
-    const user = await this.requireActiveUser(userId);
-    const authUser = await this.buildAuthenticatedUser(user.id);
-    return {
-      user: this.serializeUser(user),
-      roles: authUser.roles,
-      role_assignments: authUser.scopes,
-      permissions: authUser.permissions,
-      scopes: authUser.scopes,
-      windows: authUser.windows,
-    };
+  async me(authUser: AuthenticatedRequestUser) {
+    return this.serializeAuthenticatedUser(authUser);
   }
 
   async authenticateAccessToken(token: string) {
@@ -228,106 +238,38 @@ export class AuthService implements OnModuleInit {
     }
   }
 
-  async buildAuthenticatedUser(userId: string, cachedUser?: AuthUserEntity): Promise<AuthenticatedRequestUser> {
-    // Fetch user + assignments + all roles + all permissions + all role-permissions in parallel
-    // This avoids sequential DB round-trips that were causing slow logins
-    const [user, assignments, allRoles, allPermissions, allRolePermissions, allFaculties, allPrograms] = await Promise.all([
-      cachedUser ? Promise.resolve(cachedUser) : this.requireActiveUser(userId),
-      this.assignmentsRepo.find({
-        where: { user_id: userId, is_active: true },
-        order: { created_at: 'ASC' },
-      }),
-      this.rolesRepo.find({ where: { is_active: true } }),
-      this.permissionsRepo.find({ where: { is_active: true } }),
-      this.rolePermissionsRepo.find(),
-      this.facultiesRepo.find(),
-      this.programsRepo.find(),
-    ]);
-
-    if (assignments.length === 0) {
-      throw new ForbiddenException('El usuario no tiene roles activos asignados.');
-    }
-
-    const roleMap = new Map(allRoles.map((item) => [item.id, item]));
-    const facultyMap = new Map(allFaculties.map((item) => [item.id, item]));
-    const programMap = new Map(allPrograms.map((item) => [item.id, item]));
-    const permissionMap = new Map(allPermissions.map((item) => [item.id, item]));
-
-    // Build role-permission lookup from in-memory data
-    const rolePermissionsByRole = new Map<string, string[]>();
-    for (const rp of allRolePermissions) {
-      const arr = rolePermissionsByRole.get(rp.role_id) || [];
-      arr.push(rp.permission_id);
-      rolePermissionsByRole.set(rp.role_id, arr);
-    }
-
-    const activeRoleIds = new Set(
-      assignments.map((item) => item.role_id).filter((roleId) => roleMap.has(roleId)),
-    );
-
-    // Gather all permission codes from active roles
-    const permissionCodeSet = new Set<string>();
-    for (const roleId of activeRoleIds) {
-      const permIds = rolePermissionsByRole.get(roleId) || [];
-      for (const permId of permIds) {
-        const perm = permissionMap.get(permId);
-        if (perm) {
-          permissionCodeSet.add(perm.code);
-        }
-      }
-    }
-    const permissionCodes = [...permissionCodeSet].sort();
-
-    const scopes: AccessScope[] = assignments
-      .map((assignment) => {
-        const role = roleMap.get(assignment.role_id);
-        if (!role) {
-          return null;
-        }
-        const program = assignment.academic_program_id
-          ? programMap.get(assignment.academic_program_id)
-          : null;
-        const effectiveFacultyId = assignment.faculty_id ?? program?.faculty_id ?? null;
-        const faculty = effectiveFacultyId ? facultyMap.get(effectiveFacultyId) : null;
-        return {
-          assignment_id: assignment.id,
-          role_id: role.id,
-          role_code: role.code,
-          role_name: role.name,
-          faculty_id: effectiveFacultyId,
-          faculty_name: faculty?.name ?? null,
-          academic_program_id: assignment.academic_program_id ?? null,
-          academic_program_name: program?.name ?? null,
-          is_global: !assignment.faculty_id && !assignment.academic_program_id,
-        };
-      })
-      .filter((item): item is AccessScope => Boolean(item));
-
-    const roleSummaries = [
-      ...new Map(
-        assignments
-          .map((a) => roleMap.get(a.role_id))
-          .filter((r): r is AuthRoleEntity => Boolean(r))
-          .map((role) => [role.id, { id: role.id, code: role.code, name: role.name }]),
-      ).values(),
-    ];
-    const isAdmin = roleSummaries.some((item) => item.code === ROLE_CODES.ADMIN);
-    const isGlobal = isAdmin || scopes.some((item) => item.is_global);
+  async buildAuthenticatedUser(
+    userId: string,
+    cachedUser?: AuthUserEntity,
+    options?: { bypassCache?: boolean },
+  ): Promise<AuthenticatedRequestUser> {
+    const user = cachedUser ? cachedUser : await this.requireActiveUser(userId);
+    const accessProfile = await this.getAccessProfile(userId, options?.bypassCache === true);
 
     return {
       id: user.id,
       username: user.username,
       display_name: user.display_name,
       email: user.email,
-      permissions: permissionCodes,
-      windows: permissionCodes.filter((item) => item.startsWith('window.')),
-      roles: roleSummaries,
-      scopes,
-      allowed_faculty_ids: uniqueIds(scopes.map((item) => item.faculty_id)),
-      allowed_academic_program_ids: uniqueIds(scopes.map((item) => item.academic_program_id)),
-      is_global: isGlobal,
-      is_admin: isAdmin,
+      permissions: accessProfile.permissions,
+      windows: accessProfile.windows,
+      roles: accessProfile.roles,
+      scopes: accessProfile.scopes,
+      allowed_faculty_ids: accessProfile.allowed_faculty_ids,
+      allowed_academic_program_ids: accessProfile.allowed_academic_program_ids,
+      is_global: accessProfile.is_global,
+      is_admin: accessProfile.is_admin,
     };
+  }
+
+  invalidateAccessProfileCache(userId?: string | null) {
+    if (!userId) {
+      this.accessProfileCache.clear();
+      this.accessProfileRequests.clear();
+      return;
+    }
+    this.accessProfileCache.delete(userId);
+    this.accessProfileRequests.delete(userId);
   }
 
   assertScopeAccess(
@@ -494,21 +436,21 @@ export class AuthService implements OnModuleInit {
       }
 
       const existingMappings = await this.rolePermissionsRepo.find({ where: { role_id: role.id } });
-      if (existingMappings.length === 0) {
-        const mappings = seed.permissionCodes
-          .map((code) => permissionMap.get(code))
-          .filter((item): item is AuthPermissionEntity => Boolean(item))
-          .map((permission) =>
-            this.rolePermissionsRepo.create({
-              id: newId(),
-              role_id: role!.id,
-              permission_id: permission.id,
-              created_at: now,
-            }),
-          );
-        if (mappings.length > 0) {
-          await this.rolePermissionsRepo.save(mappings);
-        }
+      const existingPermissionIds = new Set(existingMappings.map((item) => item.permission_id));
+      const missingMappings = seed.permissionCodes
+        .map((code) => permissionMap.get(code))
+        .filter((item): item is AuthPermissionEntity => Boolean(item))
+        .filter((permission) => !existingPermissionIds.has(permission.id))
+        .map((permission) =>
+          this.rolePermissionsRepo.create({
+            id: newId(),
+            role_id: role!.id,
+            permission_id: permission.id,
+            created_at: now,
+          }),
+        );
+      if (missingMappings.length > 0) {
+        await this.rolePermissionsRepo.save(missingMappings);
       }
     }
 
@@ -640,6 +582,178 @@ export class AuthService implements OnModuleInit {
     };
   }
 
+  private serializeAuthenticatedUser(authUser: AuthenticatedRequestUser) {
+    return {
+      user: {
+        id: authUser.id,
+        username: authUser.username,
+        display_name: authUser.display_name,
+        email: authUser.email,
+        is_active: true,
+      },
+      roles: authUser.roles,
+      role_assignments: authUser.scopes,
+      permissions: authUser.permissions,
+      scopes: authUser.scopes,
+      windows: authUser.windows,
+    };
+  }
+
+  private async getAccessProfile(userId: string, bypassCache = false) {
+    if (bypassCache) {
+      this.invalidateAccessProfileCache(userId);
+    } else {
+      const cached = this.accessProfileCache.get(userId);
+      if (cached && cached.expires_at > Date.now()) {
+        return cached.value;
+      }
+    }
+
+    const inFlight = this.accessProfileRequests.get(userId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const request = this.buildAccessProfile(userId)
+      .then((value) => {
+        this.accessProfileCache.set(userId, {
+          value,
+          expires_at: Date.now() + this.accessProfileCacheMs,
+        });
+        this.accessProfileRequests.delete(userId);
+        return value;
+      })
+      .catch((error) => {
+        this.accessProfileRequests.delete(userId);
+        throw error;
+      });
+
+    this.accessProfileRequests.set(userId, request);
+    return request;
+  }
+
+  private async buildAccessProfile(userId: string): Promise<AuthAccessProfile> {
+    const assignments = await this.assignmentsRepo.find({
+      where: { user_id: userId, is_active: true },
+      order: { created_at: 'ASC' },
+    });
+
+    if (assignments.length === 0) {
+      throw new ForbiddenException('El usuario no tiene roles activos asignados.');
+    }
+
+    const roleIds = uniqueIds(assignments.map((item) => item.role_id));
+    const programIds = uniqueIds(assignments.map((item) => item.academic_program_id));
+
+    const [roles, rolePermissions, programs] = await Promise.all([
+      roleIds.length
+        ? this.rolesRepo.find({ where: { id: In(roleIds), is_active: true } })
+        : Promise.resolve([]),
+      roleIds.length
+        ? this.rolePermissionsRepo.find({ where: { role_id: In(roleIds) } })
+        : Promise.resolve([]),
+      programIds.length
+        ? this.programsRepo.find({ where: { id: In(programIds) } })
+        : Promise.resolve([]),
+    ]);
+
+    const permissionIds = uniqueIds(rolePermissions.map((item) => item.permission_id));
+    const facultyIds = uniqueIds([
+      ...assignments.map((item) => item.faculty_id),
+      ...programs.map((item) => item.faculty_id),
+    ]);
+
+    const [permissions, faculties] = await Promise.all([
+      permissionIds.length
+        ? this.permissionsRepo.find({ where: { id: In(permissionIds), is_active: true } })
+        : Promise.resolve([]),
+      facultyIds.length
+        ? this.facultiesRepo.find({ where: { id: In(facultyIds) } })
+        : Promise.resolve([]),
+    ]);
+
+    const roleMap = new Map(roles.map((item) => [item.id, item]));
+    const programMap = new Map(programs.map((item) => [item.id, item]));
+    const facultyMap = new Map(faculties.map((item) => [item.id, item]));
+    const permissionMap = new Map(permissions.map((item) => [item.id, item]));
+
+    const rolePermissionsByRole = new Map<string, string[]>();
+    for (const mapping of rolePermissions) {
+      const current = rolePermissionsByRole.get(mapping.role_id) ?? [];
+      current.push(mapping.permission_id);
+      rolePermissionsByRole.set(mapping.role_id, current);
+    }
+
+    const activeRoleIds = new Set(
+      assignments.map((item) => item.role_id).filter((roleId) => roleMap.has(roleId)),
+    );
+    const permissionCodeSet = new Set<string>();
+    const windowCodeSet = new Set<string>();
+    for (const roleId of activeRoleIds) {
+      const rolePermissionIds = rolePermissionsByRole.get(roleId) ?? [];
+      for (const permissionId of rolePermissionIds) {
+        const permission = permissionMap.get(permissionId);
+        if (permission) {
+          permissionCodeSet.add(permission.code);
+          if (permission.type === 'WINDOW') {
+            windowCodeSet.add(permission.code);
+          }
+          if (permission.parent_window_code) {
+            windowCodeSet.add(permission.parent_window_code);
+          }
+        }
+      }
+    }
+    const permissionCodes = [...permissionCodeSet].sort();
+
+    const scopes: AccessScope[] = assignments
+      .map((assignment) => {
+        const role = roleMap.get(assignment.role_id);
+        if (!role) {
+          return null;
+        }
+        const program = assignment.academic_program_id
+          ? programMap.get(assignment.academic_program_id)
+          : null;
+        const effectiveFacultyId = assignment.faculty_id ?? program?.faculty_id ?? null;
+        const faculty = effectiveFacultyId ? facultyMap.get(effectiveFacultyId) : null;
+        return {
+          assignment_id: assignment.id,
+          role_id: role.id,
+          role_code: role.code,
+          role_name: role.name,
+          faculty_id: effectiveFacultyId,
+          faculty_name: faculty?.name ?? null,
+          academic_program_id: assignment.academic_program_id ?? null,
+          academic_program_name: program?.name ?? null,
+          is_global: !assignment.faculty_id && !assignment.academic_program_id,
+        };
+      })
+      .filter((item): item is AccessScope => Boolean(item));
+
+    const roleSummaries = [
+      ...new Map(
+        assignments
+          .map((assignment) => roleMap.get(assignment.role_id))
+          .filter((role): role is AuthRoleEntity => Boolean(role))
+          .map((role) => [role.id, { id: role.id, code: role.code, name: role.name }]),
+      ).values(),
+    ];
+    const isAdmin = roleSummaries.some((item) => item.code === ROLE_CODES.ADMIN);
+    const isGlobal = isAdmin || scopes.some((item) => item.is_global);
+
+    return {
+      permissions: permissionCodes,
+      windows: [...windowCodeSet].sort(),
+      roles: roleSummaries,
+      scopes,
+      allowed_faculty_ids: uniqueIds(scopes.map((item) => item.faculty_id)),
+      allowed_academic_program_ids: uniqueIds(scopes.map((item) => item.academic_program_id)),
+      is_global: isGlobal,
+      is_admin: isAdmin,
+    };
+  }
+
   private get jwtSecret() {
     return this.configService.get<string>('AUTH_JWT_SECRET', 'uai-dev-secret');
   }
@@ -658,6 +772,10 @@ export class AuthService implements OnModuleInit {
         String(REFRESH_TOKEN_DEFAULT_EXPIRES_DAYS),
       ),
     );
+  }
+
+  private get accessProfileCacheMs() {
+    return Number(this.configService.get<string>('AUTH_ACCESS_PROFILE_CACHE_MS', '15000'));
   }
 }
 

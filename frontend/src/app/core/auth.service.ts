@@ -11,9 +11,11 @@ import {
   of,
   shareReplay,
   tap,
+  timeout,
   throwError,
 } from 'rxjs';
 import { AuthResponse, PermissionCode, SessionState, WindowCode } from './auth.models';
+import { API_BASE_URL } from './api-base';
 import { firstAllowedPath } from './navigation';
 
 const ACCESS_TOKEN_KEY = 'uai.auth.access_token';
@@ -21,7 +23,11 @@ const REFRESH_TOKEN_KEY = 'uai.auth.refresh_token';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
+
   private readonly baseUrl = `${environment.apiBaseUrl}/auth`;
+
+  private readonly authRequestTimeoutMs = 15000;
+
   private readonly sessionSubject = new BehaviorSubject<SessionState | null>(null);
   private readonly readySubject = new BehaviorSubject(false);
   private refreshRequest$: Observable<string | null> | null = null;
@@ -64,6 +70,7 @@ export class AuthService {
         password,
       })
       .pipe(
+        timeout({ first: this.authRequestTimeoutMs }),
         tap((response) => this.setSessionFromAuthResponse(response)),
         map(() => void 0),
       );
@@ -93,19 +100,22 @@ export class AuthService {
     if (!accessToken || !refreshToken) {
       return throwError(() => new Error('Sesion no disponible.'));
     }
-    return this.http.get<Omit<AuthResponse, 'access_token' | 'refresh_token'>>(`${this.baseUrl}/me`).pipe(
-      tap((response) =>
-        this.setSession({
-          accessToken,
-          refreshToken,
-          user: response.user,
-          roles: response.roles,
-          scopes: response.scopes,
-          permissions: response.permissions,
-          windows: response.windows,
-        }),
-      ),
-    );
+    return this.http
+      .get<Omit<AuthResponse, 'access_token' | 'refresh_token'>>(`${this.baseUrl}/me`)
+      .pipe(
+        timeout({ first: this.authRequestTimeoutMs }),
+        tap((response) =>
+          this.setSession({
+            accessToken,
+            refreshToken,
+            user: response.user,
+            roles: response.roles,
+            scopes: response.scopes,
+            permissions: response.permissions,
+            windows: response.windows,
+          }),
+        ),
+      );
   }
 
   refreshAccessToken() {
@@ -119,6 +129,7 @@ export class AuthService {
           refresh_token: this.refreshToken,
         })
         .pipe(
+          timeout({ first: this.authRequestTimeoutMs }),
           tap((response) => this.setSessionFromAuthResponse(response)),
           map((response) => response.access_token),
           catchError((error) => {
@@ -159,7 +170,12 @@ export class AuthService {
   }
 
   redirectAfterLogin() {
-    return this.router.navigateByUrl(this.firstAllowedPath());
+    const path = this.firstAllowedPath();
+    if (!path) {
+      this.clearSession();
+      return Promise.resolve(false);
+    }
+    return this.router.navigateByUrl(path);
   }
 
   get snapshot() {
@@ -172,6 +188,10 @@ export class AuthService {
 
   get refreshToken() {
     return this.sessionSubject.value?.refreshToken ?? localStorage.getItem(REFRESH_TOKEN_KEY);
+  }
+
+  clearLocalSession() {
+    this.clearSession();
   }
 
   private setSessionFromAuthResponse(response: AuthResponse) {

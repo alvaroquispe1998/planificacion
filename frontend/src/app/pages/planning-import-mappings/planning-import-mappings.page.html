@@ -1,0 +1,118 @@
+<div class="planning-shell">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Mapeos persistentes</p>
+      <h1>Mapeos de importacion</h1>
+      <p class="subtle">
+        Mantén aliases reutilizables para campus, programas, planes, modalidades, turnos y espacios físicos.
+      </p>
+    </div>
+    <div class="hero-actions">
+      <button class="btn btn-secondary btn-sm" type="button" (click)="backToBatch()">
+        Volver al preview
+      </button>
+    </div>
+  </header>
+
+  <p *ngIf="message" class="flash success">{{ message }}</p>
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+
+  <section class="content-grid">
+    <article class="panel form-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Alta rapida</p>
+          <h2>{{ editingId ? 'Editar alias' : 'Nuevo alias' }}</h2>
+        </div>
+      </div>
+
+      <label>
+        <span>Namespace</span>
+        <select [(ngModel)]="form.namespace" (ngModelChange)="onNamespaceChange()">
+          <option value="">Selecciona un namespace</option>
+          <option *ngFor="let item of catalog.namespaces" [value]="item">{{ item }}</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Valor origen</span>
+        <input type="text" [(ngModel)]="form.source_value" placeholder="Ejemplo: EN, FILIAL, HIBRIDO" />
+      </label>
+
+      <label>
+        <span>Destino</span>
+        <select [(ngModel)]="form.target_id" (ngModelChange)="onTargetChange()">
+          <option value="">Selecciona un destino</option>
+          <option *ngFor="let item of availableTargets" [value]="item.id">{{ item.label }}</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Label destino</span>
+        <input type="text" [(ngModel)]="form.target_label" placeholder="Label visible del destino" />
+      </label>
+
+      <label>
+        <span>Notas</span>
+        <textarea [(ngModel)]="form.notes" rows="3" placeholder="Comentarios opcionales"></textarea>
+      </label>
+
+      <label class="checkbox-line">
+        <input type="checkbox" [(ngModel)]="form.is_active" />
+        <span>Alias activo</span>
+      </label>
+
+      <div class="form-actions">
+        <button class="btn btn-secondary btn-sm" type="button" (click)="resetForm()">Limpiar</button>
+        <button class="btn btn-primary btn-sm" type="button" (click)="save()" [disabled]="saving">
+          {{ saving ? 'Guardando...' : (editingId ? 'Actualizar alias' : 'Crear alias') }}
+        </button>
+      </div>
+    </article>
+
+    <article class="panel list-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Consulta</p>
+          <h2>Aliases registrados</h2>
+        </div>
+      </div>
+
+      <div class="filters">
+        <select [(ngModel)]="namespaceFilter" (ngModelChange)="reloadAliases()">
+          <option value="">Todos los namespaces</option>
+          <option *ngFor="let item of catalog.namespaces" [value]="item">{{ item }}</option>
+        </select>
+        <input type="text" [(ngModel)]="search" (change)="reloadAliases()" placeholder="Buscar por origen o destino" />
+      </div>
+
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Namespace</th>
+              <th>Origen</th>
+              <th>Destino</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of aliases">
+              <td>{{ item.namespace }}</td>
+              <td>{{ item.source_value }}</td>
+              <td>
+                <strong>{{ item.target_label || item.target_id }}</strong>
+                <div class="muted">{{ item.target_id }}</div>
+              </td>
+              <td>{{ item.is_active ? 'Activo' : 'Inactivo' }}</td>
+              <td>
+                <button class="btn btn-secondary btn-sm" type="button" (click)="edit(item)">Editar</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+</div>

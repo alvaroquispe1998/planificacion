@@ -1,0 +1,161 @@
+.planning-shell {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+}
+
+.hero,
+.panel {
+  background: #fff;
+  border: 1px solid #dbe5f1;
+  border-radius: 1.25rem;
+  box-shadow: 0 16px 36px rgba(15, 42, 79, 0.08);
+  padding: 1.25rem;
+}
+
+.hero,
+.section-head,
+.hero-actions,
+.form-actions,
+.filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  gap: 1rem;
+}
+
+.form-panel {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.form-panel label {
+  display: grid;
+  gap: 0.35rem;
+  color: #12345b;
+  font-weight: 600;
+}
+
+.checkbox-line {
+  display: flex !important;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  color: #a8550f;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.hero h1,
+.section-head h2 {
+  margin: 0;
+  color: #12345b;
+}
+
+.subtle,
+.muted {
+  color: #61758c;
+}
+
+select,
+input,
+textarea {
+  width: 100%;
+  border: 1px solid #cbd7e6;
+  border-radius: 0.85rem;
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.table-wrap {
+  overflow: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.85rem 0.75rem;
+  border-bottom: 1px solid #e4edf6;
+  vertical-align: top;
+  text-align: left;
+}
+
+.data-table th {
+  color: #52657c;
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.btn {
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0.7rem 1rem;
+}
+
+.btn-sm {
+  padding: 0.55rem 0.9rem;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #155a8a, #2a8a7b);
+  color: #fff;
+}
+
+.btn-secondary {
+  background: #eef4fa;
+  color: #12345b;
+}
+
+.flash {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 0.9rem;
+  font-weight: 600;
+}
+
+.flash.success {
+  background: #e9f8ef;
+  color: #20643c;
+}
+
+.flash.error {
+  background: #fff1f2;
+  color: #b42318;
+}
+
+@media (max-width: 960px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero,
+  .section-head,
+  .filters,
+  .form-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

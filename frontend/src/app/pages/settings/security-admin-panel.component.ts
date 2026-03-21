@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, Input, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, Input, OnChanges, SimpleChanges } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { catchError, finalize, of, timeout } from 'rxjs';
 import { ApiService } from '../../core/api.service';
@@ -20,7 +20,7 @@ type AssignmentRow = {
   templateUrl: './security-admin-panel.component.html',
   styleUrl: './security-admin-panel.component.css',
 })
-export class SecurityAdminPanelComponent implements OnInit {
+export class SecurityAdminPanelComponent implements OnChanges {
   @Input() showHeader = true;
   @Input() activeView: 'users' | 'roles' = 'users';
 
@@ -51,28 +51,57 @@ export class SecurityAdminPanelComponent implements OnInit {
     private readonly cdr: ChangeDetectorRef,
   ) {}
 
-  ngOnInit() {
-    this.loadData();
+  ngOnChanges(changes: SimpleChanges) {
+    if (changes['activeView']) {
+      this.loadData();
+    }
   }
 
   loadData() {
     this.errorMessage = '';
-    this.beginLoad();
-    this.api
-      .listAdminUsers()
-      .pipe(
-        timeout(15000),
-        catchError((error) => {
-          this.errorMessage = this.buildLoadError('usuarios', error);
-          return of([]);
-        }),
-        finalize(() => this.endLoad()),
-      )
-      .subscribe((users) => {
-        this.users = Array.isArray(users) ? users : [];
-        this.syncSelectionsAfterReload();
-        this.cdr.detectChanges();
-      });
+    if (this.activeView === 'users') {
+      this.beginLoad();
+      this.api
+        .listAdminUsers()
+        .pipe(
+          timeout(15000),
+          catchError((error) => {
+            this.errorMessage = this.buildLoadError('usuarios', error);
+            return of([]);
+          }),
+          finalize(() => this.endLoad()),
+        )
+        .subscribe((users) => {
+          this.users = Array.isArray(users) ? users : [];
+          this.syncSelectionsAfterReload();
+          this.cdr.detectChanges();
+        });
+
+      this.beginLoad();
+      this.api
+        .getAdminScopeCatalog()
+        .pipe(
+          timeout(15000),
+          catchError((error) => {
+            this.errorMessage = this.buildLoadError('catalogos de alcance', error);
+            return of({
+              faculties: [],
+              academic_programs: [],
+              roles: [],
+            });
+          }),
+          finalize(() => this.endLoad()),
+        )
+        .subscribe((scopeCatalog) => {
+          this.faculties = Array.isArray(scopeCatalog?.faculties) ? scopeCatalog.faculties : [];
+          this.academicPrograms = Array.isArray(scopeCatalog?.academic_programs)
+            ? scopeCatalog.academic_programs
+            : [];
+          this.availableRoles = Array.isArray(scopeCatalog?.roles) ? scopeCatalog.roles : [];
+          this.cdr.detectChanges();
+        });
+      return;
+    }
 
     this.beginLoad();
     this.api
@@ -104,30 +133,7 @@ export class SecurityAdminPanelComponent implements OnInit {
       )
       .subscribe((permissions) => {
         this.permissions = Array.isArray(permissions) ? permissions : [];
-        this.cdr.detectChanges();
-      });
-
-    this.beginLoad();
-    this.api
-      .getAdminScopeCatalog()
-      .pipe(
-        timeout(15000),
-        catchError((error) => {
-          this.errorMessage = this.buildLoadError('catalogos de alcance', error);
-          return of({
-            faculties: [],
-            academic_programs: [],
-            roles: [],
-          });
-        }),
-        finalize(() => this.endLoad()),
-      )
-      .subscribe((scopeCatalog) => {
-        this.faculties = Array.isArray(scopeCatalog?.faculties) ? scopeCatalog.faculties : [];
-        this.academicPrograms = Array.isArray(scopeCatalog?.academic_programs)
-          ? scopeCatalog.academic_programs
-          : [];
-        this.availableRoles = Array.isArray(scopeCatalog?.roles) ? scopeCatalog.roles : [];
+        this.syncSelectionsAfterReload();
         this.cdr.detectChanges();
       });
   }
@@ -237,7 +243,7 @@ export class SecurityAdminPanelComponent implements OnInit {
       is_active: role.is_active ?? true,
       is_editable: role.is_editable ?? true,
     };
-    this.rolePermissionIds = new Set((role.permissions ?? []).map((permission: any) => permission.id));
+    this.rolePermissionIds = this.normalizeRolePermissionIds(role.permissions ?? []);
     this.feedback = '';
     this.errorMessage = '';
   }
@@ -620,5 +626,19 @@ export class SecurityAdminPanelComponent implements OnInit {
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .trim();
+  }
+
+  private normalizeRolePermissionIds(rolePermissions: any[]) {
+    const next = new Set<string>((rolePermissions ?? []).map((permission: any) => permission.id));
+    for (const permission of rolePermissions ?? []) {
+      if (!permission?.parent_window_code) {
+        continue;
+      }
+      const parent = this.permissions.find((item) => item.code === permission.parent_window_code);
+      if (parent?.id) {
+        next.add(parent.id);
+      }
+    }
+    return next;
   }
 }
