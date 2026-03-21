@@ -30,8 +30,8 @@ jobs:
 
       - name: Add .htaccess to built frontend
         run: |
-          mkdir -p frontend/browser/public
-          cp frontend/deploy/.htaccess frontend/browser/public/.htaccess || true
+          mkdir -p frontend/browser
+          cp frontend/deploy/.htaccess frontend/browser/.htaccess || true
 
       - name: Preparar clave SSH
         run: |
@@ -42,7 +42,7 @@ jobs:
 
       - name: Sync frontend to server (rsync)
         run: |
-          rsync -avz --delete frontend/browser/ ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no"
+          rsync -avz --delete frontend/browser/. ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no"
 
       - name: Copy backend package files
         run: |
