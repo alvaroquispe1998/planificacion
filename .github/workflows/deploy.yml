@@ -32,6 +32,16 @@ jobs:
         run: |
           ls -R frontend/dist
 
+      - name: Verify frontend build doesn't contain localhost
+        run: |
+          if grep -R "localhost:3000" frontend/dist >/dev/null 2>&1; then
+            echo "ERROR: production build contains localhost:3000 references" >&2
+            grep -R "localhost:3000" frontend/dist || true
+            exit 1
+          else
+            echo "OK: no localhost references found in dist"
+          fi
+
       - name: Add .htaccess to built frontend
         run: |
           mkdir -p frontend/browser
