@@ -27,7 +27,12 @@ export const ConflictTypeValues = [
 ] as const;
 export const ConflictSeverityValues = ['INFO', 'WARNING', 'CRITICAL'] as const;
 export const PlanningOfferStatusValues = ['DRAFT', 'ACTIVE', 'OBSERVED', 'CLOSED'] as const;
-export const PlanningSubsectionKindValues = ['THEORY', 'PRACTICE', 'MIXED'] as const;
+export const PlanningSubsectionKindValues = [
+  'THEORY',
+  'PRACTICE',
+  'MIXED',
+  'MIXED_PRACTICE_THEORY',
+] as const;
 export const PlanningPlanWorkflowStatusValues = [
   'DRAFT',
   'IN_REVIEW',
@@ -42,6 +47,19 @@ export const PlanningV2ConflictTypeValues = [
 ] as const;
 export const PlanningChangeActionValues = ['CREATE', 'UPDATE', 'DELETE'] as const;
 export const PlanningVcLocationCodeValues = ['CH', 'HU', 'SU', 'IC'] as const;
+export const PlanningImportBatchStatusValues = [
+  'PREVIEW_PROCESSING',
+  'PREVIEW_READY',
+  'PREVIEW_FAILED',
+  'EXECUTED',
+  'FAILED',
+] as const;
+export const PlanningImportIssueSeverityValues = ['BLOCKING', 'WARNING', 'INFO'] as const;
+export const PlanningImportScopeDecisionValues = [
+  'PENDING',
+  'REPLACE_SCOPE',
+  'SKIP_SCOPE',
+] as const;
 
 @Entity({ name: 'class_offerings' })
 export class ClassOfferingEntity {
@@ -474,6 +492,9 @@ export class PlanningSectionEntity {
   projected_vacancies!: number | null;
 
   @Column({ type: 'boolean', default: false })
+  is_cepea!: boolean;
+
+  @Column({ type: 'boolean', default: false })
   has_subsections!: boolean;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
@@ -700,9 +721,210 @@ export class PlanningChangeLogEntity {
   @Column({ type: 'varchar', length: 80, nullable: true })
   changed_by!: string | null;
 
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  changed_from_ip!: string | null;
+
   @Column({ type: 'json', nullable: true })
   context_json!: Record<string, unknown> | null;
 
   @Column({ type: 'datetime' })
   changed_at!: Date;
+}
+
+@Entity({ name: 'planning_import_batches' })
+export class PlanningImportBatchEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 255 })
+  file_name!: string;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  sheet_name!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  file_hash!: string | null;
+
+  @Column({ type: 'enum', enum: PlanningImportBatchStatusValues, default: 'PREVIEW_PROCESSING' })
+  status!: (typeof PlanningImportBatchStatusValues)[number];
+
+  @Column({ type: 'int', default: 0 })
+  total_row_count!: number;
+
+  @Column({ type: 'int', default: 0 })
+  importable_row_count!: number;
+
+  @Column({ type: 'int', default: 0 })
+  blocked_row_count!: number;
+
+  @Column({ type: 'int', default: 0 })
+  warning_row_count!: number;
+
+  @Column({ type: 'json', nullable: true })
+  preview_summary_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  preview_progress_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  execution_summary_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  error_message!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  uploaded_by_user_id!: string | null;
+
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  uploaded_by!: string | null;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  uploaded_from_ip!: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  executed_at!: Date | null;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_import_rows' })
+@Index(['batch_id'])
+@Index(['batch_id', 'scope_key'])
+export class PlanningImportRowEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  batch_id!: string;
+
+  @Column({ type: 'int' })
+  row_number!: number;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  scope_key!: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  row_hash!: string | null;
+
+  @Column({ type: 'json', nullable: true })
+  source_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  normalized_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  resolution_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'boolean', default: false })
+  can_import!: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  imported!: boolean;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_import_row_issues' })
+@Index(['batch_id'])
+@Index(['row_id'])
+export class PlanningImportRowIssueEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  batch_id!: string;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  row_id!: string | null;
+
+  @Column({ type: 'int', nullable: true })
+  row_number!: number | null;
+
+  @Column({ type: 'enum', enum: PlanningImportIssueSeverityValues })
+  severity!: (typeof PlanningImportIssueSeverityValues)[number];
+
+  @Column({ type: 'varchar', length: 80 })
+  issue_code!: string;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  field_name!: string | null;
+
+  @Column({ type: 'varchar', length: 255 })
+  message!: string;
+
+  @Column({ type: 'json', nullable: true })
+  meta_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+}
+
+@Entity({ name: 'planning_import_scope_decisions' })
+@Index(['batch_id', 'scope_key'], { unique: true })
+export class PlanningImportScopeDecisionEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 36 })
+  batch_id!: string;
+
+  @Column({ type: 'varchar', length: 200 })
+  scope_key!: string;
+
+  @Column({ type: 'json', nullable: true })
+  scope_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  existing_summary_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'enum', enum: PlanningImportScopeDecisionValues, default: 'PENDING' })
+  decision!: (typeof PlanningImportScopeDecisionValues)[number];
+
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  notes!: string | null;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
+}
+
+@Entity({ name: 'planning_import_alias_mappings' })
+@Index(['namespace', 'source_value'], { unique: true })
+export class PlanningImportAliasMappingEntity {
+  @PrimaryColumn({ type: 'varchar', length: 36 })
+  id!: string;
+
+  @Column({ type: 'varchar', length: 80 })
+  namespace!: string;
+
+  @Column({ type: 'varchar', length: 200 })
+  source_value!: string;
+
+  @Column({ type: 'varchar', length: 120 })
+  target_id!: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  target_label!: string | null;
+
+  @Column({ type: 'boolean', default: true })
+  is_active!: boolean;
+
+  @Column({ type: 'varchar', length: 300, nullable: true })
+  notes!: string | null;
+
+  @Column({ type: 'datetime' })
+  created_at!: Date;
+
+  @Column({ type: 'datetime' })
+  updated_at!: Date;
 }

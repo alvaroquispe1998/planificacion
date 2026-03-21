@@ -3,6 +3,7 @@ export type WindowCode =
   | 'window.conflicts'
   | 'window.audit'
   | 'window.videoconferences'
+  | 'window.security'
   | 'window.settings';
 
 export type PermissionCode =

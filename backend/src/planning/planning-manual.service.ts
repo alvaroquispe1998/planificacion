@@ -97,6 +97,7 @@ type ChangeLogActor = {
   user_id?: string | null;
   username?: string | null;
   display_name?: string | null;
+  ip_address?: string | null;
 };
 
 type ChangeLogFilters = {
@@ -1076,13 +1077,25 @@ export class PlanningManualService {
     const teacherId = emptyToNull(dto.teacher_id);
     const projectedVacancies =
       dto.projected_vacancies !== undefined ? Math.max(0, Math.trunc(dto.projected_vacancies)) : null;
+    const requestedSectionCode =
+      dto.code !== undefined ? normalizePlanningSectionCode(dto.code) : null;
+    if (dto.code !== undefined && !requestedSectionCode) {
+      throw new BadRequestException('Debes indicar un codigo valido para la seccion.');
+    }
 
     const saved = await this.sectionsRepo.manager.transaction(async (manager) => {
       const existingSections = await manager.find(PlanningSectionEntity, {
         where: { planning_offer_id: offerId },
         order: { code: 'ASC' },
       });
-      const sectionCode = nextSectionCodeValue(existingSections.map((item) => item.code));
+      const suggestedSectionCode = nextSectionCodeValue(existingSections.map((item) => item.code));
+      const sectionCode = requestedSectionCode ?? suggestedSectionCode;
+      const duplicateSection = existingSections.find(
+        (item) => normalizePlanningSectionCode(item.code) === sectionCode,
+      );
+      if (duplicateSection) {
+        throw new BadRequestException(`La seccion ${sectionCode} ya existe para esta oferta.`);
+      }
       const section = manager.create(PlanningSectionEntity, {
         id: dto.id ?? newId(),
         planning_offer_id: offerId,
@@ -1090,6 +1103,7 @@ export class PlanningManualService {
         teacher_id: teacherId,
         course_modality_id: modalityId,
         projected_vacancies: projectedVacancies,
+        is_cepea: Boolean(dto.is_cepea),
         has_subsections: subsectionCount > 1,
         default_theoretical_hours: offer.theoretical_hours,
         default_practical_hours: offer.practical_hours,
@@ -1236,7 +1250,12 @@ export class PlanningManualService {
     const current = await this.requireEntity(this.sectionsRepo, id, 'planning_section');
     const currentOffer = await this.requireEntity(this.offersRepo, current.planning_offer_id, 'planning_offer');
     await this.assertOfferPlanEditable(currentOffer);
-    const nextCode = dto.code ? dto.code.trim().toUpperCase() : current.code;
+    const normalizedCode =
+      dto.code !== undefined ? normalizePlanningSectionCode(dto.code) : current.code;
+    if (dto.code !== undefined && !normalizedCode) {
+      throw new BadRequestException('Debes indicar un codigo valido para la seccion.');
+    }
+    const nextCode = normalizedCode ?? current.code;
     if (nextCode !== current.code) {
       const existing = await this.sectionsRepo.findOne({
         where: { planning_offer_id: current.planning_offer_id, code: nextCode },
@@ -1255,6 +1274,8 @@ export class PlanningManualService {
         dto.projected_vacancies !== undefined
           ? Math.max(0, Math.trunc(dto.projected_vacancies))
           : current.projected_vacancies,
+      is_cepea:
+        dto.is_cepea !== undefined ? Boolean(dto.is_cepea) : current.is_cepea,
       updated_at: new Date(),
     });
     await this.sectionsRepo.save(next);
@@ -4092,6 +4113,7 @@ export class PlanningManualService {
         after_json: toLogJson(afterValue),
         changed_by_user_id: actor?.user_id ?? null,
         changed_by: actor?.display_name || actor?.username || 'SYSTEM',
+        changed_from_ip: actor?.ip_address ?? null,
         context_json: context ?? null,
         changed_at: new Date(),
       }),
@@ -4358,7 +4380,7 @@ function resolveAllowedSubsectionKinds(
     return ['PRACTICE'];
   }
   if (Math.max(1, subsectionCount) <= 1) {
-    return ['MIXED'];
+    return ['MIXED', 'MIXED_PRACTICE_THEORY'];
   }
   return ['THEORY', 'PRACTICE'];
 }
@@ -4375,7 +4397,7 @@ function validateSubsectionKindDistribution(
     return normalizedKinds.every((item) => item === 'PRACTICE');
   }
   if (normalizedKinds.length <= 1) {
-    return normalizedKinds[0] === 'MIXED';
+    return ['MIXED', 'MIXED_PRACTICE_THEORY'].includes(normalizedKinds[0] ?? '');
   }
   return normalizedKinds.includes('THEORY') && normalizedKinds.includes('PRACTICE');
 }
@@ -4391,7 +4413,7 @@ function buildSubsectionKindErrorMessage(
     return 'Este curso solo admite subsecciones practicas.';
   }
   if (Math.max(1, subsectionCount) <= 1) {
-    return 'Si solo existe una subseccion en un curso teorico practico, debe ser mixta.';
+    return 'Si solo existe una subseccion en un curso teorico practico, debe ser teorico practico o practico teorico.';
   }
   return 'En cursos teorico practico solo puedes usar subsecciones teoricas o practicas.';
 }
@@ -4424,6 +4446,15 @@ function sectionCodeFromIndex(index: number) {
     value = Math.floor(value / 26) - 1;
   } while (value >= 0);
   return code;
+}
+
+function normalizePlanningSectionCode(value: string | null | undefined) {
+  const normalized = `${value ?? ''}`
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Z0-9_-]/g, '');
+  return normalized || null;
 }
 
 function extractCycleFromLabel(value: string | null | undefined) {

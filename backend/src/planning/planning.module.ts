@@ -26,6 +26,11 @@ import {
   PlanningChangeLogEntity,
   PlanningCampusVcLocationMappingEntity,
   PlanningCyclePlanRuleEntity,
+  PlanningImportAliasMappingEntity,
+  PlanningImportBatchEntity,
+  PlanningImportRowEntity,
+  PlanningImportRowIssueEntity,
+  PlanningImportScopeDecisionEntity,
   PlanningOfferEntity,
   PlanningScheduleConflictV2Entity,
   PlanningSectionEntity,
@@ -42,6 +47,7 @@ import {
   VcSectionEntity,
 } from '../videoconference/videoconference.entity';
 import { PlanningController } from './planning.controller';
+import { PlanningImportService } from './planning-import.service';
 import { PlanningManualService } from './planning-manual.service';
 import { PlanningService } from './planning.service';
 
@@ -60,6 +66,11 @@ import { PlanningService } from './planning.service';
       CourseModalityEntity,
       PlanningCampusVcLocationMappingEntity,
       PlanningCyclePlanRuleEntity,
+      PlanningImportAliasMappingEntity,
+      PlanningImportBatchEntity,
+      PlanningImportRowEntity,
+      PlanningImportRowIssueEntity,
+      PlanningImportScopeDecisionEntity,
       PlanningOfferEntity,
       PlanningSectionEntity,
       PlanningSubsectionEntity,
@@ -86,6 +97,6 @@ import { PlanningService } from './planning.service';
     ]),
   ],
   controllers: [PlanningController],
-  providers: [PlanningService, PlanningManualService],
+  providers: [PlanningService, PlanningManualService, PlanningImportService],
 })
 export class PlanningModule {}

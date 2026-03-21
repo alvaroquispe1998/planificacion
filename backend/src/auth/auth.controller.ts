@@ -31,6 +31,6 @@ export class AuthController {
 
   @Get('me')
   me(@CurrentAuthUser() authUser: AuthenticatedRequestUser) {
-    return this.authService.me(authUser.id);
+    return this.authService.me(authUser);
   }
 }

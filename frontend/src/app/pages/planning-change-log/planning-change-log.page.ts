@@ -171,6 +171,10 @@ export class PlanningChangeLogPageComponent implements OnInit {
     return row?.changed_by || row?.changed_by_user_id || 'SYSTEM';
   }
 
+  ipLabel(row: any) {
+    return row?.changed_from_ip || 'Sin IP registrada';
+  }
+
   contextLabel(row: any) {
     if (row?.reference_label) {
       return row.reference_label;

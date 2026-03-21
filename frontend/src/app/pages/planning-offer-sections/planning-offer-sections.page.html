@@ -104,6 +104,7 @@
                 <h3>{{ section.code }}</h3>
               </div>
               <div class="section-summary-pills">
+                <span *ngIf="section.is_cepea" class="pill neutral">CEPEA</span>
                 <span class="pill neutral">{{ section.subsections?.length || 0 }} subsecciones</span>
                 <span class="pill" [ngClass]="sectionStatusClass(section)">
                   {{ sectionStatusLabel(section) }}
@@ -373,13 +374,7 @@
           </label>
         </div>
         <p class="drawer-helper">
-          <ng-container [ngSwitch]="offer?.course_type">
-            <span *ngSwitchCase="'TEORICO'">Este curso solo admite subsecciones teoricas.</span>
-            <span *ngSwitchCase="'PRACTICO'">Este curso solo admite subsecciones practicas.</span>
-            <span *ngSwitchDefault>
-              En cursos teorico practico puedes ajustar la distribucion, pero debe quedar al menos una subseccion teorica y una practica.
-            </span>
-          </ng-container>
+          {{ subsectionKindGuidance(activeSubsection) }}
         </p>
       </section>
 
@@ -457,6 +452,16 @@
         <div class="schedule-form drawer-schedule-form">
           <div class="schedule-form-note">
             Solo se permite un horario por subseccion, entre 07:40 y 23:30, en bloques de 50 minutos.
+          </div>
+
+          <div class="hours-warning" [class.hours-warning-alert]="subsectionAssignedHoursMismatch(activeSubsection)">
+            <strong>
+              {{ subsectionAssignedHoursMismatch(activeSubsection) ? 'Advertencia de horas' : 'Horas esperadas' }}
+            </strong>
+            <span>{{ subsectionExpectedHoursLabel(activeSubsection) }}</span>
+            <span *ngIf="subsectionAssignedHoursMismatch(activeSubsection)">
+              {{ subsectionCurrentHoursLabel(activeSubsection) }}
+            </span>
           </div>
 
           <label class="field">
@@ -544,6 +549,26 @@
           [ngModel]="createSectionForm.subsection_count"
           (ngModelChange)="onCreateSubsectionCountChange($event)" />
       </label>
+
+      <div class="field">
+        <span>Codigo de seccion</span>
+        <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+          <input
+            style="flex:1 1 220px;"
+            type="text"
+            [ngModel]="createSectionForm.code"
+            (ngModelChange)="onCreateSectionCodeChange($event)"
+            [disabled]="saving"
+            placeholder="A" />
+          <label class="checkbox-field" style="white-space:nowrap;align-self:center;">
+            <input type="checkbox" [(ngModel)]="createSectionForm.is_cepea" [disabled]="saving" />
+            <strong>CEPEA</strong>
+          </label>
+        </div>
+        <small style="color:#64748b;font-size:.8rem;line-height:1.35;">
+          Sugerido: {{ nextSectionCodeSuggestion() }}. Puedes cambiarlo por A, B, X, Y, etc.
+        </small>
+      </div>
 
       <label class="field">
         <span>Vacantes de seccion</span>

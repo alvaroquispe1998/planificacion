@@ -13,6 +13,7 @@ export type SecondaryNavItem = {
   icon: string;
   window?: WindowCode;
   permission?: PermissionCode;
+  permissions?: PermissionCode[];
   match: NavMatch;
 };
 
@@ -47,6 +48,24 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             match: {
               exact: ['/planning'],
               prefix: ['/planning/cycle-detail', '/planning/cycle-editor', '/planning/offers', '/class-detail'],
+            },
+          },
+          {
+            label: 'Carga masiva',
+            path: '/planning/imports',
+            icon: 'upload',
+            window: 'window.planning',
+            match: {
+              exact: ['/planning/imports'],
+            },
+          },
+          {
+            label: 'Mapeos importacion',
+            path: '/planning/import-mappings',
+            icon: 'sliders',
+            window: 'window.planning',
+            match: {
+              exact: ['/planning/import-mappings'],
             },
           },
           {
@@ -142,16 +161,18 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             label: 'Usuarios',
             path: '/admin/security/users',
             icon: 'users',
+            window: 'window.security',
             permission: 'action.users.manage',
             match: {
               exact: ['/admin/security/users', '/admin/security', '/security'],
             },
           },
           {
-            label: 'Roles',
+            label: 'Roles y Privilegios',
             path: '/admin/security/roles',
             icon: 'badge',
-            permission: 'action.users.manage',
+            window: 'window.security',
+            permissions: ['action.roles.manage', 'action.permissions.manage'],
             match: {
               exact: ['/admin/security/roles'],
             },
@@ -163,12 +184,14 @@ export const APP_NAV_GROUPS: NavGroup[] = [
 ];
 
 export function canAccessNavItem(
-  item: Pick<SecondaryNavItem, 'window' | 'permission'>,
+  item: Pick<SecondaryNavItem, 'window' | 'permission' | 'permissions'>,
   windows: WindowCode[],
   permissions: PermissionCode[],
 ) {
   const windowAllowed = !item.window || windows.includes(item.window);
-  const permissionAllowed = !item.permission || permissions.includes(item.permission);
+  const permissionAllowed =
+    (!item.permission || permissions.includes(item.permission)) &&
+    (!(item.permissions?.length) || item.permissions.every((permission) => permissions.includes(permission)));
   return windowAllowed && permissionAllowed;
 }
 
@@ -235,7 +258,7 @@ export function firstAllowedPath(
       }
     }
   }
-  return '/planning';
+  return null;
 }
 
 function normalizeUrlPath(url: string) {

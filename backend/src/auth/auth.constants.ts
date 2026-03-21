@@ -3,6 +3,7 @@ export const WINDOW_PERMISSIONS = {
   CONFLICTS: 'window.conflicts',
   AUDIT: 'window.audit',
   VIDEOCONFERENCES: 'window.videoconferences',
+  SECURITY: 'window.security',
   SETTINGS: 'window.settings',
 } as const;
 
@@ -25,8 +26,8 @@ export const ROLE_CODES = {
 export const AUTH_PUBLIC_KEY = 'auth:public';
 export const AUTH_PERMISSIONS_KEY = 'auth:permissions';
 
-export const ACCESS_TOKEN_DEFAULT_EXPIRES = '15m';
-export const REFRESH_TOKEN_DEFAULT_EXPIRES_DAYS = 7;
+export const ACCESS_TOKEN_DEFAULT_EXPIRES = '8h';
+export const REFRESH_TOKEN_DEFAULT_EXPIRES_DAYS = 30;
 
 export const DEFAULT_ADMIN_USERNAME = 'admin';
 export const DEFAULT_ADMIN_PASSWORD = 'admin123';
@@ -69,21 +70,30 @@ export const PERMISSION_SEEDS = [
     sort_order: 40,
   },
   {
+    code: WINDOW_PERMISSIONS.SECURITY,
+    type: 'WINDOW' as const,
+    description: 'Acceso a la ventana de seguridad.',
+    display_name: 'Seguridad',
+    group_key: 'security',
+    parent_window_code: null,
+    sort_order: 50,
+  },
+  {
     code: WINDOW_PERMISSIONS.SETTINGS,
     type: 'WINDOW' as const,
     description: 'Acceso a la ventana de configuracion.',
     display_name: 'Configuracion',
     group_key: 'settings',
     parent_window_code: null,
-    sort_order: 50,
+    sort_order: 60,
   },
   {
     code: ACTION_PERMISSIONS.USERS_MANAGE,
     type: 'ACTION' as const,
     description: 'Gestion de usuarios.',
     display_name: 'Gestionar usuarios',
-    group_key: 'global_admin',
-    parent_window_code: null,
+    group_key: 'security',
+    parent_window_code: WINDOW_PERMISSIONS.SECURITY,
     sort_order: 100,
   },
   {
@@ -91,8 +101,8 @@ export const PERMISSION_SEEDS = [
     type: 'ACTION' as const,
     description: 'Gestion de roles.',
     display_name: 'Gestionar roles',
-    group_key: 'global_admin',
-    parent_window_code: null,
+    group_key: 'security',
+    parent_window_code: WINDOW_PERMISSIONS.SECURITY,
     sort_order: 110,
   },
   {
@@ -100,8 +110,8 @@ export const PERMISSION_SEEDS = [
     type: 'ACTION' as const,
     description: 'Gestion de privilegios.',
     display_name: 'Gestionar privilegios',
-    group_key: 'global_admin',
-    parent_window_code: null,
+    group_key: 'security',
+    parent_window_code: WINDOW_PERMISSIONS.SECURITY,
     sort_order: 120,
   },
   {
