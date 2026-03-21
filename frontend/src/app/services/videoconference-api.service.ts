@@ -1,6 +1,6 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { API_BASE_URL } from '../core/api-base';
+import { environment } from '../../environments/environment';
 
 export interface FilterOptionsDto {
     facultyIds?: string[];
@@ -27,7 +27,7 @@ export interface VideoconferencePreviewItem {
 
 @Injectable({ providedIn: 'root' })
 export class VideoconferenceApiService {
-    private readonly baseUrl = `${API_BASE_URL}/videoconference`;
+    private readonly baseUrl = `${environment.apiBaseUrl}/videoconference`;
 
     constructor(private http: HttpClient) { }
 

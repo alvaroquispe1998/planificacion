@@ -1,4 +1,5 @@
 import { HttpClient } from '@angular/common/http';
+import { environment } from '../../environments/environment';
 import { Injectable } from '@angular/core';
 import { Router } from '@angular/router';
 import {
@@ -22,8 +23,11 @@ const REFRESH_TOKEN_KEY = 'uai.auth.refresh_token';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly baseUrl = `${API_BASE_URL}/auth`;
+
+  private readonly baseUrl = `${environment.apiBaseUrl}/auth`;
+
   private readonly authRequestTimeoutMs = 15000;
+
   private readonly sessionSubject = new BehaviorSubject<SessionState | null>(null);
   private readonly readySubject = new BehaviorSubject(false);
   private refreshRequest$: Observable<string | null> | null = null;
