@@ -552,21 +552,21 @@ export class SettingsSyncService {
     }
 
     const resources = requestedResources as ResourceCode[];
-    const sourceProbeCache = new Map<SourceCode, SourceProbeResult>();
-    const results: Array<Record<string, unknown>> = [];
+    const sourceMap = new Map(
+      (await this.sourcesRepo.find({ where: { is_active: true } })).map((item) => [item.code, item] as const),
+    );
+    const jobs: Array<{ job: SyncJobEntity; resource: ResourceCode; sourceCode: SourceCode }> = [];
 
     for (const resource of resources) {
       const resourceDefinition = RESOURCE_BY_CODE.get(resource);
       if (!resourceDefinition) {
         throw new BadRequestException(`Recurso no configurado: ${resource}`);
       }
-      const sourceCode = resourceDefinition.source;
-      const sourceResult = sourceProbeCache.has(sourceCode)
-        ? (sourceProbeCache.get(sourceCode) as SourceProbeResult)
-        : await this.probeSourceSession(sourceCode);
-      sourceProbeCache.set(sourceCode, sourceResult);
-
-      const job = await this.createJob(sourceResult.source.id, resource, dto.mode ?? 'FULL', {
+      const source = sourceMap.get(resourceDefinition.source);
+      if (!source) {
+        throw new BadRequestException(`Fuente no configurada para el recurso ${resource}.`);
+      }
+      const job = await this.createJob(source.id, resource, dto.mode ?? 'FULL', {
         mode: dto.mode ?? 'FULL',
         resources: dto.resources ?? null,
         campus_ids: dto.campus_ids ?? null,
@@ -576,20 +576,58 @@ export class SettingsSyncService {
         schedule_start: dto.schedule_start ?? null,
         schedule_end: dto.schedule_end ?? null,
       });
+      jobs.push({
+        job,
+        resource,
+        sourceCode: resourceDefinition.source,
+      });
+    }
 
-      if (!sourceResult.ok || !sourceResult.cookie) {
-        await this.failJob(job, sourceResult.reason ?? 'Sesion no valida.');
-        results.push({
-          resource,
-          source: sourceCode,
-          status: 'FAILED',
-          reason: sourceResult.reason ?? 'Sesion no valida.',
-          job_id: job.id,
-        });
-        continue;
-      }
+    this.scheduleSyncExecution(jobs, dto);
 
+    return {
+      started_at: new Date().toISOString(),
+      total_resources: resources.length,
+      queued: jobs.length,
+      accepted: true,
+      completed: 0,
+      failed: 0,
+      results: jobs.map(({ job, resource, sourceCode }) => ({
+        resource,
+        source: sourceCode,
+        status: 'PENDING',
+        job_id: job.id,
+      })),
+    };
+  }
+
+  private scheduleSyncExecution(
+    jobs: Array<{ job: SyncJobEntity; resource: ResourceCode; sourceCode: SourceCode }>,
+    dto: RunSettingsSyncDto,
+  ) {
+    setTimeout(() => {
+      void this.executeQueuedSync(jobs, dto);
+    }, 0);
+  }
+
+  private async executeQueuedSync(
+    jobs: Array<{ job: SyncJobEntity; resource: ResourceCode; sourceCode: SourceCode }>,
+    dto: RunSettingsSyncDto,
+  ) {
+    const sourceProbeCache = new Map<SourceCode, SourceProbeResult>();
+
+    for (const { job, resource, sourceCode } of jobs) {
       try {
+        const sourceResult = sourceProbeCache.has(sourceCode)
+          ? (sourceProbeCache.get(sourceCode) as SourceProbeResult)
+          : await this.probeSourceSession(sourceCode);
+        sourceProbeCache.set(sourceCode, sourceResult);
+
+        if (!sourceResult.ok || !sourceResult.cookie) {
+          await this.failJob(job, sourceResult.reason ?? 'Sesion no valida.');
+          continue;
+        }
+
         await this.updateJobStatus(job, 'RUNNING');
         await this.log(job.id, 'INFO', `Iniciando sync de ${resource}`, {
           source: sourceCode,
@@ -600,35 +638,12 @@ export class SettingsSyncService {
         const persisted = await this.persistResourceRows(resource, rows);
         await this.log(job.id, 'INFO', `Sync de ${resource} completado`, persisted);
         await this.completeJob(job);
-
-        results.push({
-          resource,
-          source: sourceCode,
-          status: 'DONE',
-          ...persisted,
-          job_id: job.id,
-        });
       } catch (error) {
         const message = this.toErrorMessage(error);
         await this.failJob(job, message);
         await this.log(job.id, 'ERROR', `Error en sync de ${resource}`, { error: message });
-        results.push({
-          resource,
-          source: sourceCode,
-          status: 'FAILED',
-          reason: message,
-          job_id: job.id,
-        });
       }
     }
-
-    return {
-      started_at: new Date().toISOString(),
-      total_resources: resources.length,
-      completed: results.filter((item) => item.status === 'DONE').length,
-      failed: results.filter((item) => item.status === 'FAILED').length,
-      results,
-    };
   }
 
   async listJobs(limit = 20) {

@@ -1,3 +1,5 @@
+import { environment } from '../../environments/environment';
+
 declare global {
   interface Window {
     __UAI_API_BASE_URL__?: string;
@@ -14,17 +16,11 @@ function resolveApiBaseUrl() {
   if (override) {
     return normalizeBaseUrl(override);
   }
-
-  if (typeof window !== 'undefined' && window.location) {
-    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
-    const hostname =
-      window.location.hostname && window.location.hostname !== 'localhost'
-        ? window.location.hostname
-        : '127.0.0.1';
-    return `${protocol}//${hostname}:3000`;
+  const envBaseUrl = environment?.apiBaseUrl?.trim() ?? '';
+  if (envBaseUrl) {
+    return normalizeBaseUrl(envBaseUrl);
   }
-
-  return 'http://127.0.0.1:3000';
+  return '/api';
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();

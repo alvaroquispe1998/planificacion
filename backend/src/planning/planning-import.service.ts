@@ -60,11 +60,18 @@ type AliasNamespace =
   | 'faculty_code'
   | 'academic_program_code'
   | 'study_plan_code'
+  | 'course_code'
   | 'course_modality'
   | 'shift'
   | 'building'
   | 'classroom'
   | 'laboratory';
+
+type AliasSourceContext = {
+  academic_program_code_raw?: string | null;
+  study_plan_code_raw?: string | null;
+  cycle_raw?: number | null;
+};
 
 type ImportCatalog = {
   semesters: SemesterEntity[];
@@ -72,8 +79,10 @@ type ImportCatalog = {
   faculties: FacultyEntity[];
   programs: AcademicProgramEntity[];
   studyPlans: StudyPlanEntity[];
+  studyPlanById: Map<string, StudyPlanEntity>;
   studyPlanCourses: StudyPlanCourseEntity[];
   studyPlanCourseDetails: StudyPlanCourseDetailEntity[];
+  studyPlanCourseDetailById: Map<string, StudyPlanCourseDetailEntity>;
   teachers: TeacherEntity[];
   courseModalities: CourseModalityEntity[];
   studyTypes: StudyTypeEntity[];
@@ -674,16 +683,23 @@ export class PlanningImportService {
   }
 
   async getAliasCatalog() {
-    const [campuses, faculties, programs, studyPlans, courseModalities, buildings, classrooms] =
+    const [campuses, faculties, programs, studyPlans, studyPlanCourses, studyPlanCourseDetails, courseModalities, buildings, classrooms] =
       await Promise.all([
         this.campusesRepo.find({ order: { name: 'ASC' } }),
         this.facultiesRepo.find({ order: { name: 'ASC' } }),
         this.programsRepo.find({ order: { name: 'ASC' } }),
         this.studyPlansRepo.find({ order: { career: 'ASC', year: 'ASC' } }),
+        this.studyPlanCoursesRepo.find({ order: { course_code: 'ASC', course_name: 'ASC' } }),
+        this.studyPlanCourseDetailsRepo.find(),
         this.courseModalitiesRepo.find({ where: { is_active: true }, order: { name: 'ASC' } }),
         this.buildingsRepo.find({ order: { name: 'ASC' } }),
         this.classroomsRepo.find({ order: { name: 'ASC' } }),
       ]);
+
+    const studyPlanById = new Map(studyPlans.map((item) => [item.id, item] as const));
+    const studyPlanCourseDetailById = new Map(
+      studyPlanCourseDetails.map((item) => [item.study_plan_course_id, item] as const),
+    );
 
     return {
       namespaces: [
@@ -691,6 +707,7 @@ export class PlanningImportService {
         'faculty_code',
         'academic_program_code',
         'study_plan_code',
+        'course_code',
         'course_modality',
         'shift',
         'building',
@@ -712,8 +729,31 @@ export class PlanningImportService {
       })),
       study_plans: studyPlans.map((item) => ({
         id: item.id,
+        academic_program_id: item.academic_program_id ?? null,
         label: [item.year, item.career, item.name].filter(Boolean).join(' - '),
       })),
+      course_targets: studyPlanCourses
+        .map((item) => {
+          const plan = studyPlanById.get(item.study_plan_id) ?? null;
+          const detail = studyPlanCourseDetailById.get(item.id) ?? null;
+          const cycle = detail?.academic_year ?? extractCycleFromStudyPlanCourse(item) ?? null;
+          return {
+            id: item.id,
+            study_plan_id: item.study_plan_id,
+            academic_program_id: plan?.academic_program_id ?? null,
+            cycle,
+            label: [
+              detail?.short_code ?? item.course_code,
+              detail?.name ?? item.course_name,
+              plan?.career ?? plan?.academic_program,
+              plan?.year,
+              cycle ? `Ciclo ${cycle}` : null,
+            ]
+              .filter(Boolean)
+              .join(' - '),
+          };
+        })
+        .sort((left, right) => left.label.localeCompare(right.label)),
       course_modalities: courseModalities.map((item) => ({
         id: item.id,
         label: item.name ?? item.code ?? item.id,
@@ -1320,6 +1360,7 @@ export class PlanningImportService {
     scopeDecisions: PlanningImportScopeDecisionEntity[],
   ): BatchComposition {
     const issuesByRowId = groupBy(issues, (issue) => issue.row_id ?? '__NO_ROW__');
+    const rowsById = new Map(rows.map((row) => [row.id, row]));
     const rowsByScope = groupBy(
       rows.filter((row) => row.can_import && row.scope_key),
       (row) => row.scope_key!,
@@ -1342,6 +1383,7 @@ export class PlanningImportService {
         issue_count: 0,
         blocking_count: 0,
         warning_count: 0,
+        dependent_academic_programs: [],
       };
       current.row_count = numberValue(current.row_count) + 1;
       current.issue_count = numberValue(current.issue_count) + 1;
@@ -1350,6 +1392,91 @@ export class PlanningImportService {
       }
       if (issue.severity === 'WARNING') {
         current.warning_count = numberValue(current.warning_count) + 1;
+      }
+      if (namespace === 'study_plan_code' && issue.row_id) {
+        const relatedRow = rowsById.get(issue.row_id);
+        if (relatedRow) {
+          const normalized = asRecord(relatedRow.normalized_json);
+          const resolution = asRecord(relatedRow.resolution_json);
+          const mappingResolution = asRecord(recordValue(resolution, 'mapping_resolution'));
+          const programResolution = asRecord(recordValue(mappingResolution, 'academic_program_code'));
+          const dependentPrograms = Array.isArray(current.dependent_academic_programs)
+            ? current.dependent_academic_programs
+            : [];
+          const dependentProgram = {
+            source_value: recordString(normalized, 'academic_program_code_raw') ?? '',
+            target_id: recordString(programResolution, 'target_id'),
+            target_label: recordString(programResolution, 'target_label'),
+            match_source: recordString(programResolution, 'match_source') ?? 'none',
+          };
+          if (
+            dependentProgram.source_value &&
+            !dependentPrograms.some(
+              (item: any) =>
+                `${item?.source_value ?? ''}` === dependentProgram.source_value &&
+                `${item?.target_id ?? ''}` === `${dependentProgram.target_id ?? ''}`,
+            )
+          ) {
+            dependentPrograms.push(dependentProgram);
+            current.dependent_academic_programs = dependentPrograms;
+          }
+        }
+      }
+      if (namespace === 'course_code' && issue.row_id) {
+        const relatedRow = rowsById.get(issue.row_id);
+        if (relatedRow) {
+          const normalized = asRecord(relatedRow.normalized_json);
+          const resolution = asRecord(relatedRow.resolution_json);
+          const mappingResolution = asRecord(recordValue(resolution, 'mapping_resolution'));
+          const programResolution = asRecord(recordValue(mappingResolution, 'academic_program_code'));
+          const studyPlanResolution = asRecord(recordValue(mappingResolution, 'study_plan_code'));
+          const dependentPrograms = Array.isArray(current.dependent_academic_programs)
+            ? current.dependent_academic_programs
+            : [];
+          const dependentStudyPlans = Array.isArray(current.dependent_study_plans)
+            ? current.dependent_study_plans
+            : [];
+          const dependentCycles = Array.isArray(current.dependent_cycles) ? current.dependent_cycles : [];
+          const dependentProgram = {
+            source_value: recordString(normalized, 'academic_program_code_raw') ?? '',
+            target_id: recordString(programResolution, 'target_id'),
+            target_label: recordString(programResolution, 'target_label'),
+            match_source: recordString(programResolution, 'match_source') ?? 'none',
+          };
+          const dependentStudyPlan = {
+            source_value: recordString(normalized, 'study_plan_code_raw') ?? '',
+            target_id: recordString(studyPlanResolution, 'target_id'),
+            target_label: recordString(studyPlanResolution, 'target_label'),
+            match_source: recordString(studyPlanResolution, 'match_source') ?? 'none',
+          };
+          const cycle = recordNumberOrNull(normalized, 'cycle_raw');
+          if (
+            dependentProgram.source_value &&
+            !dependentPrograms.some(
+              (item: any) =>
+                `${item?.source_value ?? ''}` === dependentProgram.source_value &&
+                `${item?.target_id ?? ''}` === `${dependentProgram.target_id ?? ''}`,
+            )
+          ) {
+            dependentPrograms.push(dependentProgram);
+            current.dependent_academic_programs = dependentPrograms;
+          }
+          if (
+            dependentStudyPlan.source_value &&
+            !dependentStudyPlans.some(
+              (item: any) =>
+                `${item?.source_value ?? ''}` === dependentStudyPlan.source_value &&
+                `${item?.target_id ?? ''}` === `${dependentStudyPlan.target_id ?? ''}`,
+            )
+          ) {
+            dependentStudyPlans.push(dependentStudyPlan);
+            current.dependent_study_plans = dependentStudyPlans;
+          }
+          if (cycle && !dependentCycles.includes(cycle)) {
+            dependentCycles.push(cycle);
+            current.dependent_cycles = dependentCycles;
+          }
+        }
       }
       unresolvedMappingMap.set(key, current);
     }
@@ -1364,6 +1491,34 @@ export class PlanningImportService {
         const targetId = recordString(details, 'target_id');
         if (!sourceValue || !targetId) {
           continue;
+        }
+        if (requiresMappingConfirmation(namespace, targetId, recordString(details, 'match_source'))) {
+          const confirmationKey = `${namespace}::${sourceValue}`;
+          const current = unresolvedMappingMap.get(confirmationKey) ?? {
+            namespace,
+            source_value: sourceValue,
+            row_count: 0,
+            issue_count: 0,
+            blocking_count: 0,
+            warning_count: 0,
+            target_id: targetId,
+            target_label: targetLabel,
+            match_source: recordString(details, 'match_source') ?? 'catalog',
+            requires_confirmation: true,
+            dependent_academic_programs: Array.isArray(details.dependent_academic_programs)
+              ? details.dependent_academic_programs
+              : [],
+            dependent_study_plans: Array.isArray(details.dependent_study_plans)
+              ? details.dependent_study_plans
+              : [],
+            dependent_cycles: Array.isArray(details.dependent_cycles) ? details.dependent_cycles : [],
+          };
+          current.row_count = numberValue(current.row_count) + 1;
+          current.target_id = targetId;
+          current.target_label = targetLabel;
+          current.match_source = recordString(details, 'match_source') ?? 'catalog';
+          current.requires_confirmation = true;
+          unresolvedMappingMap.set(confirmationKey, current);
         }
         const key = `${namespace}::${sourceValue}::${targetId}`;
         const current = resolvedMappingMap.get(key) ?? {
@@ -1506,6 +1661,9 @@ export class PlanningImportService {
         hasExistingData(scope.existing_summary as Record<string, unknown> | null | undefined) &&
         scope.decision === 'PENDING',
     ).length;
+    const pendingMappingConfirmations = [...unresolvedMappingMap.values()].filter(
+      (item) => recordBoolean(item, 'requires_confirmation') || numberValue(item.blocking_count) > 0,
+    ).length;
 
     return {
       summary: {
@@ -1516,6 +1674,7 @@ export class PlanningImportService {
         optional_null_row_count: rowsWithOptionalNulls,
         detected_scope_count: scopeSummaries.length,
         pending_scope_decision_count: pendingDecisions,
+        pending_mapping_confirmation_count: pendingMappingConfirmations,
         create_counts: totalCreateCounts,
         effective_create_counts: effectiveCounts,
       },
@@ -1596,6 +1755,11 @@ export class PlanningImportService {
 
   private resolvePreviewRow(row: NormalizedImportRow, catalog: ImportCatalog): PreviewRow {
     const issues: PreviewIssue[] = [];
+    const aliasContext: AliasSourceContext = {
+      academic_program_code_raw: row.academic_program_code_raw,
+      study_plan_code_raw: row.study_plan_code_raw,
+      cycle_raw: row.cycle_raw,
+    };
     const semesterResolution = this.resolveSemester(row.semester_raw, catalog, issues);
     const campusResolution = this.resolveCampus(row.campus_raw, catalog, issues);
     const facultyResolution = this.resolveFaculty(row.faculty_code_raw, catalog, issues);
@@ -1603,6 +1767,9 @@ export class PlanningImportService {
     const studyPlanResolution = this.resolveStudyPlan(
       row.study_plan_code_raw,
       programResolution.target_id,
+      row.course_code_raw,
+      row.cycle_raw,
+      aliasContext,
       catalog,
       issues,
     );
@@ -1610,6 +1777,8 @@ export class PlanningImportService {
       row.course_code_raw,
       row.course_name_raw,
       studyPlanResolution.target_id,
+      row.cycle_raw,
+      aliasContext,
       catalog,
       issues,
     );
@@ -1730,7 +1899,39 @@ export class PlanningImportService {
         campus: campusResolution,
         faculty_code: facultyResolution,
         academic_program_code: programResolution,
-        study_plan_code: studyPlanResolution,
+        study_plan_code: {
+          ...studyPlanResolution,
+          source_value: buildAliasSourceValue('study_plan_code', row.study_plan_code_raw, aliasContext),
+          dependent_academic_programs: [
+            {
+              source_value: row.academic_program_code_raw,
+              target_id: programResolution.target_id,
+              target_label: programResolution.target_label,
+              match_source: programResolution.match_source,
+            },
+          ],
+        },
+        course_code: {
+          ...courseResolution,
+          source_value: buildAliasSourceValue('course_code', row.course_code_raw, aliasContext),
+          dependent_academic_programs: [
+            {
+              source_value: row.academic_program_code_raw,
+              target_id: programResolution.target_id,
+              target_label: programResolution.target_label,
+              match_source: programResolution.match_source,
+            },
+          ],
+          dependent_study_plans: [
+            {
+              source_value: row.study_plan_code_raw,
+              target_id: studyPlanResolution.target_id,
+              target_label: studyPlanResolution.target_label,
+              match_source: studyPlanResolution.match_source,
+            },
+          ],
+          dependent_cycles: row.cycle_raw ? [row.cycle_raw] : [],
+        },
         course_modality: modalityResolution,
         shift: shiftResolution,
         building: buildingResolution,
@@ -1944,17 +2145,61 @@ export class PlanningImportService {
     return toResolution(value, program?.id ?? null, program?.name ?? null, program ? 'catalog' : 'none');
   }
 
+  private findStudyPlansByCourseCode(
+    courseCode: string,
+    academicProgramId: string | null,
+    cycle: number | null,
+    catalog: ImportCatalog,
+  ) {
+    const normalizedCourseCode = normalizeCourseCodeValue(courseCode);
+    if (!normalizedCourseCode || !cycle) {
+      return [];
+    }
+
+    const planCandidates = catalog.studyPlanCourses
+      .map((item) => {
+        const plan = catalog.studyPlanById.get(item.study_plan_id) ?? null;
+        if (!plan) {
+          return null;
+        }
+        if (academicProgramId && plan.academic_program_id !== academicProgramId) {
+          return null;
+        }
+        const detail = catalog.studyPlanCourseDetailById.get(item.id) ?? null;
+        const resolvedCycle = detail?.academic_year ?? extractCycleFromStudyPlanCourse(item) ?? null;
+        if (resolvedCycle !== cycle) {
+          return null;
+        }
+        const candidateCodes = [detail?.short_code, item.course_code].filter(
+          (candidate): candidate is string => Boolean(candidate),
+        );
+        if (!candidateCodes.some((candidate) => courseCodeLikeMatch(candidate, normalizedCourseCode))) {
+          return null;
+        }
+        return plan;
+      })
+      .filter((item): item is StudyPlanEntity => Boolean(item));
+
+    return uniqueById(planCandidates);
+  }
+
   private resolveStudyPlan(
     value: string,
     academicProgramId: string | null,
+    courseCode: string,
+    cycle: number | null,
+    aliasContext: AliasSourceContext,
     catalog: ImportCatalog,
     issues: PreviewIssue[],
   ) {
-    const alias = resolveAlias(catalog.aliasMap, 'study_plan_code', value);
+    const contextualSourceValue = buildAliasSourceValue('study_plan_code', value, aliasContext);
+    const alias =
+      resolveAlias(catalog.aliasMap, 'study_plan_code', contextualSourceValue) ??
+      resolveAlias(catalog.aliasMap, 'study_plan_code', value);
     if (alias?.target_id) {
       const plan = catalog.studyPlans.find((item) => item.id === alias.target_id) ?? null;
       return toResolution(
-        value,
+        contextualSourceValue || value,
         plan?.id ?? null,
         [plan?.year, plan?.career, plan?.name].filter(Boolean).join(' - ') || alias.target_label || null,
         plan ? 'alias' : 'none',
@@ -1973,51 +2218,116 @@ export class PlanningImportService {
       return year === normalized || year.endsWith(`-${normalized}`);
     });
     const unique = uniqueById(candidates);
+    if (unique.length === 1) {
+      const plan = unique[0];
+      return toResolution(
+        contextualSourceValue || value,
+        plan.id,
+        [plan.year, plan.career, plan.name].filter(Boolean).join(' - ') || null,
+        'catalog',
+        { year: plan.year ?? null },
+      );
+    }
+
+    const inferredPlans = this.findStudyPlansByCourseCode(courseCode, academicProgramId, cycle, catalog);
+    if (inferredPlans.length === 1) {
+      const plan = inferredPlans[0];
+      return toResolution(
+        contextualSourceValue || value || courseCode,
+        plan.id,
+        [plan.year, plan.career, plan.name].filter(Boolean).join(' - ') || null,
+        'heuristic',
+        {
+          year: plan.year ?? null,
+          inferred_by: 'course_code_like',
+          course_code: courseCode || null,
+          cycle: cycle ?? null,
+        },
+      );
+    }
+
     if (unique.length !== 1) {
       issues.push(
         missingCriticalIssue(
           'study_plan_code',
-          value,
+          contextualSourceValue || value,
           unique.length > 1
             ? 'El codigo de plan coincide con mas de un plan de estudios; agrega un mapeo explicito.'
-            : 'No se encontro el plan de estudios del archivo.',
+            : inferredPlans.length > 1
+              ? 'El codigo del curso coincide con mas de un plan de estudios para ese programa y ciclo; agrega o corrige el mapeo del plan.'
+              : 'No se encontro el plan de estudios del archivo.',
         ),
       );
-      return toResolution(value, null, null, 'none');
+      return toResolution(contextualSourceValue || value, null, null, 'none');
     }
-    const plan = unique[0];
-    return toResolution(
-      value,
-      plan.id,
-      [plan.year, plan.career, plan.name].filter(Boolean).join(' - ') || null,
-      'catalog',
-      { year: plan.year ?? null },
-    );
+    return toResolution(contextualSourceValue || value, null, null, 'none');
   }
 
   private resolveStudyPlanCourse(
     courseCode: string,
     courseName: string,
     studyPlanId: string | null,
+    cycle: number | null,
+    aliasContext: AliasSourceContext,
     catalog: ImportCatalog,
     issues: PreviewIssue[],
   ) {
+    const contextualSourceValue = buildAliasSourceValue('course_code', courseCode || courseName, aliasContext);
     if (!studyPlanId) {
-      return toResolution(courseCode || courseName, null, null, 'none');
+      return toResolution(contextualSourceValue || courseCode || courseName, null, null, 'none');
     }
-    const candidates = catalog.studyPlanCourses.filter((item) => item.study_plan_id === studyPlanId);
-    const normalizedCourseCode = normalizeLoose(courseCode);
+    if (!cycle) {
+      return toResolution(contextualSourceValue || courseCode || courseName, null, null, 'none');
+    }
+    const candidates = catalog.studyPlanCourses
+      .filter((item) => item.study_plan_id === studyPlanId)
+      .map((item) => {
+        const detail = catalog.studyPlanCourseDetailById.get(item.id) ?? null;
+        const resolvedCycle = detail?.academic_year ?? extractCycleFromStudyPlanCourse(item) ?? null;
+        if (resolvedCycle !== cycle) {
+          return null;
+        }
+        return {
+          course: item,
+          detail,
+          resolvedCycle,
+          resolvedCourseCode: detail?.short_code ?? item.course_code ?? null,
+          resolvedCourseName: detail?.name ?? item.course_name ?? null,
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const alias = resolveAlias(catalog.aliasMap, 'course_code', contextualSourceValue);
+    if (alias?.target_id) {
+      const aliased = candidates.find((item) => item.course.id === alias.target_id) ?? null;
+      if (aliased) {
+        return toResolution(
+          contextualSourceValue || courseCode || courseName,
+          aliased.course.id,
+          [aliased.resolvedCourseCode, aliased.resolvedCourseName].filter(Boolean).join(' - ') || alias.target_label || null,
+          'alias',
+          {
+            course_code: aliased.resolvedCourseCode ?? null,
+            course_name: aliased.resolvedCourseName ?? null,
+            cycle: aliased.resolvedCycle,
+          },
+        );
+      }
+    }
+    const normalizedCourseCode = normalizeCourseCodeValue(courseCode);
     if (normalizedCourseCode) {
-      const direct = candidates.filter((item) => normalizeLoose(item.course_code) === normalizedCourseCode);
+      const direct = candidates.filter(
+        (item) => normalizeCourseCodeValue(item.resolvedCourseCode) === normalizedCourseCode,
+      );
       if (direct.length === 1) {
         return toResolution(
-          courseCode || courseName,
-          direct[0].id,
-          [direct[0].course_code, direct[0].course_name].filter(Boolean).join(' - ') || null,
+          contextualSourceValue || courseCode || courseName,
+          direct[0].course.id,
+          [direct[0].resolvedCourseCode, direct[0].resolvedCourseName].filter(Boolean).join(' - ') || null,
           'catalog',
           {
-            course_code: direct[0].course_code ?? null,
-            course_name: direct[0].course_name ?? null,
+            course_code: direct[0].resolvedCourseCode ?? null,
+            course_name: direct[0].resolvedCourseName ?? null,
+            cycle: direct[0].resolvedCycle,
           },
         );
       }
@@ -2025,36 +2335,91 @@ export class PlanningImportService {
         issues.push({
           severity: 'BLOCKING',
           issue_code: 'AMBIGUOUS_STUDY_PLAN_COURSE',
-          field_name: 'CÓDIGO',
-          message: 'El codigo de curso coincide con mas de un curso del plan de estudios.',
+          field_name: 'CODIGO',
+          message: `El codigo de curso coincide con mas de un curso del ciclo ${cycle} en el plan de estudios.`,
+          meta_json: {
+            namespace: 'course_code',
+            source_value: contextualSourceValue || courseCode,
+          },
         });
-        return toResolution(courseCode, null, null, 'none');
+        return toResolution(contextualSourceValue || courseCode, null, null, 'none');
+      }
+
+      const likeMatches = candidates.filter((item) =>
+        courseCodeLikeMatch(item.resolvedCourseCode, normalizedCourseCode),
+      );
+      if (likeMatches.length === 1) {
+        return toResolution(
+          contextualSourceValue || courseCode || courseName,
+          likeMatches[0].course.id,
+          [likeMatches[0].resolvedCourseCode, likeMatches[0].resolvedCourseName]
+            .filter(Boolean)
+            .join(' - ') || null,
+          'heuristic',
+          {
+            course_code: likeMatches[0].resolvedCourseCode ?? null,
+            course_name: likeMatches[0].resolvedCourseName ?? null,
+            cycle: likeMatches[0].resolvedCycle,
+            matched_by: 'course_code_like',
+          },
+        );
+      }
+      if (likeMatches.length > 1) {
+        issues.push({
+          severity: 'BLOCKING',
+          issue_code: 'AMBIGUOUS_STUDY_PLAN_COURSE',
+          field_name: 'CODIGO',
+          message: `El codigo de curso coincide de forma parcial con mas de un curso del ciclo ${cycle} en el plan de estudios.`,
+          meta_json: {
+            namespace: 'course_code',
+            source_value: contextualSourceValue || courseCode,
+          },
+        });
+        return toResolution(contextualSourceValue || courseCode, null, null, 'none');
       }
     }
 
     const normalizedCourseName = normalizeCourseName(courseName);
     const fallback = candidates.filter(
-      (item) => normalizeCourseName(item.course_name) === normalizedCourseName,
+      (item) => normalizeCourseName(item.resolvedCourseName) === normalizedCourseName,
     );
     if (fallback.length === 1) {
       return toResolution(
-        courseCode || courseName,
-        fallback[0].id,
-        [fallback[0].course_code, fallback[0].course_name].filter(Boolean).join(' - ') || null,
+        contextualSourceValue || courseCode || courseName,
+        fallback[0].course.id,
+        [fallback[0].resolvedCourseCode, fallback[0].resolvedCourseName].filter(Boolean).join(' - ') || null,
         'catalog',
         {
-          course_code: fallback[0].course_code ?? null,
-          course_name: fallback[0].course_name ?? null,
+          course_code: fallback[0].resolvedCourseCode ?? null,
+          course_name: fallback[0].resolvedCourseName ?? null,
+          cycle: fallback[0].resolvedCycle,
         },
       );
+    }
+    if (fallback.length > 1) {
+      issues.push({
+        severity: 'BLOCKING',
+        issue_code: 'AMBIGUOUS_STUDY_PLAN_COURSE',
+        field_name: 'NOMBRE DE CURSO',
+        message: `El nombre del curso coincide con mas de un curso del ciclo ${cycle} en el plan de estudios.`,
+        meta_json: {
+          namespace: 'course_code',
+          source_value: contextualSourceValue || courseCode || courseName,
+        },
+      });
+      return toResolution(contextualSourceValue || courseCode || courseName, null, null, 'none');
     }
     issues.push({
       severity: 'BLOCKING',
       issue_code: 'MISSING_STUDY_PLAN_COURSE',
-      field_name: 'CÓDIGO',
-      message: 'No se encontro el curso dentro del plan de estudios.',
+      field_name: 'CODIGO',
+      message: `No se encontro el curso dentro del ciclo ${cycle} del plan de estudios.`,
+      meta_json: {
+        namespace: 'course_code',
+        source_value: contextualSourceValue || courseCode || courseName,
+      },
     });
-    return toResolution(courseCode || courseName, null, null, 'none');
+    return toResolution(contextualSourceValue || courseCode || courseName, null, null, 'none');
   }
 
   private resolveTeacher(
@@ -2357,8 +2722,12 @@ export class PlanningImportService {
       faculties,
       programs,
       studyPlans,
+      studyPlanById: new Map(studyPlans.map((item) => [item.id, item] as const)),
       studyPlanCourses,
       studyPlanCourseDetails,
+      studyPlanCourseDetailById: new Map(
+        studyPlanCourseDetails.map((item) => [item.study_plan_course_id, item] as const),
+      ),
       teachers,
       courseModalities,
       studyTypes,
@@ -2497,6 +2866,7 @@ function normalizeAliasNamespace(value: string | null | undefined): AliasNamespa
     normalized === 'FACULTY_CODE' ||
     normalized === 'ACADEMIC_PROGRAM_CODE' ||
     normalized === 'STUDY_PLAN_CODE' ||
+    normalized === 'COURSE_CODE' ||
     normalized === 'COURSE_MODALITY' ||
     normalized === 'SHIFT' ||
     normalized === 'BUILDING' ||
@@ -2624,6 +2994,65 @@ function normalizeCourseName(value: string | null | undefined) {
   }
   const parts = raw.split(/\s-\s/);
   return normalizeLoose(parts.length > 1 ? parts.slice(1).join(' - ') : raw);
+}
+
+function extractCycleFromStudyPlanCourse(course: Pick<StudyPlanCourseEntity, 'year_label'>) {
+  const rawLabel = `${course.year_label ?? ''}`.trim();
+  if (!rawLabel) {
+    return null;
+  }
+  const match = rawLabel.match(/(\d+)/);
+  return match ? Number(match[1]) : null;
+}
+
+function normalizeCourseCodeValue(value: string | null | undefined) {
+  return normalizeLoose(value).replace(/[^0-9A-Z]/g, '');
+}
+
+function courseCodeLikeMatch(candidateCode: string | null | undefined, normalizedCourseCode: string) {
+  const normalizedCandidate = normalizeCourseCodeValue(candidateCode);
+  if (!normalizedCandidate || !normalizedCourseCode) {
+    return false;
+  }
+  return (
+    normalizedCandidate === normalizedCourseCode ||
+    normalizedCandidate.includes(normalizedCourseCode) ||
+    normalizedCourseCode.includes(normalizedCandidate)
+  );
+}
+
+function buildAliasSourceValue(
+  namespace: AliasNamespace,
+  sourceValue: string | null | undefined,
+  context?: AliasSourceContext | null,
+) {
+  const normalizedSource = normalizeSourceValue(sourceValue);
+  if (!normalizedSource) {
+    return '';
+  }
+  const program = normalizeSourceValue(context?.academic_program_code_raw);
+  const studyPlan = normalizeSourceValue(context?.study_plan_code_raw);
+  const cycle = Number(context?.cycle_raw ?? 0) > 0 ? String(Number(context?.cycle_raw)) : '';
+
+  if (namespace === 'study_plan_code') {
+    return program ? `${program} | ${normalizedSource}` : normalizedSource;
+  }
+  if (namespace === 'course_code') {
+    return [program, studyPlan, cycle ? `CICLO ${cycle}` : '', normalizedSource].filter(Boolean).join(' | ');
+  }
+  return normalizedSource;
+}
+
+function requiresMappingConfirmation(namespace: string, targetId: string | null, matchSource: string | null) {
+  if (!targetId) {
+    return false;
+  }
+  if (String(matchSource ?? '').toLowerCase() === 'alias') {
+    return false;
+  }
+  return ['faculty_code', 'academic_program_code', 'study_plan_code', 'course_code'].includes(
+    String(namespace ?? '').trim().toLowerCase(),
+  );
 }
 
 function normalizeStudyPlanCode(value: string | null | undefined) {

@@ -1,0 +1,28 @@
+services:
+  mysql:
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: uai_planning
+    ports:
+      - '127.0.0.1:${MYSQL_HOST_PORT:-3307}:3306'
+
+  backend:
+    env_file:
+      - ./backend/.env
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: uai_planning
+      DB_SYNCHRONIZE: 'true'
+      PORT: 3000
+      CORS_ORIGINS: http://localhost:4200,http://127.0.0.1:4200
+    ports:
+      - '3000:3000'
+
+  frontend:
+    environment:
+      UAI_API_BASE_URL: /api
+    ports:
+      - '4200:80'

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { finalize, forkJoin } from 'rxjs';
@@ -23,6 +23,18 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
   search = '';
   aliases: any[] = [];
   catalog: any = {};
+  readonly namespaceLabels: Record<string, string> = {
+    campus: 'Sede o local',
+    faculty_code: 'Facultad',
+    academic_program_code: 'Programa academico',
+    study_plan_code: 'Plan de estudios',
+    course_code: 'Curso',
+    course_modality: 'Modalidad del curso',
+    shift: 'Turno',
+    building: 'Pabellon o edificio',
+    classroom: 'Aula',
+    laboratory: 'Laboratorio',
+  };
 
   editingId = '';
   private routeSubscription: Subscription | null = null;
@@ -40,6 +52,7 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
     private readonly api: ApiService,
     private readonly route: ActivatedRoute,
     private readonly router: Router,
+    private readonly cdr: ChangeDetectorRef,
   ) {}
 
   ngOnInit(): void {
@@ -68,6 +81,8 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
         return this.catalog.academic_programs ?? [];
       case 'study_plan_code':
         return this.catalog.study_plans ?? [];
+      case 'course_code':
+        return this.catalog.course_targets ?? [];
       case 'course_modality':
         return this.catalog.course_modalities ?? [];
       case 'shift':
@@ -82,6 +97,10 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  namespaceLabel(namespace: string) {
+    return this.namespaceLabels[String(namespace ?? '').trim()] ?? this.humanizeCode(namespace);
+  }
+
   loadBootstrap() {
     this.loading = true;
     this.error = '';
@@ -92,7 +111,12 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
         search: this.search,
       }),
     })
-      .pipe(finalize(() => (this.loading = false)))
+      .pipe(
+        finalize(() => {
+          this.loading = false;
+          this.cdr.detectChanges();
+        }),
+      )
       .subscribe({
         next: ({ catalog, aliases }) => {
           this.bootstrapLoaded = true;
@@ -102,9 +126,11 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
             this.route.snapshot.queryParamMap.get('namespace') ?? '',
             this.route.snapshot.queryParamMap.get('source_value') ?? '',
           );
+          this.cdr.detectChanges();
         },
         error: (err) => {
           this.error = err?.error?.message ?? 'No se pudo cargar la pantalla de mapeos.';
+          this.cdr.detectChanges();
         },
       });
   }
@@ -116,13 +142,20 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
         namespace: this.namespaceFilter,
         search: this.search,
       })
-      .pipe(finalize(() => (this.loading = false)))
+      .pipe(
+        finalize(() => {
+          this.loading = false;
+          this.cdr.detectChanges();
+        }),
+      )
       .subscribe({
         next: (aliases) => {
           this.aliases = aliases ?? [];
+          this.cdr.detectChanges();
         },
         error: (err) => {
-          this.error = err?.error?.message ?? 'No se pudieron cargar los alias.';
+          this.error = err?.error?.message ?? 'No se pudieron cargar los mapeos.';
+          this.cdr.detectChanges();
         },
       });
   }
@@ -142,6 +175,7 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
   save() {
     this.saving = true;
     this.error = '';
+    this.message = '';
     const request$ = this.editingId
       ? this.api.updatePlanningImportAlias(this.editingId, {
           target_id: this.form.target_id,
@@ -159,15 +193,25 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
         });
 
     request$
-      .pipe(finalize(() => (this.saving = false)))
+      .pipe(
+        finalize(() => {
+          this.saving = false;
+          this.cdr.detectChanges();
+        }),
+      )
       .subscribe({
-        next: () => {
-          this.message = this.editingId ? 'Alias actualizado.' : 'Alias creado.';
+        next: (saved) => {
+          this.upsertAlias(saved);
+          this.message = this.editingId
+            ? 'Mapeo actualizado correctamente.'
+            : 'Mapeo creado correctamente.';
           this.resetForm();
           this.reloadAliases();
+          this.cdr.detectChanges();
         },
         error: (err) => {
-          this.error = err?.error?.message ?? 'No se pudo guardar el alias.';
+          this.error = err?.error?.message ?? 'No se pudo guardar el mapeo.';
+          this.cdr.detectChanges();
         },
       });
   }
@@ -215,5 +259,30 @@ export class PlanningImportMappingsPageComponent implements OnInit, OnDestroy {
       is_active: true,
       notes: '',
     };
+  }
+
+  private upsertAlias(saved: any) {
+    const savedId = String(saved?.id ?? '').trim();
+    if (!savedId) {
+      return;
+    }
+    const existingIndex = this.aliases.findIndex((item) => String(item?.id ?? '').trim() === savedId);
+    if (existingIndex >= 0) {
+      this.aliases[existingIndex] = {
+        ...this.aliases[existingIndex],
+        ...saved,
+      };
+      this.aliases = [...this.aliases];
+      return;
+    }
+    this.aliases = [saved, ...this.aliases];
+  }
+
+  private humanizeCode(value: string) {
+    return String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 }

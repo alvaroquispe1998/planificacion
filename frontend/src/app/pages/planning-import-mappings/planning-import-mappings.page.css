@@ -68,6 +68,12 @@
   color: #61758c;
 }
 
+.helper-copy {
+  margin: 0;
+  color: #61758c;
+  line-height: 1.45;
+}
+
 select,
 input,
 textarea {
