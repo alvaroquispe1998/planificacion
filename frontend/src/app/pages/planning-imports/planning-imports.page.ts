@@ -29,6 +29,9 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   aliasMessage = '';
   aliasModalMode: 'create' | 'edit' = 'create';
   aliasEditingId = '';
+  aliasTargetQuery = '';
+  showAliasTargetOptions = false;
+  aliasContext: any = null;
 
   selectedFile: File | null = null;
   batch: any = null;
@@ -43,6 +46,27 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     target_label: '',
     is_active: true,
     notes: '',
+  };
+  readonly optionalFieldLabels = [
+    'docente',
+    'turno',
+    'modalidad',
+    'pabellon o edificio',
+    'aula',
+    'laboratorio',
+    'horario',
+  ];
+  readonly namespaceLabels: Record<string, string> = {
+    campus: 'Sede o local',
+    faculty_code: 'Facultad',
+    academic_program_code: 'Programa academico',
+    study_plan_code: 'Plan de estudios',
+    course_code: 'Curso',
+    course_modality: 'Modalidad del curso',
+    shift: 'Turno',
+    building: 'Pabellon o edificio',
+    classroom: 'Aula',
+    laboratory: 'Laboratorio',
   };
   private batchPollingTimer: ReturnType<typeof setInterval> | null = null;
   private routeSubscription: Subscription | null = null;
@@ -98,7 +122,9 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       case 'academic_program_code':
         return this.aliasCatalog.academic_programs ?? [];
       case 'study_plan_code':
-        return this.aliasCatalog.study_plans ?? [];
+        return this.filteredStudyPlanTargets();
+      case 'course_code':
+        return this.filteredCourseTargets();
       case 'course_modality':
         return this.aliasCatalog.course_modalities ?? [];
       case 'shift':
@@ -111,6 +137,70 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       default:
         return [];
     }
+  }
+
+  get filteredAliasTargets() {
+    const query = this.normalizeLoose(this.aliasTargetQuery);
+    if (!query) {
+      return this.aliasAvailableTargets;
+    }
+    return this.aliasAvailableTargets.filter((item: any) =>
+      this.normalizeLoose(item?.label).includes(query),
+    );
+  }
+
+  get dependentAcademicPrograms() {
+    return Array.isArray(this.aliasContext?.dependent_academic_programs)
+      ? this.aliasContext.dependent_academic_programs
+      : [];
+  }
+
+  get hasResolvedDependentAcademicProgram() {
+    return this.dependentAcademicPrograms.some((item: any) => Boolean(item?.target_id));
+  }
+
+  get aliasTargetHelperText() {
+    if (this.aliasForm.namespace !== 'study_plan_code') {
+      if (this.aliasForm.namespace !== 'course_code') {
+        return '';
+      }
+      const dependentStudyPlans = Array.isArray(this.aliasContext?.dependent_study_plans)
+        ? this.aliasContext.dependent_study_plans
+        : [];
+      const resolvedStudyPlans = dependentStudyPlans.filter((item: any) => Boolean(item?.target_id));
+      const cycles = Array.isArray(this.aliasContext?.dependent_cycles)
+        ? this.aliasContext.dependent_cycles.filter(Boolean)
+        : [];
+      if (!resolvedStudyPlans.length) {
+        return 'Primero confirma el plan de estudios relacionado para poder elegir el curso correcto.';
+      }
+      return `Mostrando cursos del plan ${resolvedStudyPlans
+        .map((item: any) => item?.target_label || item?.source_value)
+        .filter(Boolean)
+        .join(', ')}${cycles.length ? ` en ciclo ${cycles.join(', ')}` : ''}.`;
+    }
+    const dependentPrograms = this.dependentAcademicPrograms;
+    if (!dependentPrograms.length) {
+      return '';
+    }
+    const resolvedPrograms = dependentPrograms.filter((item: any) => Boolean(item?.target_id));
+    if (!resolvedPrograms.length) {
+      const pending = dependentPrograms
+        .map((item: any) => String(item?.source_value ?? '').trim())
+        .filter(Boolean)
+        .join(', ');
+      return pending
+        ? `Primero mapea el programa academico relacionado: ${pending}.`
+        : 'Primero mapea el programa academico relacionado.';
+    }
+    return `Mostrando planes del programa: ${resolvedPrograms
+      .map((item: any) => item?.target_label || item?.source_value)
+      .filter(Boolean)
+      .join(', ')}.`;
+  }
+
+  get optionalFieldsSummary() {
+    return this.optionalFieldLabels.join(', ');
   }
 
   onFileChange(event: Event) {
@@ -140,12 +230,12 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         next: (result) => {
           this.applyBatch(result);
           if (result?.status === 'PREVIEW_PROCESSING') {
-            this.message = 'Preview en proceso. La pantalla se actualizara automaticamente.';
+            this.message = 'La revision previa esta en proceso. La pantalla se actualizara automaticamente.';
             this.startBatchPolling(result.id);
             return;
           }
           this.completeUploadProgress();
-          this.message = 'Preview generado correctamente.';
+          this.message = 'Revision previa generada correctamente.';
         },
         error: (err) => {
           this.stopBatchPolling();
@@ -177,7 +267,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         next: (result) => {
           this.applyBatch(result);
           if (result?.status === 'PREVIEW_READY') {
-            this.message = this.message || 'Preview generado correctamente.';
+            this.message = this.message || 'Revision previa generada correctamente.';
           }
           if (result?.status === 'PREVIEW_FAILED') {
             this.error = result?.error_message ?? 'No se pudo generar el preview del archivo.';
@@ -207,7 +297,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (result) => {
           this.applyBatch(result);
-          this.message = 'Decisiones por scope actualizadas.';
+          this.message = 'Decisiones por grupo guardadas correctamente.';
         },
         error: (err) => {
           this.error = err?.error?.message ?? 'No se pudieron guardar las decisiones.';
@@ -256,20 +346,111 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     this.aliasEditingId = '';
     this.aliasError = '';
     this.aliasMessage = '';
+    this.aliasTargetQuery = '';
+    this.showAliasTargetOptions = false;
+    this.aliasContext = null;
   }
 
   onAliasNamespaceChange() {
     this.aliasForm.target_id = '';
     this.aliasForm.target_label = '';
+    this.aliasTargetQuery = '';
+    this.showAliasTargetOptions = false;
   }
 
   onAliasTargetChange() {
     const selected = this.aliasAvailableTargets.find((item: any) => item.id === this.aliasForm.target_id);
     this.aliasForm.target_label = selected?.label ?? this.aliasForm.target_id;
+    this.aliasTargetQuery = selected?.label ?? '';
+  }
+
+  onAliasTargetQueryChange(value: string) {
+    this.aliasTargetQuery = value;
+    this.aliasForm.target_id = '';
+    this.aliasForm.target_label = value;
+    this.showAliasTargetOptions = true;
+  }
+
+  onAliasTargetFocus() {
+    this.showAliasTargetOptions = true;
+  }
+
+  onAliasTargetBlur() {
+    setTimeout(() => {
+      this.showAliasTargetOptions = false;
+      const selected = this.aliasAvailableTargets.find((item: any) => item.id === this.aliasForm.target_id);
+      if (selected) {
+        this.aliasTargetQuery = selected.label;
+        this.aliasForm.target_label = selected.label;
+        this.cdr.detectChanges();
+      }
+    }, 120);
+  }
+
+  selectAliasTarget(target: any | null) {
+    this.aliasForm.target_id = target?.id ?? '';
+    this.aliasForm.target_label = target?.label ?? '';
+    this.aliasTargetQuery = target?.label ?? '';
+    this.showAliasTargetOptions = false;
   }
 
   getMappingActionLabel(item: any) {
-    return this.findExistingAlias(item?.namespace, item?.source_value) ? 'Modificar mapeo' : 'Agregar mapeo';
+    if (this.findExistingAlias(item?.namespace, item?.source_value)) {
+      return 'Modificar mapeo';
+    }
+    if (item?.target_id) {
+      return 'Confirmar mapeo';
+    }
+    return 'Agregar mapeo';
+  }
+
+  get hasPendingMappings() {
+    const items = Array.isArray(this.batch?.unresolved_mappings) ? this.batch.unresolved_mappings : [];
+    return items.some(
+      (item: any) => Boolean(item?.requires_confirmation) || Number(item?.blocking_count ?? 0) > 0,
+    );
+  }
+
+  namespaceLabel(namespace: string) {
+    return this.namespaceLabels[String(namespace ?? '').trim()] ?? this.humanizeCode(namespace);
+  }
+
+  countsLabel(counts: any) {
+    return [
+      `${Number(counts?.plan_rules ?? 0)} planes`,
+      `${Number(counts?.offers ?? 0)} ofertas`,
+      `${Number(counts?.sections ?? 0)} secciones`,
+      `${Number(counts?.subsections ?? 0)} subsecciones`,
+      `${Number(counts?.schedules ?? 0)} horarios`,
+    ].join(' | ');
+  }
+
+  severityLabel(severity: string) {
+    switch (String(severity ?? '').toUpperCase()) {
+      case 'BLOCKING':
+        return 'No se guardara';
+      case 'WARNING':
+        return 'Se guardara con observaciones';
+      case 'INFO':
+        return 'Informativo';
+      default:
+        return severity || 'Observacion';
+    }
+  }
+
+  issueTitle(issueCode: string) {
+    return this.issueMeta(issueCode).title;
+  }
+
+  issueDescription(issueCode: string) {
+    return this.issueMeta(issueCode).description;
+  }
+
+  topBlockingReasons(limit = 3) {
+    const items = Array.isArray(this.batch?.issue_summary) ? this.batch.issue_summary : [];
+    return items
+      .filter((item: any) => String(item?.severity ?? '').toUpperCase() === 'BLOCKING')
+      .slice(0, limit);
   }
 
   saveAliasMapping() {
@@ -302,10 +483,10 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         next: (saved) => {
           this.upsertAliasMapping(saved);
           this.aliasMessage = this.aliasEditingId
-            ? 'Alias actualizado correctamente.'
-            : 'Alias creado correctamente.';
+            ? 'Mapeo actualizado correctamente.'
+            : 'Mapeo creado correctamente.';
           this.message =
-            'Alias guardado. El preview actual se mantiene; cuando quieras, genera nuevamente el preview para recalcular.';
+            'Mapeo guardado. Esta revision previa se mantiene; cuando quieras, genera nuevamente el preview para recalcular.';
           this.closeAliasModal();
           this.cdr.detectChanges();
         },
@@ -351,6 +532,45 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     };
   }
 
+  scopeLabelDisplay(scopeDecision: any) {
+    const scope = scopeDecision?.scope ?? {};
+    return [
+      scope?.semester_name,
+      scope?.campus_name,
+      scope?.faculty_name,
+      scope?.academic_program_name,
+      scope?.study_plan_year,
+      scope?.cycle ? `Ciclo ${scope.cycle}` : null,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+  }
+
+  existingSummaryLabelDisplay(scopeDecision: any) {
+    const existing = scopeDecision?.existing_summary ?? {};
+    if (!existing?.has_existing_data) {
+      return 'No hay informacion previa en este grupo.';
+    }
+    return [
+      `${existing.plan_rule_count ?? 0} planes`,
+      `${existing.offer_count ?? 0} ofertas`,
+      `${existing.section_count ?? 0} secciones`,
+      `${existing.subsection_count ?? 0} subsecciones`,
+      `${existing.schedule_count ?? 0} horarios`,
+    ].join(' | ');
+  }
+
+  decisionLabel(decision: string) {
+    switch (decision) {
+      case 'REPLACE_SCOPE':
+        return 'Borrar lo actual y cargar lo nuevo';
+      case 'SKIP_SCOPE':
+        return 'Mantener lo actual y no cargar este grupo';
+      default:
+        return 'Elige que hacer con este grupo';
+    }
+  }
+
   private applyBatch(result: any) {
     const previousStatus = this.batch?.status ?? '';
     this.batch = result;
@@ -366,7 +586,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     }
     if (previousStatus === 'PREVIEW_PROCESSING' && result?.status === 'PREVIEW_READY') {
       this.completeUploadProgress();
-      this.message = 'Preview generado correctamente.';
+      this.message = 'Revision previa generada correctamente.';
     }
     if (previousStatus === 'PREVIEW_PROCESSING' && result?.status === 'PREVIEW_FAILED') {
       this.error = result?.error_message ?? 'No se pudo generar el preview del archivo.';
@@ -394,7 +614,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
 
   private completeUploadProgress() {
     this.uploadProgress = 100;
-    this.uploadStageLabel = 'Preview listo.';
+    this.uploadStageLabel = 'Revision previa lista.';
   }
 
   private startBatchPolling(batchId: string) {
@@ -427,6 +647,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     this.aliasModalOpen = true;
     this.aliasError = '';
     this.aliasMessage = '';
+    this.aliasContext = item ?? null;
     const namespace = String(item?.namespace ?? '').trim();
     const sourceValue = String(item?.source_value ?? '').trim();
     this.setAliasModalForm(namespace, sourceValue);
@@ -462,6 +683,8 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   private setAliasModalForm(namespace: string, sourceValue: string) {
     this.aliasModalMode = 'create';
     this.aliasEditingId = '';
+    this.aliasTargetQuery = '';
+    this.showAliasTargetOptions = false;
     this.aliasForm = {
       namespace,
       source_value: sourceValue,
@@ -479,6 +702,13 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       this.aliasEditingId = '';
       this.aliasForm.namespace = namespace;
       this.aliasForm.source_value = sourceValue;
+      if (this.aliasContext?.target_id) {
+        this.aliasForm.target_id = String(this.aliasContext.target_id ?? '').trim();
+        this.aliasForm.target_label = String(
+          this.aliasContext.target_label ?? this.aliasContext.target_id ?? '',
+        ).trim();
+        this.aliasTargetQuery = this.aliasForm.target_label;
+      }
       return;
     }
     this.aliasModalMode = 'edit';
@@ -491,6 +721,8 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       is_active: existing.is_active !== false,
       notes: String(existing.notes ?? '').trim(),
     };
+    this.aliasTargetQuery = this.aliasForm.target_label;
+    this.showAliasTargetOptions = false;
   }
 
   private findExistingAlias(namespace: string, sourceValue: string) {
@@ -538,5 +770,128 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         this.aliasMappingsLoaded = true;
       },
     });
+  }
+
+  private filteredStudyPlanTargets() {
+    const studyPlans = this.aliasCatalog.study_plans ?? [];
+    if (this.aliasForm.namespace !== 'study_plan_code') {
+      return studyPlans;
+    }
+    const programIds = this.dependentAcademicPrograms
+      .map((item: any) => String(item?.target_id ?? '').trim())
+      .filter(Boolean);
+    if (!programIds.length) {
+      return [];
+    }
+    return studyPlans.filter((item: any) => programIds.includes(String(item?.academic_program_id ?? '').trim()));
+  }
+
+  private filteredCourseTargets() {
+    const courseTargets = this.aliasCatalog.course_targets ?? [];
+    if (this.aliasForm.namespace !== 'course_code') {
+      return courseTargets;
+    }
+    const studyPlanIds = (Array.isArray(this.aliasContext?.dependent_study_plans)
+      ? this.aliasContext.dependent_study_plans
+      : [])
+      .map((item: any) => String(item?.target_id ?? '').trim())
+      .filter(Boolean);
+    const cycles = (Array.isArray(this.aliasContext?.dependent_cycles)
+      ? this.aliasContext.dependent_cycles
+      : [])
+      .map((value: any) => Number(value))
+      .filter((value: number) => Number.isFinite(value) && value > 0);
+    return courseTargets.filter((item: any) => {
+      const matchesPlan =
+        !studyPlanIds.length || studyPlanIds.includes(String(item?.study_plan_id ?? '').trim());
+      const itemCycle = Number(item?.cycle ?? 0);
+      const matchesCycle = !cycles.length || cycles.includes(itemCycle);
+      return matchesPlan && matchesCycle;
+    });
+  }
+
+  private normalizeLoose(value: unknown) {
+    return String(value ?? '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  private issueMeta(issueCode: string) {
+    const normalizedCode = String(issueCode ?? '').trim().toUpperCase();
+    const staticMap: Record<string, { title: string; description: string }> = {
+      INVALID_SECTION: {
+        title: 'La seccion no se pudo interpretar',
+        description: 'Esa fila no se puede cargar porque la seccion del Excel no tiene un formato valido.',
+      },
+      MISSING_CYCLE: {
+        title: 'Falta el ciclo academico',
+        description: 'Sin ciclo no se puede ubicar correctamente la fila dentro del plan.',
+      },
+      MULTIPLE_SCHEDULES_FOR_SUBSECTION: {
+        title: 'La misma subseccion tiene mas de un horario',
+        description: 'Conviene revisar esa fila antes de crear horarios duplicados para una sola subseccion.',
+      },
+      AMBIGUOUS_STUDY_PLAN_COURSE: {
+        title: 'El curso coincide con varias opciones del plan',
+        description: 'Hay mas de una coincidencia posible y el sistema no puede elegir una sola con seguridad.',
+      },
+      MISSING_STUDY_PLAN_COURSE: {
+        title: 'No se encontro el curso dentro del plan de estudios',
+        description: 'Esa fila no se guardara hasta resolver el curso correcto del plan.',
+      },
+      UNMATCHED_TEACHER: {
+        title: 'No se encontro el docente',
+        description: 'La estructura si se puede guardar, pero el docente quedara vacio.',
+      },
+      UNMATCHED_COURSE_MODALITY: {
+        title: 'No se encontro la modalidad',
+        description: 'La estructura si se puede guardar, pero la modalidad quedara vacia.',
+      },
+      UNMATCHED_SHIFT: {
+        title: 'No se encontro el turno',
+        description: 'La estructura si se puede guardar, pero el turno quedara vacio.',
+      },
+      UNMATCHED_BUILDING: {
+        title: 'No se encontro el pabellon o edificio',
+        description: 'La estructura si se puede guardar, pero ese dato fisico quedara vacio.',
+      },
+      UNMATCHED_CLASSROOM: {
+        title: 'No se encontro el aula',
+        description: 'La estructura si se puede guardar, pero el aula quedara vacia.',
+      },
+      UNMATCHED_LABORATORY: {
+        title: 'No se encontro el laboratorio',
+        description: 'La estructura si se puede guardar, pero el laboratorio quedara vacio.',
+      },
+      INVALID_SCHEDULE: {
+        title: 'El horario no es valido',
+        description: 'La estructura si se puede guardar, pero el horario no se creara con esos datos.',
+      },
+    };
+    if (staticMap[normalizedCode]) {
+      return staticMap[normalizedCode];
+    }
+    if (normalizedCode.startsWith('MISSING_')) {
+      const namespace = normalizedCode.replace(/^MISSING_/, '').toLowerCase();
+      const label = this.namespaceLabel(namespace);
+      return {
+        title: `Falta mapear ${label.toLowerCase()}`,
+        description: 'Esa fila no se guardara hasta resolver ese dato obligatorio.',
+      };
+    }
+    return {
+      title: this.humanizeCode(issueCode),
+      description: 'Hay una observacion tecnica que conviene revisar antes de ejecutar la carga.',
+    };
+  }
+
+  private humanizeCode(value: string) {
+    return String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 }

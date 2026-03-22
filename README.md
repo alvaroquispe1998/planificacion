@@ -120,6 +120,59 @@ npm run start
 
 App base: `http://localhost:4200`
 
+El frontend de desarrollo usa proxy local a `/api`, por lo que no deberias apuntarlo manualmente a la API publicada.
+
+## Como correr
+
+### Local sin Docker
+
+1. Copia `backend/.env.dev.example` a `backend/.env`
+2. Levanta MySQL local o con Docker en el puerto `3307`
+3. Inicia backend:
+
+```bash
+cd backend
+npm install
+npm run start:dev
+```
+
+4. Inicia frontend:
+
+```bash
+cd frontend
+npm install
+npm run start
+```
+
+URLs:
+
+- Frontend: `http://localhost:4200`
+- Backend: `http://localhost:3000`
+
+### Local con Docker
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+URLs:
+
+- Frontend: `http://localhost:4200`
+- Backend: `http://localhost:3000`
+- MySQL: `127.0.0.1:3307`
+
+### Produccion / publicada
+
+Hay dos formas validas de trabajar:
+
+- con Docker Compose
+- sin Docker, levantando backend y frontend por separado
+
+El archivo `backend/.env.prod.example` no debe ir comentado completo.
+Debe quedar como plantilla real de produccion, pero con valores neutrales.
+Si publicas sin Docker, cambia `DB_HOST` al host o IP real de tu base.
+Si publicas con Docker Compose y usas MySQL dentro del stack, ahi si puedes usar `DB_HOST=mysql`.
+
 Flujo recomendado:
 
 - 1) `http://localhost:4200/settings` -> Configuracion -> Sincronizacion con Akademic
@@ -127,36 +180,76 @@ Flujo recomendado:
 - 3) Ejecutar sincronizacion de catalogos y secciones
 - 4) Ir a `http://localhost:4200/planning`
 
-## Docker Compose (MySQL + Backend + Seed + Frontend)
+## Docker Compose
+
+### Desarrollo local
 
 ```bash
-docker compose up --build
-
-
-docker compose up -d --force-recreate mysql backend
-
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 Servicios:
 
 - Frontend: `http://localhost:4200`
 - Backend API: `http://localhost:3000`
-- MySQL: `localhost:3307` (por defecto)
+- MySQL: `localhost:3307`
 
-Si ya tienes libre el `3306` y prefieres ese puerto:
+El frontend local habla con el backend por `/api` y el contenedor de frontend lo proxyea hacia `backend:3000`.
+Asi se evita mezclar la API publicada con la local y no deberias volver a tener problemas de CORS por ese motivo.
+
+### Produccion / publicada con Docker
 
 ```bash
-MYSQL_HOST_PORT=3306 docker compose up --build
+copy backend/.env.prod.example backend/.env.prod
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-En PowerShell:
+En esta modalidad:
 
-```powershell
-$env:MYSQL_HOST_PORT=3306; docker compose up --build
+- frontend queda publicado por el puerto configurado en `FRONTEND_HOST_PORT` (por defecto `8080`)
+- backend ya no se expone al host
+- mysql ya no se expone al host
+- el frontend sigue hablando al backend por `/api`
+
+### Produccion / publicada sin Docker
+
+Backend:
+
+1. Copia `backend/.env.prod.example` a `backend/.env`
+2. Completa secretos, credenciales, dominio y conexion real a base de datos
+3. Inicia backend con tu proceso preferido (`node`, `pm2`, servicio del servidor, etc.)
+
+```bash
+cd backend
+npm install
+npm run build
+npm run start:prod
 ```
 
-El contenedor `seed` corre una vez y carga datos de ejemplo para flujo:
-planificacion -> auditoria Zoom -> syllabus.
+Frontend:
+
+1. Compila Angular
+2. Publica el contenido de `frontend/dist/frontend/browser` en tu Nginx, Apache o IIS
+3. Mantiene `runtime-config.js` apuntando a `/api` si frontend y backend quedaran bajo el mismo dominio
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Recomendacion para publicada sin Docker:
+
+- publica frontend y backend bajo el mismo dominio si puedes
+- haz que el servidor web envie `/api` al backend
+- usa `DB_SYNCHRONIZE=false`
+- no uses `SYNC_TLS_ALLOW_INSECURE=true` en produccion
+
+Recomendacion:
+
+- usa `backend/.env` solo para desarrollo local
+- usa `backend/.env.prod` solo para publicada
+- no reutilices el mismo archivo entre ambos entornos
 
 ## Build y pruebas ejecutadas
 

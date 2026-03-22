@@ -310,10 +310,10 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
           this.clearSyncTimer();
           this.isSyncing = false;
           this.syncResult = result;
-          const elapsed = this.formatElapsed(this.syncElapsedSeconds);
+          const queued = Number(result?.queued ?? result?.total_resources ?? 0);
           this.feedback =
-            `Sincronizacion completada en ${elapsed}. ` +
-            `${result.completed ?? 0} exitosos, ${result.failed ?? 0} fallidos.`;
+            `Sincronizacion enviada correctamente. ` +
+            `${queued} recurso(s) quedaron en cola; revisa el historial de jobs para ver el avance.`;
           this.refreshJobs();
           this.cdr.detectChanges();
         });

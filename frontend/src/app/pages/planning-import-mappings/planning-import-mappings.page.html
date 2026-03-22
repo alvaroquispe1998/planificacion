@@ -1,10 +1,10 @@
 <div class="planning-shell">
   <header class="hero">
     <div>
-      <p class="eyebrow">Mapeos persistentes</p>
-      <h1>Mapeos de importacion</h1>
+      <p class="eyebrow">Mapeos guardados</p>
+      <h1>Mapeos para la carga masiva</h1>
       <p class="subtle">
-        Mantén aliases reutilizables para campus, programas, planes, modalidades, turnos y espacios físicos.
+        Aqui defines como debe interpretar el sistema los valores que vienen en tu Excel.
       </p>
     </div>
     <div class="hero-actions">
@@ -21,51 +21,56 @@
     <article class="panel form-panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Alta rapida</p>
-          <h2>{{ editingId ? 'Editar alias' : 'Nuevo alias' }}</h2>
+          <p class="eyebrow">Edicion rapida</p>
+          <h2>{{ editingId ? 'Editar mapeo' : 'Nuevo mapeo' }}</h2>
         </div>
       </div>
 
       <label>
-        <span>Namespace</span>
+        <span>Tipo de dato del Excel</span>
         <select [(ngModel)]="form.namespace" (ngModelChange)="onNamespaceChange()">
-          <option value="">Selecciona un namespace</option>
-          <option *ngFor="let item of catalog.namespaces" [value]="item">{{ item }}</option>
+          <option value="">Selecciona un tipo de dato</option>
+          <option *ngFor="let item of catalog.namespaces" [value]="item">{{ namespaceLabel(item) }}</option>
         </select>
       </label>
 
       <label>
-        <span>Valor origen</span>
+        <span>Valor que viene en el Excel</span>
         <input type="text" [(ngModel)]="form.source_value" placeholder="Ejemplo: EN, FILIAL, HIBRIDO" />
       </label>
 
       <label>
-        <span>Destino</span>
+        <span>Valor real del sistema</span>
         <select [(ngModel)]="form.target_id" (ngModelChange)="onTargetChange()">
-          <option value="">Selecciona un destino</option>
+          <option value="">Selecciona una opcion del sistema</option>
           <option *ngFor="let item of availableTargets" [value]="item.id">{{ item.label }}</option>
         </select>
       </label>
 
       <label>
-        <span>Label destino</span>
-        <input type="text" [(ngModel)]="form.target_label" placeholder="Label visible del destino" />
+        <span>Nombre que se mostrara</span>
+        <input type="text" [(ngModel)]="form.target_label" placeholder="Nombre visible del destino" />
       </label>
 
       <label>
-        <span>Notas</span>
+        <span>Observaciones</span>
         <textarea [(ngModel)]="form.notes" rows="3" placeholder="Comentarios opcionales"></textarea>
       </label>
 
       <label class="checkbox-line">
         <input type="checkbox" [(ngModel)]="form.is_active" />
-        <span>Alias activo</span>
+        <span>Mapeo activo</span>
       </label>
+
+      <p class="helper-copy">
+        Ejemplo: si en el Excel viene <strong>AF</strong>, aqui le dices al sistema que debe usar
+        <strong>Administracion y Finanzas</strong>.
+      </p>
 
       <div class="form-actions">
         <button class="btn btn-secondary btn-sm" type="button" (click)="resetForm()">Limpiar</button>
         <button class="btn btn-primary btn-sm" type="button" (click)="save()" [disabled]="saving">
-          {{ saving ? 'Guardando...' : (editingId ? 'Actualizar alias' : 'Crear alias') }}
+          {{ saving ? 'Guardando...' : (editingId ? 'Guardar cambios' : 'Crear mapeo') }}
         </button>
       </div>
     </article>
@@ -74,24 +79,24 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">Consulta</p>
-          <h2>Aliases registrados</h2>
+          <h2>Mapeos guardados</h2>
         </div>
       </div>
 
       <div class="filters">
         <select [(ngModel)]="namespaceFilter" (ngModelChange)="reloadAliases()">
-          <option value="">Todos los namespaces</option>
-          <option *ngFor="let item of catalog.namespaces" [value]="item">{{ item }}</option>
+          <option value="">Todos los tipos de dato</option>
+          <option *ngFor="let item of catalog.namespaces" [value]="item">{{ namespaceLabel(item) }}</option>
         </select>
-        <input type="text" [(ngModel)]="search" (change)="reloadAliases()" placeholder="Buscar por origen o destino" />
+        <input type="text" [(ngModel)]="search" (ngModelChange)="reloadAliases()" placeholder="Buscar por valor del Excel o destino" />
       </div>
 
       <div class="table-wrap">
         <table class="data-table">
           <thead>
             <tr>
-              <th>Namespace</th>
-              <th>Origen</th>
+              <th>Tipo de dato</th>
+              <th>Valor del Excel</th>
               <th>Destino</th>
               <th>Estado</th>
               <th></th>
@@ -99,7 +104,7 @@
           </thead>
           <tbody>
             <tr *ngFor="let item of aliases">
-              <td>{{ item.namespace }}</td>
+              <td>{{ namespaceLabel(item.namespace) }}</td>
               <td>{{ item.source_value }}</td>
               <td>
                 <strong>{{ item.target_label || item.target_id }}</strong>
@@ -107,7 +112,7 @@
               </td>
               <td>{{ item.is_active ? 'Activo' : 'Inactivo' }}</td>
               <td>
-                <button class="btn btn-secondary btn-sm" type="button" (click)="edit(item)">Editar</button>
+                <button class="btn btn-secondary btn-sm" type="button" (click)="edit(item)">Editar mapeo</button>
               </td>
             </tr>
           </tbody>

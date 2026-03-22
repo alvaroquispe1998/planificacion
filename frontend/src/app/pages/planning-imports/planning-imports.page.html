@@ -2,9 +2,9 @@
   <header class="hero">
     <div>
       <p class="eyebrow">Carga masiva</p>
-      <h1>Preview de importacion</h1>
+      <h1>Revision previa de la carga</h1>
       <p class="subtle">
-        Sube el Excel, revisa cuantos registros entran, corrige mapeos y decide por scope si reemplazas o saltas la data existente.
+        Sube el Excel y revisa, antes de insertar nada, que filas se guardaran, cuales no y cuales entraran con datos incompletos.
       </p>
     </div>
     <div class="hero-actions">
@@ -20,12 +20,12 @@
   <section class="panel upload-panel">
     <div class="upload-copy">
       <strong>Archivo fuente</strong>
-      <span>{{ selectedFile?.name || batch?.file_name || 'Selecciona un Excel para generar el preview' }}</span>
+      <span>{{ selectedFile?.name || batch?.file_name || 'Selecciona un Excel para generar la revision previa' }}</span>
     </div>
     <div class="upload-actions">
       <input type="file" accept=".xlsx,.xls" (change)="onFileChange($event)" />
       <button class="btn btn-primary btn-sm" type="button" (click)="uploadPreview()" [disabled]="isPreviewProcessing">
-        {{ isPreviewProcessing ? 'Procesando...' : 'Generar preview' }}
+        {{ isPreviewProcessing ? 'Procesando...' : 'Generar revision previa' }}
       </button>
     </div>
   </section>
@@ -34,7 +34,7 @@
     <div class="section-head">
       <div>
         <p class="eyebrow">Procesando</p>
-        <h2>{{ uploadStageLabel || 'Generando preview' }}</h2>
+        <h2>{{ uploadStageLabel || 'Generando revision previa' }}</h2>
       </div>
       <strong class="progress-value">{{ uploadProgress }}%</strong>
     </div>
@@ -44,7 +44,7 @@
     </div>
 
     <p class="subtle progress-copy">
-      El preview puede tardar mientras lee el Excel, valida filas y revisa si ya existe data en los scopes detectados.
+      El sistema esta leyendo el Excel, validando filas y revisando si ya existe informacion en los grupos detectados.
     </p>
   </section>
 
@@ -54,62 +54,88 @@
   <ng-container *ngIf="showBatchResults && batch as current">
     <section class="stats-grid">
       <article class="stat-card">
-        <span>Filas</span>
+        <span>Filas leidas</span>
         <strong>{{ current.summary?.total_row_count || 0 }}</strong>
-        <small>{{ current.summary?.importable_row_count || 0 }} importables</small>
+        <small>Total revisado en el Excel</small>
       </article>
       <article class="stat-card">
-        <span>Bloqueadas</span>
+        <span>Filas que si entran</span>
+        <strong>{{ current.summary?.importable_row_count || 0 }}</strong>
+        <small>{{ current.summary?.warning_row_count || 0 }} entran con observaciones</small>
+      </article>
+      <article class="stat-card">
+        <span>Filas que no entran</span>
         <strong>{{ current.summary?.blocked_row_count || 0 }}</strong>
-        <small>{{ current.summary?.warning_row_count || 0 }} con warning</small>
+        <small>No se guardaran hasta corregir lo bloqueante</small>
       </article>
       <article class="stat-card">
-        <span>Opcionales en null</span>
+        <span>Filas con campos vacios</span>
         <strong>{{ current.summary?.optional_null_row_count || 0 }}</strong>
-        <small>Estructura sigue entrando</small>
-      </article>
-      <article class="stat-card">
-        <span>Scopes</span>
-        <strong>{{ current.summary?.detected_scope_count || 0 }}</strong>
-        <small>{{ current.summary?.pending_scope_decision_count || 0 }} pendientes</small>
+        <small>La estructura si se guardara</small>
       </article>
     </section>
 
     <section class="panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Resumen</p>
-          <h2>Estructura estimada</h2>
+          <p class="eyebrow">Resumen claro</p>
+          <h2>Como se tratara este archivo</h2>
+        </div>
+      </div>
+
+      <div class="summary-grid outcome-grid">
+        <article class="summary-card outcome-card success-tone">
+          <span>Si se guardara</span>
+          <strong>{{ countsLabel(current.summary?.effective_create_counts) }}</strong>
+          <small>{{ current.summary?.importable_row_count || 0 }} filas pueden entrar con la configuracion actual.</small>
+        </article>
+
+        <article class="summary-card outcome-card danger-tone">
+          <span>No se guardara</span>
+          <strong>{{ current.summary?.blocked_row_count || 0 }} filas quedaran fuera por ahora</strong>
+          <small *ngIf="topBlockingReasons().length === 0">
+            No hay motivos bloqueantes detectados en este preview.
+          </small>
+          <div *ngIf="topBlockingReasons().length" class="outcome-reasons">
+            <span *ngFor="let item of topBlockingReasons()">
+              {{ issueTitle(item.issue_code) }} ({{ item.count || 0 }} filas)
+            </span>
+          </div>
+        </article>
+
+        <article class="summary-card outcome-card warning-tone">
+          <span>Se guardara con datos vacios</span>
+          <strong>{{ current.summary?.optional_null_row_count || 0 }} filas pueden entrar aunque falten datos</strong>
+          <small>
+            Los campos opcionales que pueden quedar vacios son: {{ optionalFieldsSummary }}.
+          </small>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Estructura</p>
+          <h2>Lo que se creara en la plataforma</h2>
         </div>
         <button
           class="btn btn-primary btn-sm"
           type="button"
           (click)="executeBatch()"
-          [disabled]="executing || hasPendingScopeDecisions || !hasBatch">
+          [disabled]="executing || hasPendingScopeDecisions || hasPendingMappings || !hasBatch">
           {{ executing ? 'Ejecutando...' : 'Ejecutar carga' }}
         </button>
       </div>
 
       <div class="summary-grid">
         <article class="summary-card">
-          <span>Preview completo</span>
-          <strong>
-            {{ current.summary?.create_counts?.plan_rules || 0 }} planes ·
-            {{ current.summary?.create_counts?.offers || 0 }} ofertas ·
-            {{ current.summary?.create_counts?.sections || 0 }} secciones ·
-            {{ current.summary?.create_counts?.subsections || 0 }} subsecciones ·
-            {{ current.summary?.create_counts?.schedules || 0 }} horarios
-          </strong>
+          <span>Si tomaras todo el preview</span>
+          <strong>{{ countsLabel(current.summary?.create_counts) }}</strong>
         </article>
         <article class="summary-card">
-          <span>Aplicando decisiones actuales</span>
-          <strong>
-            {{ current.summary?.effective_create_counts?.plan_rules || 0 }} planes ·
-            {{ current.summary?.effective_create_counts?.offers || 0 }} ofertas ·
-            {{ current.summary?.effective_create_counts?.sections || 0 }} secciones ·
-            {{ current.summary?.effective_create_counts?.subsections || 0 }} subsecciones ·
-            {{ current.summary?.effective_create_counts?.schedules || 0 }} horarios
-          </strong>
+          <span>Segun las decisiones actuales</span>
+          <strong>{{ countsLabel(current.summary?.effective_create_counts) }}</strong>
         </article>
       </div>
     </section>
@@ -117,45 +143,45 @@
     <section class="panel" *ngIf="current.scope_decisions?.length">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Scopes</p>
-          <h2>Tratamiento de data existente</h2>
+          <p class="eyebrow">Grupos detectados</p>
+          <h2>Que hacer con la informacion que ya existe</h2>
         </div>
         <button class="btn btn-secondary btn-sm" type="button" (click)="saveScopeDecisions()" [disabled]="saving">
           {{ saving ? 'Guardando...' : 'Guardar decisiones' }}
         </button>
       </div>
 
+      <p class="subtle scope-help">
+        Cada grupo junta semestre, sede, facultad, programa, plan y ciclo. Aqui eliges si reemplazas lo actual o si lo dejas intacto.
+      </p>
+
       <div class="table-wrap">
         <table class="data-table">
           <thead>
             <tr>
-              <th>Scope</th>
-              <th>Data actual</th>
-              <th>Se creara</th>
+              <th>Grupo</th>
+              <th>Lo que ya existe</th>
+              <th>Lo que se cargaria</th>
               <th>Decision</th>
             </tr>
           </thead>
           <tbody>
             <tr *ngFor="let item of current.scope_decisions">
               <td>
-                <strong>{{ scopeLabel(item) }}</strong>
-                <div class="muted">{{ item.importable_row_count || 0 }} filas · {{ item.warning_row_count || 0 }} warnings</div>
+                <strong>{{ scopeLabelDisplay(item) }}</strong>
+                <div class="muted">
+                  {{ item.importable_row_count || 0 }} filas utiles | {{ item.warning_row_count || 0 }} con observaciones
+                </div>
               </td>
-              <td>{{ existingSummaryLabel(item) }}</td>
-              <td>
-                {{ item.create_counts?.plan_rules || 0 }} planes ·
-                {{ item.create_counts?.offers || 0 }} ofertas ·
-                {{ item.create_counts?.sections || 0 }} secciones ·
-                {{ item.create_counts?.subsections || 0 }} subsecciones ·
-                {{ item.create_counts?.schedules || 0 }} horarios
-              </td>
+              <td>{{ existingSummaryLabelDisplay(item) }}</td>
+              <td>{{ countsLabel(item.create_counts) }}</td>
               <td>
                 <select
                   [(ngModel)]="decisionDraftByScopeKey[item.scope_key]"
                   [ngClass]="decisionClass(decisionDraftByScopeKey[item.scope_key])">
-                  <option value="PENDING">Pendiente</option>
-                  <option value="REPLACE_SCOPE">Reemplazar scope</option>
-                  <option value="SKIP_SCOPE">Saltar scope</option>
+                  <option value="PENDING">{{ decisionLabel('PENDING') }}</option>
+                  <option value="REPLACE_SCOPE">{{ decisionLabel('REPLACE_SCOPE') }}</option>
+                  <option value="SKIP_SCOPE">{{ decisionLabel('SKIP_SCOPE') }}</option>
                 </select>
               </td>
             </tr>
@@ -167,8 +193,8 @@
     <section class="panel" *ngIf="current.unresolved_mappings?.length">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Mapeos faltantes</p>
-          <h2>Valores por resolver</h2>
+          <p class="eyebrow">Pendientes</p>
+          <h2>Valores del Excel que aun debes relacionar o confirmar</h2>
         </div>
       </div>
 
@@ -176,20 +202,24 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th>Namespace</th>
-              <th>Valor origen</th>
+              <th>Dato por resolver</th>
+              <th>Valor que viene en el Excel</th>
               <th>Impacto</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             <tr *ngFor="let item of current.unresolved_mappings">
-              <td>{{ item.namespace }}</td>
+              <td>{{ namespaceLabel(item.namespace) }}</td>
               <td>{{ item.source_value }}</td>
               <td>
-                {{ item.row_count || 0 }} filas ·
-                {{ item.blocking_count || 0 }} bloqueantes ·
-                {{ item.warning_count || 0 }} warnings
+                <ng-container *ngIf="item.requires_confirmation; else missingMappingImpact">
+                  {{ item.row_count || 0 }} filas | el sistema encontro un posible destino y necesitas confirmarlo antes de cargar
+                </ng-container>
+                <ng-template #missingMappingImpact>
+                  {{ item.row_count || 0 }} filas | {{ item.blocking_count || 0 }} no se pueden guardar |
+                  {{ item.warning_count || 0 }} con observaciones
+                </ng-template>
               </td>
               <td>
                 <button class="btn btn-secondary btn-sm" type="button" (click)="openMappings(item)">
@@ -205,15 +235,16 @@
     <section class="panel" *ngIf="current.issue_summary?.length">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Issues</p>
-          <h2>Resumen de validaciones</h2>
+          <p class="eyebrow">Validaciones</p>
+          <h2>Motivos por los que una fila entra, entra con observaciones o no entra</h2>
         </div>
       </div>
 
       <div class="issue-grid">
         <article class="issue-card" *ngFor="let item of current.issue_summary">
-          <span class="pill" [ngClass]="item.severity?.toLowerCase()">{{ item.severity }}</span>
-          <strong>{{ item.issue_code }}</strong>
+          <span class="pill" [ngClass]="item.severity?.toLowerCase()">{{ severityLabel(item.severity) }}</span>
+          <strong>{{ issueTitle(item.issue_code) }}</strong>
+          <small>{{ issueDescription(item.issue_code) }}</small>
           <small>{{ item.count }} filas</small>
         </article>
       </div>
@@ -223,7 +254,7 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">Detalle</p>
-          <h2>Filas con observaciones</h2>
+          <h2>Filas que conviene revisar</h2>
         </div>
       </div>
 
@@ -234,7 +265,7 @@
               <th>Fila</th>
               <th>Curso</th>
               <th>Seccion</th>
-              <th>Issues</th>
+              <th>Observaciones</th>
             </tr>
           </thead>
           <tbody>
@@ -244,11 +275,11 @@
                 <strong>{{ item.course_code || 'Sin codigo' }}</strong>
                 <div class="muted">{{ item.course_name || 'Sin nombre' }}</div>
               </td>
-              <td>{{ item.section || 'Sin seccion' }} → {{ item.import_subsection_code || 'Sin subseccion' }}</td>
+              <td>{{ item.section || 'Sin seccion' }} -> {{ item.import_subsection_code || 'Sin subseccion' }}</td>
               <td>
                 <div class="issue-list">
                   <span *ngFor="let issue of item.issues" class="issue-line">
-                    <strong>{{ issue.severity }}</strong> · {{ issue.message }}
+                    <strong>{{ severityLabel(issue.severity) }}</strong> | {{ issue.message }}
                   </span>
                 </div>
               </td>
@@ -264,7 +295,7 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">Mapeo rapido</p>
-          <h2>{{ aliasModalMode === 'edit' ? 'Modificar mapeo sin salir del preview' : 'Agregar mapeo sin salir del preview' }}</h2>
+          <h2>{{ aliasModalMode === 'edit' ? 'Editar mapeo sin salir del preview' : 'Agregar mapeo sin salir del preview' }}</h2>
         </div>
         <button class="btn btn-secondary btn-sm" type="button" (click)="closeAliasModal()">Cerrar</button>
       </div>
@@ -273,50 +304,70 @@
 
       <div class="modal-grid">
         <label class="field">
-          <span>Namespace</span>
+          <span>Tipo de dato del Excel</span>
           <select
             [(ngModel)]="aliasForm.namespace"
             (ngModelChange)="onAliasNamespaceChange()"
             [disabled]="aliasModalLoading || aliasModalMode === 'edit'">
-            <option value="">Selecciona un namespace</option>
-            <option *ngFor="let item of aliasCatalog.namespaces || []" [value]="item">{{ item }}</option>
+            <option value="">Selecciona un tipo de dato</option>
+            <option *ngFor="let item of aliasCatalog.namespaces || []" [value]="item">{{ namespaceLabel(item) }}</option>
           </select>
         </label>
 
         <label class="field">
-          <span>Valor origen</span>
+          <span>Valor que viene en el Excel</span>
           <input type="text" [(ngModel)]="aliasForm.source_value" [disabled]="aliasModalMode === 'edit'" />
         </label>
 
         <label class="field modal-span-2">
-          <span>Destino</span>
-          <select
-            [(ngModel)]="aliasForm.target_id"
-            (ngModelChange)="onAliasTargetChange()"
-            [disabled]="aliasModalLoading">
-            <option value="">Selecciona un destino</option>
-            <option *ngFor="let item of aliasAvailableTargets" [value]="item.id">{{ item.label }}</option>
-          </select>
+          <span>Valor real del sistema</span>
+          <div class="search-select">
+            <input
+              type="text"
+              [ngModel]="aliasTargetQuery"
+              (ngModelChange)="onAliasTargetQueryChange($event)"
+              (focus)="onAliasTargetFocus()"
+              (blur)="onAliasTargetBlur()"
+              [disabled]="aliasModalLoading"
+              placeholder="Buscar destino" />
+
+            <div *ngIf="showAliasTargetOptions" class="search-select-menu alias-search-menu">
+              <button
+                type="button"
+                class="search-select-option"
+                *ngFor="let item of filteredAliasTargets"
+                (mousedown)="selectAliasTarget(item)">
+                {{ item.label }}
+              </button>
+
+              <div *ngIf="filteredAliasTargets.length === 0" class="search-select-empty">
+                No se encontraron opciones
+              </div>
+            </div>
+          </div>
+          <small *ngIf="aliasTargetHelperText" class="field-helper">
+            {{ aliasTargetHelperText }}
+          </small>
         </label>
 
         <label class="field modal-span-2">
-          <span>Label destino</span>
-          <input type="text" [(ngModel)]="aliasForm.target_label" placeholder="Label visible del destino" />
+          <span>Nombre que se mostrara</span>
+          <input type="text" [(ngModel)]="aliasForm.target_label" placeholder="Nombre visible del destino" />
         </label>
 
         <label class="field modal-span-2">
-          <span>Notas</span>
+          <span>Observaciones</span>
           <textarea [(ngModel)]="aliasForm.notes" rows="3" placeholder="Comentarios opcionales"></textarea>
         </label>
 
         <label class="checkbox-inline modal-span-2">
           <input type="checkbox" [(ngModel)]="aliasForm.is_active" />
-          <span>Alias activo</span>
+          <span>Mapeo activo</span>
         </label>
       </div>
 
       <p class="subtle modal-copy">
-        Guardas el alias aqui mismo y sigues en el preview actual. Cuando quieras, generas nuevamente el preview para recalcular los matches.
+        Guardas el mapeo aqui mismo y sigues en esta revision previa. Cuando quieras aplicar el cambio, genera nuevamente el preview.
       </p>
 
       <div class="modal-actions">
@@ -326,7 +377,7 @@
           type="button"
           (click)="saveAliasMapping()"
           [disabled]="aliasSaving || aliasModalLoading || !aliasForm.namespace || !aliasForm.source_value || !aliasForm.target_id">
-          {{ aliasSaving ? 'Guardando...' : (aliasModalMode === 'edit' ? 'Guardar cambios' : 'Guardar alias') }}
+          {{ aliasSaving ? 'Guardando...' : (aliasModalMode === 'edit' ? 'Guardar cambios' : 'Guardar mapeo') }}
         </button>
       </div>
     </article>

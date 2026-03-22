@@ -1,10 +1,10 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
-import { environment } from '../../environments/environment';
+import { API_BASE_URL } from './api-base';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
-  private readonly baseUrl = environment.apiBaseUrl;
+  private readonly baseUrl = API_BASE_URL;
 
   constructor(private readonly http: HttpClient) { }
 
