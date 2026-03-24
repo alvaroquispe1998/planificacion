@@ -153,7 +153,12 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   }
 
   get aliasSourceValueDisplay() {
-    return String(this.aliasContext?.source_value_display ?? this.aliasForm.source_value ?? '').trim();
+    return this.mappingSourceLabel(
+      this.aliasContext ?? {
+        namespace: this.aliasForm.namespace,
+        source_value: this.aliasForm.source_value,
+      },
+    );
   }
 
   get aliasSourceValueLocked() {
@@ -451,7 +456,23 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   }
 
   mappingSourceLabel(item: any) {
-    return String(item?.source_value_display ?? item?.source_value ?? '').trim();
+    const sourceValueDisplay = String(item?.source_value_display ?? '').trim();
+    if (sourceValueDisplay) {
+      return sourceValueDisplay;
+    }
+
+    const sourceValue = String(item?.source_value ?? '').trim();
+    const namespace = String(item?.namespace ?? '').trim().toLowerCase();
+    if (!sourceValue || (namespace !== 'classroom' && namespace !== 'laboratory')) {
+      return sourceValue;
+    }
+
+    const campusValues = this.mappingDependentSourceValues(item, 'dependent_campuses');
+    if (!campusValues.length) {
+      return sourceValue;
+    }
+
+    return `${sourceValue} | ${campusValues.join(', ')}`;
   }
 
   get importableRowCount() {
@@ -1030,6 +1051,16 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     key: 'dependent_campuses' | 'dependent_buildings',
   ) {
     return Array.isArray(this.aliasContext?.[key]) ? this.aliasContext[key] : [];
+  }
+
+  private mappingDependentSourceValues(
+    item: any,
+    key: 'dependent_campuses',
+  ) {
+    const values = (Array.isArray(item?.[key]) ? item[key] : [])
+      .map((entry: any) => String(entry?.source_value ?? entry?.target_label ?? '').trim())
+      .filter(Boolean);
+    return [...new Set(values)];
   }
 
   private normalizeLoose(value: unknown) {
