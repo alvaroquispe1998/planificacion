@@ -13,10 +13,10 @@
   </header>
 
   <section class="filters-card">
-    <select [(ngModel)]="filters.semester_id" (ngModelChange)="onSemesterChange()" [disabled]="canManageOffers">
-      <option value="">Selecciona semestre</option>
-      <option *ngFor="let semester of catalog.semesters" [value]="semester.id">
-        {{ semester.name }}
+    <select [(ngModel)]="filters.vc_period_id" (ngModelChange)="onVcPeriodChange()" [disabled]="canManageOffers">
+      <option value="">Selecciona periodo VC</option>
+      <option *ngFor="let period of periodOptions" [value]="period.id">
+        {{ period.text || period.label || period.id }}
       </option>
     </select>
     <select [(ngModel)]="filters.campus_id" (ngModelChange)="onCampusChange()" [disabled]="canManageOffers">
@@ -184,7 +184,7 @@
           {{
             hasRequiredContext
               ? 'Selecciona un plan de estudio valido para revisar y guardar los cursos del ciclo.'
-              : 'Selecciona semestre, local, facultad, programa y ciclo para revisar los cursos del ciclo.'
+              : 'Selecciona periodo VC, local, facultad, programa y ciclo para revisar los cursos del ciclo.'
           }}
         </p>
       </div>

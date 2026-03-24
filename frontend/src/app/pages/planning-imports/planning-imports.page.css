@@ -145,6 +145,10 @@
   margin: 0.75rem 0 0;
 }
 
+.execute-help {
+  margin: 0.75rem 0 0;
+}
+
 .table-wrap {
   overflow: auto;
   margin-top: 1rem;
@@ -206,6 +210,11 @@
 .btn-secondary {
   background: #eef4fa;
   color: #12345b;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .flash {

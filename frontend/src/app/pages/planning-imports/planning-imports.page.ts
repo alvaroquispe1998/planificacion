@@ -57,6 +57,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     'horario',
   ];
   readonly namespaceLabels: Record<string, string> = {
+    vc_period: 'Periodo VC',
     campus: 'Sede o local',
     faculty_code: 'Facultad',
     academic_program_code: 'Programa academico',
@@ -115,6 +116,8 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
 
   get aliasAvailableTargets() {
     switch (this.aliasForm.namespace) {
+      case 'vc_period':
+        return this.aliasCatalog.vc_periods ?? [];
       case 'campus':
         return this.aliasCatalog.campuses ?? [];
       case 'faculty_code':
@@ -130,10 +133,10 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       case 'shift':
         return this.aliasCatalog.shift_options ?? [];
       case 'building':
-        return this.aliasCatalog.buildings ?? [];
+        return this.filteredBuildingTargets();
       case 'classroom':
       case 'laboratory':
-        return this.aliasCatalog.classrooms ?? [];
+        return this.filteredClassroomTargets();
       default:
         return [];
     }
@@ -149,6 +152,14 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     );
   }
 
+  get aliasSourceValueDisplay() {
+    return String(this.aliasContext?.source_value_display ?? this.aliasForm.source_value ?? '').trim();
+  }
+
+  get aliasSourceValueLocked() {
+    return this.aliasModalMode === 'edit' || this.aliasSourceValueDisplay !== this.aliasForm.source_value;
+  }
+
   get dependentAcademicPrograms() {
     return Array.isArray(this.aliasContext?.dependent_academic_programs)
       ? this.aliasContext.dependent_academic_programs
@@ -160,6 +171,34 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   }
 
   get aliasTargetHelperText() {
+    if (this.aliasForm.namespace === 'campus') {
+      const detectedCampus = String(
+        this.aliasContext?.target_label ?? this.aliasContext?.target_id ?? '',
+      ).trim();
+      return detectedCampus
+        ? `Confirma si este valor del Excel corresponde a ${detectedCampus}.`
+        : '';
+    }
+    if (this.aliasForm.namespace === 'building') {
+      const campusLabels = this.aliasDependentTargetLabels('dependent_campuses');
+      return campusLabels.length
+        ? `Mostrando pabellones de ${campusLabels.join(', ')}.`
+        : '';
+    }
+    if (this.aliasForm.namespace === 'classroom' || this.aliasForm.namespace === 'laboratory') {
+      const targetLabel = this.aliasForm.namespace === 'laboratory' ? 'laboratorios' : 'aulas';
+      const campusLabels = this.aliasDependentTargetLabels('dependent_campuses');
+      const buildingLabels = this.aliasDependentTargetLabels('dependent_buildings');
+      if (buildingLabels.length) {
+        return `Mostrando ${targetLabel} del pabellon ${buildingLabels.join(', ')}${
+          campusLabels.length ? ` en ${campusLabels.join(', ')}` : ''
+        }.`;
+      }
+      if (campusLabels.length) {
+        return `Mostrando ${targetLabel} de ${campusLabels.join(', ')}.`;
+      }
+      return '';
+    }
     if (this.aliasForm.namespace !== 'study_plan_code') {
       if (this.aliasForm.namespace !== 'course_code') {
         return '';
@@ -309,6 +348,10 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     if (!this.batch?.id) {
       return;
     }
+    if (!this.canExecuteBatch) {
+      this.error = this.executeHelperText;
+      return;
+    }
     this.executing = true;
     this.error = '';
     this.message = '';
@@ -317,8 +360,11 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       .pipe(finalize(() => (this.executing = false)))
       .subscribe({
         next: (result) => {
+          this.executing = false;
           this.applyBatch(result);
-          this.message = 'Carga masiva ejecutada correctamente.';
+          this.message = this.executionReportSummary
+            ? `Carga masiva ejecutada correctamente. ${this.executionReportSummary}.`
+            : 'Carga masiva ejecutada correctamente.';
         },
         error: (err) => {
           this.error = err?.error?.message ?? 'No se pudo ejecutar la carga masiva.';
@@ -404,11 +450,111 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     return 'Agregar mapeo';
   }
 
-  get hasPendingMappings() {
+  mappingSourceLabel(item: any) {
+    return String(item?.source_value_display ?? item?.source_value ?? '').trim();
+  }
+
+  get importableRowCount() {
+    return Number(this.batch?.summary?.importable_row_count ?? this.batch?.importable_row_count ?? 0);
+  }
+
+  get blockedRowCount() {
+    return Number(this.batch?.summary?.blocked_row_count ?? this.batch?.blocked_row_count ?? 0);
+  }
+
+  get warningRowCount() {
+    return Number(this.batch?.summary?.warning_row_count ?? this.batch?.warning_row_count ?? 0);
+  }
+
+  get pendingMappingConfirmationCount() {
     const items = Array.isArray(this.batch?.unresolved_mappings) ? this.batch.unresolved_mappings : [];
-    return items.some(
-      (item: any) => Boolean(item?.requires_confirmation) || Number(item?.blocking_count ?? 0) > 0,
+    return items.filter((item: any) => Boolean(item?.requires_confirmation)).length;
+  }
+
+  get hasPendingMappings() {
+    return this.pendingMappingConfirmationCount > 0;
+  }
+
+  get canExecuteBatch() {
+    return (
+      this.batch?.status === 'PREVIEW_READY' &&
+      this.importableRowCount > 0 &&
+      !this.hasPendingScopeDecisions &&
+      !this.hasPendingMappings
     );
+  }
+
+  get executeButtonDisabled() {
+    return this.executing || !this.canExecuteBatch;
+  }
+
+  get executeButtonLabel() {
+    if (this.executing) {
+      return 'Ejecutando...';
+    }
+    if (this.batch?.status === 'EXECUTED') {
+      return 'Carga aplicada';
+    }
+    return 'Ejecutar carga';
+  }
+
+  get executionReportSummary() {
+    const report = this.batch?.report ?? null;
+    if (!report) {
+      return '';
+    }
+    return [
+      `${Number(report.imported_scope_count ?? 0)} grupos cargados`,
+      `${Number(report.created_plan_rule_count ?? 0)} planes`,
+      `${Number(report.created_offer_count ?? 0)} ofertas`,
+      `${Number(report.created_section_count ?? 0)} secciones`,
+      `${Number(report.created_subsection_count ?? 0)} subsecciones`,
+      `${Number(report.created_schedule_count ?? 0)} horarios`,
+    ].join(' | ');
+  }
+
+  get executeHelperText() {
+    if (!this.hasBatch) {
+      return 'Genera la revision previa para habilitar la carga.';
+    }
+    const status = String(this.batch?.status ?? '').trim();
+    if (status === 'PREVIEW_PROCESSING') {
+      return 'Espera a que termine la revision previa antes de ejecutar la carga.';
+    }
+    if (status === 'PREVIEW_FAILED') {
+      return this.batch?.error_message || 'La revision previa fallo. Genera una nueva antes de ejecutar.';
+    }
+    if (status === 'FAILED') {
+      return (
+        this.batch?.error_message ||
+        this.batch?.report?.error_message ||
+        'La ultima ejecucion fallo. Revisa el batch y vuelve a intentarlo.'
+      );
+    }
+    if (status === 'EXECUTED') {
+      return this.executionReportSummary || 'Esta revision ya fue ejecutada y guardada en la plataforma.';
+    }
+    if (this.importableRowCount <= 0) {
+      return 'No hay filas validas para guardar en la plataforma.';
+    }
+    if (this.hasPendingScopeDecisions) {
+      return 'Primero decide que hacer con los grupos que ya tienen informacion guardada.';
+    }
+    if (this.hasPendingMappings) {
+      return 'Primero confirma los mapeos sugeridos que aparecen en la seccion de pendientes.';
+    }
+    if (this.blockedRowCount > 0) {
+      return `Al ejecutar se guardaran ${this.importableRowCount} filas validas y se omitiran ${this.blockedRowCount} bloqueadas.`;
+    }
+    if (this.warningRowCount > 0) {
+      return `Se guardaran ${this.importableRowCount} filas. ${this.warningRowCount} entraran con observaciones.`;
+    }
+    return `Se guardaran ${this.importableRowCount} filas validas en la planificacion.`;
+  }
+
+  get existingScopeDecisions() {
+    const items = Array.isArray(this.batch?.scope_decisions) ? this.batch.scope_decisions : [];
+    return items.filter((item: any) => this.scopeHasExistingData(item));
   }
 
   namespaceLabel(namespace: string) {
@@ -571,8 +717,15 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  scopeHasExistingData(scopeDecision: any) {
+    return Boolean(scopeDecision?.existing_summary?.has_existing_data);
+  }
+
   private applyBatch(result: any) {
     const previousStatus = this.batch?.status ?? '';
+    if (result?.status === 'EXECUTED' || result?.status === 'FAILED') {
+      this.executing = false;
+    }
     this.batch = result;
     this.syncUploadProgressFromBatch(result);
     this.decisionDraftByScopeKey = {};
@@ -808,6 +961,75 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       const matchesCycle = !cycles.length || cycles.includes(itemCycle);
       return matchesPlan && matchesCycle;
     });
+  }
+
+  private filteredBuildingTargets() {
+    const buildings = this.aliasCatalog.buildings ?? [];
+    if (this.aliasForm.namespace !== 'building') {
+      return buildings;
+    }
+    const campusIds = this.aliasDependentTargetIds('dependent_campuses');
+    if (!campusIds.length) {
+      return buildings;
+    }
+    return buildings.filter((item: any) => campusIds.includes(String(item?.campus_id ?? '').trim()));
+  }
+
+  private filteredClassroomTargets() {
+    const classrooms = this.aliasCatalog.classrooms ?? [];
+    if (this.aliasForm.namespace !== 'classroom' && this.aliasForm.namespace !== 'laboratory') {
+      return classrooms;
+    }
+
+    const campusIds = this.aliasDependentTargetIds('dependent_campuses');
+    const buildingIds = this.aliasDependentTargetIds('dependent_buildings');
+    if (!campusIds.length && !buildingIds.length) {
+      return classrooms;
+    }
+
+    return classrooms.filter((item: any) => {
+      const itemCampusId = String(item?.campus_id ?? '').trim();
+      const itemBuildingId = String(item?.building_id ?? '').trim();
+
+      if (buildingIds.length) {
+        if (itemBuildingId && buildingIds.includes(itemBuildingId)) {
+          return true;
+        }
+        if (campusIds.length && itemCampusId) {
+          return campusIds.includes(itemCampusId);
+        }
+        return false;
+      }
+
+      if (campusIds.length) {
+        return campusIds.includes(itemCampusId);
+      }
+      return true;
+    });
+  }
+
+  private aliasDependentTargetIds(
+    key: 'dependent_campuses' | 'dependent_buildings',
+  ) {
+    const values = this.aliasDependentEntries(key)
+      .map((item: any) => String(item?.target_id ?? '').trim())
+      .filter(Boolean);
+    return [...new Set(values)];
+  }
+
+  private aliasDependentTargetLabels(
+    key: 'dependent_campuses' | 'dependent_buildings',
+  ) {
+    const values = this.aliasDependentEntries(key)
+      .map((item: any) => String(item?.target_label ?? item?.source_value ?? '').trim())
+      .filter(Boolean);
+    return [...new Set(values)];
+  }
+
+  private aliasDependentEntries(
+    key: 'dependent_campuses' | 'dependent_buildings',
+  ) {
+    return Array.isArray(this.aliasContext?.[key]) ? this.aliasContext[key] : [];
   }
 
   private normalizeLoose(value: unknown) {

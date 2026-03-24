@@ -59,6 +59,7 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
   syncTotalCount = 0;
   private syncTimer: ReturnType<typeof setInterval> | null = null;
   private syncPollInterval: ReturnType<typeof setInterval> | null = null;
+  private trackedSyncJobIds = new Set<string>();
 
   constructor(
     private readonly api: ApiService,
@@ -281,6 +282,8 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
       return;
     }
 
+    this.clearSyncTimer();
+    this.trackedSyncJobIds.clear();
     this.isSyncing = true;
     this.syncElapsedSeconds = 0;
     this.syncTotalCount = resources.length;
@@ -307,14 +310,24 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
     this.api.runExternalSync({ mode: this.mode, resources }).subscribe({
       next: (result) => {
         this.zone.run(() => {
-          this.clearSyncTimer();
-          this.isSyncing = false;
           this.syncResult = result;
+          this.trackedSyncJobIds = new Set(
+            Array.isArray(result?.results)
+              ? result.results
+                .map((item: any) => `${item?.job_id ?? ''}`.trim())
+                .filter((jobId: string) => jobId !== '')
+              : [],
+          );
           const queued = Number(result?.queued ?? result?.total_resources ?? 0);
           this.feedback =
             `Sincronizacion enviada correctamente. ` +
-            `${queued} recurso(s) quedaron en cola; revisa el historial de jobs para ver el avance.`;
+            `Monitoreando ${queued} recurso(s) en tiempo real desde el historial de jobs.`;
           this.refreshJobs();
+          setTimeout(() => {
+            this.zone.run(() => {
+              this.refreshJobs();
+            });
+          }, 1500);
           this.cdr.detectChanges();
         });
       },
@@ -335,6 +348,7 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
       next: (jobs) => {
         this.zone.run(() => {
           this.jobs = jobs;
+          this.syncUiStateFromTrackedJobs();
           this.cdr.detectChanges();
         });
       },
@@ -459,6 +473,37 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
       clearInterval(this.syncPollInterval);
       this.syncPollInterval = null;
     }
+  }
+
+  private syncUiStateFromTrackedJobs() {
+    if (!this.isSyncing || this.trackedSyncJobIds.size === 0) {
+      return;
+    }
+
+    const trackedJobs = this.jobs.filter((job) => this.trackedSyncJobIds.has(job.id));
+    const unseenCount = Math.max(0, this.trackedSyncJobIds.size - trackedJobs.length);
+    const pendingCount =
+      unseenCount + trackedJobs.filter((job) => job.status === 'PENDING').length;
+    const runningCount = trackedJobs.filter((job) => job.status === 'RUNNING').length;
+    const doneCount = trackedJobs.filter((job) => job.status === 'DONE').length;
+    const failedCount = trackedJobs.filter((job) => job.status === 'FAILED').length;
+    const finishedCount = doneCount + failedCount;
+
+    if (finishedCount < this.trackedSyncJobIds.size) {
+      this.feedback =
+        `Sincronizacion en progreso. ` +
+        `${pendingCount} pendiente(s), ${runningCount} ejecutando, ` +
+        `${doneCount} completado(s), ${failedCount} con error.`;
+      return;
+    }
+
+    this.clearSyncTimer();
+    this.isSyncing = false;
+    this.feedback =
+      failedCount > 0
+        ? `Sincronizacion finalizada con incidencias. ${doneCount} completado(s), ${failedCount} con error.`
+        : `Sincronizacion finalizada correctamente. ${doneCount} recurso(s) completado(s).`;
+    this.trackedSyncJobIds.clear();
   }
 
   private getRenewalSteps(sourceCode: string) {

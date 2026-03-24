@@ -69,6 +69,7 @@ type PlanningVcLocationCode = (typeof PlanningVcLocationCodeValues)[number];
 
 type CourseCandidateFilters = {
   semester_id?: string;
+  vc_period_id?: string;
   campus_id?: string;
   faculty_id?: string;
   academic_program_id?: string;
@@ -78,6 +79,7 @@ type CourseCandidateFilters = {
 
 type ConfiguredCycleFilters = {
   semester_id?: string;
+  vc_period_id?: string;
   campus_id?: string;
   faculty_id?: string;
   academic_program_id?: string;
@@ -277,6 +279,7 @@ export class PlanningManualService {
       where: {
         is_active: true,
         ...(filters.semester_id ? { semester_id: filters.semester_id } : {}),
+        ...(filters.vc_period_id ? { vc_period_id: filters.vc_period_id } : {}),
         ...(filters.campus_id ? { campus_id: filters.campus_id } : {}),
         ...(filters.faculty_id ? { faculty_id: filters.faculty_id } : {}),
         ...(filters.academic_program_id
@@ -297,6 +300,7 @@ export class PlanningManualService {
     const offers = await this.offersRepo.find({
       where: {
         ...(filters.semester_id ? { semester_id: filters.semester_id } : {}),
+        ...(filters.vc_period_id ? { vc_period_id: filters.vc_period_id } : {}),
         ...(filters.campus_id ? { campus_id: filters.campus_id } : {}),
         ...(filters.faculty_id ? { faculty_id: filters.faculty_id } : {}),
         ...(filters.academic_program_id
@@ -306,6 +310,7 @@ export class PlanningManualService {
       order: { updated_at: 'DESC' },
     });
     const semesterIds = uniqueIds(rules.map((item) => item.semester_id));
+    const vcPeriodIds = uniqueIds(rules.map((item) => item.vc_period_id));
     const programIds = uniqueIds(rules.map((item) => item.academic_program_id));
     const facultyIds = uniqueIds(rules.map((item) => item.faculty_id));
     const studyPlanIds = uniqueIds(rules.map((item) => item.study_plan_id));
@@ -313,8 +318,9 @@ export class PlanningManualService {
       ...offers.map((item) => item.campus_id),
       ...rules.map((item) => item.campus_id),
     ]);
-    const [semesters, programs, faculties, studyPlans, campuses] = await Promise.all([
+    const [semesters, vcPeriods, programs, faculties, studyPlans, campuses] = await Promise.all([
       this.findManyByIds(this.semestersRepo, semesterIds),
+      this.findManyByIds(this.vcPeriodsRepo, vcPeriodIds),
       this.findManyByIds(this.programsRepo, programIds),
       this.findManyByIds(this.facultiesRepo, facultyIds),
       this.findManyByIds(this.studyPlansRepo, studyPlanIds),
@@ -358,6 +364,7 @@ export class PlanningManualService {
       }
       const key = configuredCycleKey({
         semester_id: '',
+        vc_period_id: '',
         campus_id: '',
         academic_program_id: '',
         study_plan_id: course.study_plan_id,
@@ -367,6 +374,7 @@ export class PlanningManualService {
     }
 
     const semesterMap = mapById(semesters);
+    const vcPeriodMap = mapById(vcPeriods);
     const programMap = mapById(programs);
     const facultyMap = mapById(faculties);
     const planMap = mapById(studyPlans);
@@ -375,6 +383,7 @@ export class PlanningManualService {
     for (const offer of offers) {
       const key = configuredCycleKey({
         semester_id: offer.semester_id,
+        vc_period_id: offer.vc_period_id ?? '',
         campus_id: offer.campus_id,
         academic_program_id: offer.academic_program_id ?? '',
         study_plan_id: offer.study_plan_id,
@@ -392,6 +401,7 @@ export class PlanningManualService {
           ? offersByRuleKey.get(
               configuredCycleKey({
                 semester_id: rule.semester_id,
+                vc_period_id: rule.vc_period_id ?? '',
                 campus_id: rule.campus_id,
                 academic_program_id: rule.academic_program_id,
                 study_plan_id: rule.study_plan_id,
@@ -401,6 +411,7 @@ export class PlanningManualService {
           : offers.filter(
               (offer) =>
                 offer.semester_id === rule.semester_id &&
+                (rule.vc_period_id ? offer.vc_period_id === rule.vc_period_id : true) &&
                 offer.academic_program_id === rule.academic_program_id &&
                 offer.study_plan_id === rule.study_plan_id &&
                 offer.cycle === cycle,
@@ -416,6 +427,7 @@ export class PlanningManualService {
           expectedCourseCountByRuleKey.get(
             configuredCycleKey({
               semester_id: '',
+              vc_period_id: '',
               campus_id: '',
               academic_program_id: '',
               study_plan_id: rule.study_plan_id,
@@ -425,6 +437,7 @@ export class PlanningManualService {
         return {
           id: rule.id,
           semester_id: rule.semester_id,
+          vc_period_id: rule.vc_period_id ?? null,
           campus_id: rule.campus_id,
           faculty_id: rule.faculty_id,
           academic_program_id: rule.academic_program_id,
@@ -440,6 +453,7 @@ export class PlanningManualService {
           reviewed_by: rule.reviewed_by,
           review_comment: rule.review_comment,
           semester: semesterMap.get(rule.semester_id) ?? null,
+          vc_period: vcPeriodMap.get(rule.vc_period_id ?? '') ?? null,
           faculty: facultyMap.get(rule.faculty_id ?? '') ?? null,
           academic_program: programMap.get(rule.academic_program_id) ?? null,
           study_plan: planMap.get(rule.study_plan_id) ?? null,
@@ -462,9 +476,12 @@ export class PlanningManualService {
         filters.campus_id ? row.campus_ids.includes(filters.campus_id) : true,
       )
       .sort((left, right) => {
-        const semesterDelta = compareCatalogLabels(left.semester?.name, right.semester?.name);
-        if (semesterDelta !== 0) {
-          return semesterDelta;
+        const vcPeriodDelta = compareCatalogLabels(
+          left.vc_period?.text ?? left.semester?.name,
+          right.vc_period?.text ?? right.semester?.name,
+        );
+        if (vcPeriodDelta !== 0) {
+          return vcPeriodDelta;
         }
 
         const campusDelta = compareCatalogLabels(left.campus_display, right.campus_display);
@@ -492,11 +509,17 @@ export class PlanningManualService {
       });
   }
 
-  async listPlanRules(semesterId?: string, campusId?: string, academicProgramId?: string) {
+  async listPlanRules(
+    semesterId?: string,
+    campusId?: string,
+    academicProgramId?: string,
+    vcPeriodId?: string,
+  ) {
     await this.ensureDefaultCatalogs();
     const rules = await this.planRulesRepo.find({
       where: {
         ...(semesterId ? { semester_id: semesterId } : {}),
+        ...(vcPeriodId ? { vc_period_id: vcPeriodId } : {}),
         ...(campusId ? { campus_id: campusId } : {}),
         ...(academicProgramId ? { academic_program_id: academicProgramId } : {}),
       },
@@ -782,6 +805,7 @@ export class PlanningManualService {
     const selectedStudyPlanId = filters.study_plan_id?.trim() || null;
     const matchedRules = await this.findMatchingRules(
       filters.semester_id,
+      filters.vc_period_id ?? null,
       filters.campus_id,
       filters.academic_program_id,
       cycle,
@@ -846,6 +870,7 @@ export class PlanningManualService {
       ? await this.offersRepo.find({
           where: {
             semester_id: planRule.semester_id,
+            ...(planRule.vc_period_id ? { vc_period_id: planRule.vc_period_id } : {}),
             campus_id: planRule.campus_id ?? undefined,
             academic_program_id: planRule.academic_program_id,
             study_plan_id: planRule.study_plan_id,
@@ -917,6 +942,7 @@ export class PlanningManualService {
     );
     const planRule = await this.findPlanRuleForOfferContext({
       semester_id: dto.semester_id,
+      vc_period_id: dto.vc_period_id ?? null,
       campus_id: dto.campus_id,
       academic_program_id: dto.academic_program_id ?? null,
       study_plan_id: dto.study_plan_id,
@@ -1006,6 +1032,7 @@ export class PlanningManualService {
 
   async listOffers(
     semesterId?: string,
+    vcPeriodId?: string,
     campusId?: string,
     facultyId?: string,
     academicProgramId?: string,
@@ -1015,6 +1042,7 @@ export class PlanningManualService {
     const offers = await this.offersRepo.find({
       where: {
         ...(semesterId ? { semester_id: semesterId } : {}),
+        ...(vcPeriodId ? { vc_period_id: vcPeriodId } : {}),
         ...(campusId ? { campus_id: campusId } : {}),
         ...(facultyId ? { faculty_id: facultyId } : {}),
         ...(academicProgramId ? { academic_program_id: academicProgramId } : {}),
@@ -1031,6 +1059,7 @@ export class PlanningManualService {
     const context = await this.buildContext([offer.id]);
     const planRule = await this.findPlanRuleForOfferContext({
       semester_id: offer.semester_id,
+      vc_period_id: offer.vc_period_id ?? null,
       campus_id: offer.campus_id,
       academic_program_id: offer.academic_program_id ?? null,
       study_plan_id: offer.study_plan_id,
@@ -2309,6 +2338,7 @@ export class PlanningManualService {
   private async ensureNoOverlappingRule(
     candidate: {
       semester_id: string;
+      vc_period_id?: string | null;
       campus_id: string | null;
       academic_program_id: string;
       cycle: number;
@@ -2322,6 +2352,7 @@ export class PlanningManualService {
     const rules = await this.planRulesRepo.find({
       where: {
         semester_id: candidate.semester_id,
+        ...(candidate.vc_period_id ? { vc_period_id: candidate.vc_period_id } : {}),
         ...(candidate.campus_id ? { campus_id: candidate.campus_id } : {}),
         academic_program_id: candidate.academic_program_id,
         cycle: candidate.cycle,
@@ -2419,6 +2450,7 @@ export class PlanningManualService {
 
   private async findMatchingRules(
     semesterId: string,
+    vcPeriodId: string | null,
     campusId: string,
     academicProgramId: string,
     cycle: number,
@@ -2426,6 +2458,7 @@ export class PlanningManualService {
     const rules = await this.planRulesRepo.find({
       where: {
         semester_id: semesterId,
+        ...(vcPeriodId ? { vc_period_id: vcPeriodId } : {}),
         campus_id: campusId,
         academic_program_id: academicProgramId,
         is_active: true,
@@ -2952,6 +2985,7 @@ export class PlanningManualService {
 
   private async findPlanRuleForOfferContext(input: {
     semester_id: string;
+    vc_period_id?: string | null;
     campus_id: string | null;
     academic_program_id: string | null;
     study_plan_id: string;
@@ -2963,6 +2997,7 @@ export class PlanningManualService {
     return this.planRulesRepo.findOne({
       where: {
         semester_id: input.semester_id,
+        ...(input.vc_period_id ? { vc_period_id: input.vc_period_id } : {}),
         campus_id: input.campus_id ?? undefined,
         academic_program_id: input.academic_program_id,
         study_plan_id: input.study_plan_id,
@@ -2975,6 +3010,7 @@ export class PlanningManualService {
 
   async getPlanRuleForOfferContext(input: {
     semester_id: string;
+    vc_period_id?: string | null;
     campus_id: string | null;
     academic_program_id: string | null;
     study_plan_id: string;
@@ -3001,6 +3037,7 @@ export class PlanningManualService {
   private async assertOfferPlanEditable(offer: PlanningOfferEntity) {
     const rule = await this.findPlanRuleForOfferContext({
       semester_id: offer.semester_id,
+      vc_period_id: offer.vc_period_id ?? null,
       campus_id: offer.campus_id,
       academic_program_id: offer.academic_program_id ?? null,
       study_plan_id: offer.study_plan_id,
@@ -3017,6 +3054,7 @@ export class PlanningManualService {
     const offers = await this.offersRepo.find({
       where: {
         semester_id: rule.semester_id,
+        ...(rule.vc_period_id ? { vc_period_id: rule.vc_period_id } : {}),
         campus_id: rule.campus_id ?? undefined,
         academic_program_id: rule.academic_program_id,
         study_plan_id: rule.study_plan_id,
@@ -3036,6 +3074,7 @@ export class PlanningManualService {
     const current = await this.requireEntity(this.offersRepo, offerId, 'planning_offer');
     const rule = await this.findPlanRuleForOfferContext({
       semester_id: current.semester_id,
+      vc_period_id: current.vc_period_id ?? null,
       campus_id: current.campus_id,
       academic_program_id: current.academic_program_id ?? null,
       study_plan_id: current.study_plan_id,
@@ -4598,6 +4637,7 @@ function buildStudyPlanCycles(
 
 function configuredCycleKey(input: {
   semester_id: string;
+  vc_period_id: string;
   campus_id: string;
   academic_program_id: string;
   study_plan_id: string;
@@ -4605,6 +4645,7 @@ function configuredCycleKey(input: {
 }) {
   return [
     input.semester_id,
+    input.vc_period_id,
     input.campus_id,
     input.academic_program_id,
     input.study_plan_id,

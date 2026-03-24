@@ -6,6 +6,7 @@ import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 
 type PlanningSummaryFilters = {
+  vc_period_id: string;
   semester_id: string;
   campus_id: string;
   faculty_id: string;
@@ -37,6 +38,7 @@ export class PlanningPageComponent implements OnInit {
   error = '';
 
   filters: PlanningSummaryFilters = {
+    vc_period_id: '',
     semester_id: '',
     campus_id: '',
     faculty_id: '',
@@ -44,6 +46,7 @@ export class PlanningPageComponent implements OnInit {
   };
 
   catalog: any = {
+    vc_periods: [],
     semesters: [],
     campuses: [],
     faculties: [],
@@ -88,20 +91,15 @@ export class PlanningPageComponent implements OnInit {
     );
   }
 
+  get periodOptions() {
+    return Array.isArray(this.catalog.vc_periods) ? this.catalog.vc_periods : [];
+  }
+
   loadBootstrap() {
     this.loading = true;
     this.api.getPlanningCatalogFilters().subscribe({
       next: (catalog) => {
         this.catalog = catalog;
-        if (
-          this.filters.semester_id &&
-          !catalog.semesters?.some((item: any) => item.id === this.filters.semester_id)
-        ) {
-          this.filters.semester_id = '';
-        }
-        if (catalog.semesters?.length > 0 && !this.filters.semester_id) {
-          this.filters.semester_id = catalog.semesters[0].id;
-        }
         if (this.filters.campus_id && !catalog.campuses?.some((item: any) => item.id === this.filters.campus_id)) {
           this.filters.campus_id = '';
         }
@@ -114,6 +112,7 @@ export class PlanningPageComponent implements OnInit {
         ) {
           this.filters.academic_program_id = '';
         }
+        this.syncPeriodFiltersFromCatalog();
         this.syncProgramSelection();
         this.persistFilters();
         this.cdr.detectChanges();
@@ -129,6 +128,12 @@ export class PlanningPageComponent implements OnInit {
 
   onFacultyChange() {
     this.syncProgramSelection();
+    this.persistFilters();
+    this.loadRows();
+  }
+
+  onVcPeriodChange() {
+    this.syncPeriodFiltersFromCatalog();
     this.persistFilters();
     this.loadRows();
   }
@@ -174,6 +179,7 @@ export class PlanningPageComponent implements OnInit {
     this.router.navigate(['/planning/cycle-editor'], {
       queryParams: {
         ...this.summaryQueryParams(),
+        vc_period_id: row.vc_period_id ?? this.filters.vc_period_id ?? '',
         semester_id: row.semester_id ?? this.filters.semester_id ?? '',
         campus_id: this.filters.campus_id || row.campus_id || row.primary_campus_id || '',
         faculty_id: row.faculty_id ?? this.filters.faculty_id ?? '',
@@ -518,6 +524,7 @@ export class PlanningPageComponent implements OnInit {
   private restoreFilters() {
     const query = this.route.snapshot.queryParamMap;
     const queryFilters: PlanningSummaryFilters = {
+      vc_period_id: query.get('vc_period_id') ?? '',
       semester_id: query.get('semester_id') ?? '',
       campus_id: query.get('campus_id') ?? '',
       faculty_id: query.get('faculty_id') ?? '',
@@ -535,6 +542,7 @@ export class PlanningPageComponent implements OnInit {
       }
       const stored = JSON.parse(raw) as Partial<PlanningSummaryFilters>;
       this.filters = {
+        vc_period_id: stored.vc_period_id ?? '',
         semester_id: stored.semester_id ?? '',
         campus_id: stored.campus_id ?? '',
         faculty_id: stored.faculty_id ?? '',
@@ -542,6 +550,7 @@ export class PlanningPageComponent implements OnInit {
       };
     } catch {
       this.filters = {
+        vc_period_id: '',
         semester_id: '',
         campus_id: '',
         faculty_id: '',
@@ -560,8 +569,69 @@ export class PlanningPageComponent implements OnInit {
     }
   }
 
+  private syncPeriodFiltersFromCatalog() {
+    const periods = Array.isArray(this.catalog?.vc_periods) ? this.catalog.vc_periods : [];
+    const semesters = Array.isArray(this.catalog?.semesters) ? this.catalog.semesters : [];
+
+    if (
+      this.filters.vc_period_id &&
+      !periods.some((item: any) => item.id === this.filters.vc_period_id)
+    ) {
+      this.filters.vc_period_id = '';
+    }
+    if (
+      this.filters.semester_id &&
+      !semesters.some((item: any) => item.id === this.filters.semester_id)
+    ) {
+      this.filters.semester_id = '';
+    }
+
+    if (!this.filters.vc_period_id && this.filters.semester_id) {
+      const vcPeriod = this.findVcPeriodBySemesterId(this.filters.semester_id);
+      this.filters.vc_period_id = vcPeriod?.id ?? '';
+    }
+
+    if (!this.filters.vc_period_id && periods.length > 0) {
+      this.filters.vc_period_id = periods.find((item: any) => item.selected)?.id ?? periods[0].id;
+    }
+
+    this.filters.semester_id = this.resolveSemesterIdFromVcPeriodId(this.filters.vc_period_id) ?? '';
+  }
+
+  private resolveSemesterIdFromVcPeriodId(vcPeriodId: string) {
+    const periods = Array.isArray(this.catalog?.vc_periods) ? this.catalog.vc_periods : [];
+    const semesters = Array.isArray(this.catalog?.semesters) ? this.catalog.semesters : [];
+    const period = periods.find((item: any) => item.id === vcPeriodId);
+    const token = this.normalizePeriodToken(period?.text);
+    if (!token) {
+      return '';
+    }
+    return semesters.find((item: any) => this.normalizePeriodToken(item.name) === token)?.id ?? '';
+  }
+
+  private findVcPeriodBySemesterId(semesterId: string) {
+    const periods = Array.isArray(this.catalog?.vc_periods) ? this.catalog.vc_periods : [];
+    const semesters = Array.isArray(this.catalog?.semesters) ? this.catalog.semesters : [];
+    const semester = semesters.find((item: any) => item.id === semesterId);
+    const token = this.normalizePeriodToken(semester?.name);
+    if (!token) {
+      return null;
+    }
+    return periods.find((item: any) => this.normalizePeriodToken(item.text) === token) ?? null;
+  }
+
+  private normalizePeriodToken(value: string | null | undefined) {
+    const normalized = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!normalized) {
+      return '';
+    }
+    const match = normalized.match(/\d{4}-\d/);
+    return match ? match[0] : normalized;
+  }
+
   private summaryQueryParams() {
     return {
+      vc_period_id: this.filters.vc_period_id || null,
       semester_id: this.filters.semester_id || null,
       campus_id: this.filters.campus_id || null,
       faculty_id: this.filters.faculty_id || null,
