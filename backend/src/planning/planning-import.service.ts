@@ -44,6 +44,12 @@ import {
   UpdatePlanningImportAliasDto,
   UpdatePlanningImportScopeDecisionsDto,
 } from './dto/planning.dto';
+import {
+  VcAcademicProgramEntity,
+  VcCourseEntity,
+  VcFacultyEntity,
+  VcPeriodEntity,
+} from '../videoconference/videoconference.entity';
 
 type ImportActor = {
   user_id?: string | null;
@@ -56,6 +62,7 @@ type PlanningSubsectionKind = (typeof PlanningSubsectionKindValues)[number];
 type PlanningImportIssueSeverity = (typeof PlanningImportIssueSeverityValues)[number];
 
 type AliasNamespace =
+  | 'vc_period'
   | 'campus'
   | 'faculty_code'
   | 'academic_program_code'
@@ -75,6 +82,7 @@ type AliasSourceContext = {
 
 type ImportCatalog = {
   semesters: SemesterEntity[];
+  vcPeriods: VcPeriodEntity[];
   campuses: CampusEntity[];
   faculties: FacultyEntity[];
   programs: AcademicProgramEntity[];
@@ -166,12 +174,14 @@ type PreviewRow = {
 
 type ImportScope = {
   semester_id: string;
+  vc_period_id: string;
   campus_id: string;
   faculty_id: string;
   academic_program_id: string;
   study_plan_id: string;
   cycle: number;
   semester_name: string | null;
+  vc_period_name: string | null;
   campus_name: string | null;
   faculty_name: string | null;
   academic_program_name: string | null;
@@ -197,6 +207,14 @@ export class PlanningImportService {
   constructor(
     @InjectRepository(SemesterEntity)
     private readonly semestersRepo: Repository<SemesterEntity>,
+    @InjectRepository(VcPeriodEntity)
+    private readonly vcPeriodsRepo: Repository<VcPeriodEntity>,
+    @InjectRepository(VcFacultyEntity)
+    private readonly vcFacultiesRepo: Repository<VcFacultyEntity>,
+    @InjectRepository(VcAcademicProgramEntity)
+    private readonly vcAcademicProgramsRepo: Repository<VcAcademicProgramEntity>,
+    @InjectRepository(VcCourseEntity)
+    private readonly vcCoursesRepo: Repository<VcCourseEntity>,
     @InjectRepository(CampusEntity)
     private readonly campusesRepo: Repository<CampusEntity>,
     @InjectRepository(FacultyEntity)
@@ -683,8 +701,9 @@ export class PlanningImportService {
   }
 
   async getAliasCatalog() {
-    const [campuses, faculties, programs, studyPlans, studyPlanCourses, studyPlanCourseDetails, courseModalities, buildings, classrooms] =
+    const [vcPeriods, campuses, faculties, programs, studyPlans, studyPlanCourses, studyPlanCourseDetails, courseModalities, buildings, classrooms] =
       await Promise.all([
+        this.vcPeriodsRepo.find({ where: { is_active: true }, order: { text: 'DESC' } }),
         this.campusesRepo.find({ order: { name: 'ASC' } }),
         this.facultiesRepo.find({ order: { name: 'ASC' } }),
         this.programsRepo.find({ order: { name: 'ASC' } }),
@@ -696,6 +715,8 @@ export class PlanningImportService {
         this.classroomsRepo.find({ order: { name: 'ASC' } }),
       ]);
 
+    const campusById = new Map(campuses.map((item) => [item.id, item] as const));
+    const buildingById = new Map(buildings.map((item) => [item.id, item] as const));
     const studyPlanById = new Map(studyPlans.map((item) => [item.id, item] as const));
     const studyPlanCourseDetailById = new Map(
       studyPlanCourseDetails.map((item) => [item.study_plan_course_id, item] as const),
@@ -703,6 +724,7 @@ export class PlanningImportService {
 
     return {
       namespaces: [
+        'vc_period',
         'campus',
         'faculty_code',
         'academic_program_code',
@@ -715,6 +737,10 @@ export class PlanningImportService {
         'laboratory',
       ],
       shift_options: SHIFT_OPTIONS.map((value) => ({ id: value, label: value })),
+      vc_periods: vcPeriods.map((item) => ({
+        id: item.id,
+        label: item.text || item.id,
+      })),
       campuses: campuses.map((item) => ({
         id: item.id,
         label: [item.code, item.name].filter(Boolean).join(' - '),
@@ -758,14 +784,27 @@ export class PlanningImportService {
         id: item.id,
         label: item.name ?? item.code ?? item.id,
       })),
-      buildings: buildings.map((item) => ({
-        id: item.id,
-        label: item.name ?? item.id,
-      })),
-      classrooms: classrooms.map((item) => ({
-        id: item.id,
-        label: [item.code, item.name].filter(Boolean).join(' - '),
-      })),
+      buildings: buildings.map((item) => {
+        const campus = item.campus_id ? campusById.get(item.campus_id) ?? null : null;
+        return {
+          id: item.id,
+          campus_id: item.campus_id ?? null,
+          campus_label: campus ? [campus.code, campus.name].filter(Boolean).join(' - ') : null,
+          label: [item.name, campus?.name].filter(Boolean).join(' - ') || item.id,
+        };
+      }),
+      classrooms: classrooms.map((item) => {
+        const campus = item.campus_id ? campusById.get(item.campus_id) ?? null : null;
+        const building = item.building_id ? buildingById.get(item.building_id) ?? null : null;
+        return {
+          id: item.id,
+          campus_id: item.campus_id ?? null,
+          building_id: item.building_id ?? null,
+          campus_label: campus ? [campus.code, campus.name].filter(Boolean).join(' - ') : null,
+          building_label: building?.name ?? null,
+          label: [item.code, item.name, building?.name, campus?.name].filter(Boolean).join(' - ') || item.id,
+        };
+      }),
     };
   }
 
@@ -780,6 +819,22 @@ export class PlanningImportService {
       const resolution = asRecord(row.resolution_json);
       return `${recordString(resolution, 'study_plan_course_id')}::${recordString(resolution, 'offer_course_code')}`;
     });
+    const vcContext = await this.resolveVcContextForScope(scope);
+    const vcCourseIdByOfferKey = new Map<string, string | null>();
+    for (const [offerKey, offerRows] of rowsByOffer.entries()) {
+      const representative = offerRows.map((row) => asRecord(row.resolution_json)).find(Boolean);
+      if (!representative) {
+        vcCourseIdByOfferKey.set(offerKey, null);
+        continue;
+      }
+      const vcCourseId = await this.resolveVcCourseIdForImport({
+        course_code: recordString(representative, 'offer_course_code'),
+        course_name: recordString(representative, 'offer_course_name'),
+        study_plan_year: scope.study_plan_year,
+        vc_academic_program_id: vcContext.vcAcademicProgramId,
+      });
+      vcCourseIdByOfferKey.set(offerKey, vcCourseId);
+    }
 
     const result = {
       plan_rules: 0,
@@ -794,15 +849,15 @@ export class PlanningImportService {
       const planRule = manager.create(PlanningCyclePlanRuleEntity, {
         id: newId(),
         semester_id: scope.semester_id,
+        vc_period_id: scope.vc_period_id,
         campus_id: scope.campus_id,
         academic_program_id: scope.academic_program_id,
         faculty_id: scope.faculty_id,
         career_name: scope.academic_program_name ?? scope.study_plan_name ?? null,
         cycle: scope.cycle,
         study_plan_id: scope.study_plan_id,
-        vc_period_id: null,
-        vc_faculty_id: null,
-        vc_academic_program_id: null,
+        vc_faculty_id: vcContext.vcFacultyId,
+        vc_academic_program_id: vcContext.vcAcademicProgramId,
         is_active: true,
         workflow_status: 'DRAFT',
         submitted_at: null,
@@ -832,19 +887,23 @@ export class PlanningImportService {
         if (!representative) {
           continue;
         }
+        const offerKey = `${recordString(representative, 'study_plan_course_id')}::${recordString(
+          representative,
+          'offer_course_code',
+        )}`;
         const offer = manager.create(PlanningOfferEntity, {
           id: newId(),
           semester_id: scope.semester_id,
+          vc_period_id: scope.vc_period_id,
           campus_id: scope.campus_id,
           faculty_id: scope.faculty_id,
           academic_program_id: scope.academic_program_id,
           study_plan_id: scope.study_plan_id,
           cycle: scope.cycle,
           study_plan_course_id: recordString(representative, 'study_plan_course_id')!,
-          vc_period_id: null,
-          vc_faculty_id: null,
-          vc_academic_program_id: null,
-          vc_course_id: null,
+          vc_faculty_id: vcContext.vcFacultyId,
+          vc_academic_program_id: vcContext.vcAcademicProgramId,
+          vc_course_id: vcCourseIdByOfferKey.get(offerKey) ?? null,
           course_code: recordString(representative, 'offer_course_code'),
           course_name: recordString(representative, 'offer_course_name'),
           study_type_id: catalog.defaultStudyTypeId,
@@ -1026,10 +1085,127 @@ export class PlanningImportService {
     return result;
   }
 
+  private async resolveVcContextForScope(scope: ImportScope) {
+    const [vcFaculties, vcPrograms] = await Promise.all([
+      this.vcFacultiesRepo.find({ order: { name: 'ASC' } }),
+      this.vcAcademicProgramsRepo.find({ order: { name: 'ASC' } }),
+    ]);
+
+    const vcFaculty = this.matchVcFaculty(scope, vcFaculties);
+    const vcAcademicProgram = this.matchVcAcademicProgram(
+      scope,
+      vcFaculty?.id ?? null,
+      vcPrograms,
+    );
+
+    return {
+      vcFacultyId: vcFaculty?.id ?? null,
+      vcAcademicProgramId: vcAcademicProgram?.id ?? null,
+    };
+  }
+
+  private matchVcFaculty(scope: ImportScope, vcFaculties: VcFacultyEntity[]) {
+    if (scope.faculty_id) {
+      const byId = vcFaculties.find((item) => item.id === scope.faculty_id) ?? null;
+      if (byId) {
+        return byId;
+      }
+    }
+
+    const normalizedFacultyName = normalizeLoose(scope.faculty_name);
+    if (!normalizedFacultyName) {
+      return null;
+    }
+
+    const matches = vcFaculties.filter(
+      (item) => normalizeLoose(item.name) === normalizedFacultyName,
+    );
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  private matchVcAcademicProgram(
+    scope: ImportScope,
+    vcFacultyId: string | null,
+    vcPrograms: VcAcademicProgramEntity[],
+  ) {
+    if (scope.academic_program_id) {
+      const byId = vcPrograms.find((item) => item.id === scope.academic_program_id) ?? null;
+      if (byId && (!vcFacultyId || byId.faculty_id === vcFacultyId)) {
+        return byId;
+      }
+    }
+
+    const normalizedProgramName = normalizeLoose(scope.academic_program_name);
+    if (!normalizedProgramName) {
+      return null;
+    }
+
+    const nameMatches = vcPrograms.filter(
+      (item) => normalizeLoose(item.name) === normalizedProgramName,
+    );
+    const scopedMatches = vcFacultyId
+      ? nameMatches.filter((item) => item.faculty_id === vcFacultyId)
+      : nameMatches;
+
+    return scopedMatches.length === 1 ? scopedMatches[0] : null;
+  }
+
+  private async resolveVcCourseIdForImport(input: {
+    course_name: string | null | undefined;
+    course_code: string | null | undefined;
+    study_plan_year: string | null | undefined;
+    vc_academic_program_id: string | null;
+  }) {
+    const normalizedCourseName = normalizeCourseName(input.course_name);
+    if (!normalizedCourseName || !input.vc_academic_program_id) {
+      return null;
+    }
+
+    const candidates = await this.vcCoursesRepo.find({
+      where: { program_id: input.vc_academic_program_id },
+      order: { name: 'ASC' },
+    });
+    const nameMatches = candidates.filter(
+      (item) => normalizeCourseName(item.name) === normalizedCourseName,
+    );
+    if (nameMatches.length === 0) {
+      return null;
+    }
+
+    const normalizedStudyPlanYear = normalizeLoose(input.study_plan_year);
+    if (normalizedStudyPlanYear) {
+      const yearMatches = nameMatches.filter((item) =>
+        vcCourseCodeMatchesStudyPlanYear(item.code, normalizedStudyPlanYear),
+      );
+      if (yearMatches.length === 1) {
+        return yearMatches[0].id;
+      }
+      if (yearMatches.length > 1) {
+        return null;
+      }
+    }
+
+    const normalizedCourseCode = normalizeCourseCodeValue(input.course_code);
+    if (normalizedCourseCode) {
+      const directCodeMatches = nameMatches.filter(
+        (item) => normalizeCourseCodeValue(item.code) === normalizedCourseCode,
+      );
+      if (directCodeMatches.length === 1) {
+        return directCodeMatches[0].id;
+      }
+      if (directCodeMatches.length > 1) {
+        return null;
+      }
+    }
+
+    return nameMatches.length === 1 ? nameMatches[0].id : null;
+  }
+
   private async replaceExistingScope(scope: ImportScope, actor?: ImportActor | null) {
     const rules = await this.planRulesRepo.find({
       where: {
         semester_id: scope.semester_id,
+        vc_period_id: scope.vc_period_id,
         campus_id: scope.campus_id,
         faculty_id: scope.faculty_id,
         academic_program_id: scope.academic_program_id,
@@ -1042,6 +1218,7 @@ export class PlanningImportService {
     const offers = await this.offersRepo.find({
       where: {
         semester_id: scope.semester_id,
+        vc_period_id: scope.vc_period_id,
         campus_id: scope.campus_id,
         faculty_id: scope.faculty_id,
         academic_program_id: scope.academic_program_id,
@@ -1240,6 +1417,7 @@ export class PlanningImportService {
     const planRules = await this.planRulesRepo.find({
       where: {
         semester_id: scope.semester_id,
+        vc_period_id: scope.vc_period_id,
         campus_id: scope.campus_id,
         faculty_id: scope.faculty_id,
         academic_program_id: scope.academic_program_id,
@@ -1251,6 +1429,7 @@ export class PlanningImportService {
     const offers = await this.offersRepo.find({
       where: {
         semester_id: scope.semester_id,
+        vc_period_id: scope.vc_period_id,
         campus_id: scope.campus_id,
         faculty_id: scope.faculty_id,
         academic_program_id: scope.academic_program_id,
@@ -1476,6 +1655,39 @@ export class PlanningImportService {
             dependentCycles.push(cycle);
             current.dependent_cycles = dependentCycles;
           }
+          current.source_value_display = buildCourseSourceValueDisplay(
+            sourceValue,
+            recordString(normalized, 'course_name_raw'),
+          );
+        }
+      }
+      if (
+        (namespace === 'building' || namespace === 'classroom' || namespace === 'laboratory') &&
+        issue.row_id
+      ) {
+        const relatedRow = rowsById.get(issue.row_id);
+        if (relatedRow) {
+          const normalized = asRecord(relatedRow.normalized_json);
+          const resolution = asRecord(relatedRow.resolution_json);
+          const mappingResolution = asRecord(recordValue(resolution, 'mapping_resolution'));
+          const campusResolution = asRecord(recordValue(mappingResolution, 'campus'));
+          pushDependencyEntry(current, 'dependent_campuses', {
+            source_value:
+              recordString(campusResolution, 'source_value') ?? recordString(normalized, 'campus_raw') ?? '',
+            target_id: recordString(campusResolution, 'target_id'),
+            target_label: recordString(campusResolution, 'target_label'),
+            match_source: recordString(campusResolution, 'match_source') ?? 'none',
+          });
+          if (namespace === 'classroom' || namespace === 'laboratory') {
+            const buildingResolution = asRecord(recordValue(mappingResolution, 'building'));
+            pushDependencyEntry(current, 'dependent_buildings', {
+              source_value:
+                recordString(buildingResolution, 'source_value') ?? recordString(normalized, 'building_raw') ?? '',
+              target_id: recordString(buildingResolution, 'target_id'),
+              target_label: recordString(buildingResolution, 'target_label'),
+              match_source: recordString(buildingResolution, 'match_source') ?? 'none',
+            });
+          }
         }
       }
       unresolvedMappingMap.set(key, current);
@@ -1530,6 +1742,13 @@ export class PlanningImportService {
           match_source: recordString(details, 'match_source') ?? 'catalog',
         };
         current.row_count = numberValue(current.row_count) + 1;
+        if (namespace === 'course_code') {
+          const normalized = asRecord(row.normalized_json);
+          current.source_value_display = buildCourseSourceValueDisplay(
+            sourceValue,
+            recordString(normalized, 'course_name_raw'),
+          );
+        }
         resolvedMappingMap.set(key, current);
       }
     }
@@ -1662,7 +1881,7 @@ export class PlanningImportService {
         scope.decision === 'PENDING',
     ).length;
     const pendingMappingConfirmations = [...unresolvedMappingMap.values()].filter(
-      (item) => recordBoolean(item, 'requires_confirmation') || numberValue(item.blocking_count) > 0,
+      (item) => recordBoolean(item, 'requires_confirmation'),
     ).length;
 
     return {
@@ -1761,6 +1980,7 @@ export class PlanningImportService {
       cycle_raw: row.cycle_raw,
     };
     const semesterResolution = this.resolveSemester(row.semester_raw, catalog, issues);
+    const vcPeriodResolution = this.resolveVcPeriod(row.semester_raw, catalog, issues);
     const campusResolution = this.resolveCampus(row.campus_raw, catalog, issues);
     const facultyResolution = this.resolveFaculty(row.faculty_code_raw, catalog, issues);
     const programResolution = this.resolveAcademicProgram(row.academic_program_code_raw, catalog, issues);
@@ -1830,6 +2050,7 @@ export class PlanningImportService {
     const scope =
       canImport &&
       semesterResolution.target_id &&
+      vcPeriodResolution.target_id &&
       campusResolution.target_id &&
       facultyResolution.target_id &&
       programResolution.target_id &&
@@ -1837,12 +2058,14 @@ export class PlanningImportService {
       row.cycle_raw
         ? {
             semester_id: semesterResolution.target_id,
+            vc_period_id: vcPeriodResolution.target_id,
             campus_id: campusResolution.target_id,
             faculty_id: facultyResolution.target_id,
             academic_program_id: programResolution.target_id,
             study_plan_id: studyPlanResolution.target_id,
             cycle: row.cycle_raw,
             semester_name: semesterResolution.target_label,
+            vc_period_name: vcPeriodResolution.target_label,
             campus_name: campusResolution.target_label,
             faculty_name: facultyResolution.target_label,
             academic_program_name: programResolution.target_label,
@@ -1853,6 +2076,7 @@ export class PlanningImportService {
     const scopeKey = scope ? buildScopeKey(scope) : null;
     const resolution = {
       semester_id: semesterResolution.target_id,
+      vc_period_id: vcPeriodResolution.target_id,
       campus_id: campusResolution.target_id,
       faculty_id: facultyResolution.target_id,
       academic_program_id: programResolution.target_id,
@@ -1896,6 +2120,7 @@ export class PlanningImportService {
         ),
       schedule,
       mapping_resolution: {
+        vc_period: vcPeriodResolution,
         campus: campusResolution,
         faculty_code: facultyResolution,
         academic_program_code: programResolution,
@@ -2065,13 +2290,29 @@ export class PlanningImportService {
   }
 
   private resolveSemester(value: string, catalog: ImportCatalog, issues: PreviewIssue[]) {
-    const normalized = normalizeLoose(value);
-    const semester =
-      catalog.semesters.find((item) => normalizeLoose(item.name) === normalized) ?? null;
+    const semester = findSemesterByPeriodValue(catalog.semesters, value);
     if (!semester) {
       issues.push(missingCriticalIssue('semester', value, 'No se encontro el semestre del archivo.'));
     }
     return toResolution(value, semester?.id ?? null, semester?.name ?? null, semester ? 'catalog' : 'none');
+  }
+
+  private resolveVcPeriod(value: string, catalog: ImportCatalog, issues: PreviewIssue[]) {
+    const alias = resolveAlias(catalog.aliasMap, 'vc_period', value);
+    if (alias?.target_id) {
+      const vcPeriod = catalog.vcPeriods.find((item) => item.id === alias.target_id) ?? null;
+      return toResolution(
+        value,
+        vcPeriod?.id ?? null,
+        vcPeriod?.text ?? alias.target_label ?? null,
+        vcPeriod ? 'alias' : 'none',
+      );
+    }
+    const vcPeriod = findVcPeriodByValue(catalog.vcPeriods, value);
+    if (!vcPeriod) {
+      issues.push(missingCriticalIssue('vc_period', value, 'No se encontro el periodo VC del archivo.'));
+    }
+    return toResolution(value, vcPeriod?.id ?? null, vcPeriod?.text ?? null, vcPeriod ? 'catalog' : 'none');
   }
 
   private resolveCampus(value: string, catalog: ImportCatalog, issues: PreviewIssue[]) {
@@ -2081,10 +2322,15 @@ export class PlanningImportService {
       return toResolution(value, campus?.id ?? null, campus?.name ?? alias.target_label ?? null, campus ? 'alias' : 'none');
     }
     const normalized = normalizeLoose(value);
-    let campus =
+    const catalogCampus =
       catalog.campuses.find((item) => normalizeLoose(item.code) === normalized) ??
       catalog.campuses.find((item) => normalizeLoose(item.name) === normalized) ??
       null;
+    if (catalogCampus) {
+      return toResolution(value, catalogCampus.id, catalogCampus.name ?? null, 'catalog');
+    }
+
+    let campus: CampusEntity | null = null;
     if (!campus) {
       if (normalized === 'PRINCIPAL') {
         campus = catalog.campuses.find((item) => normalizeLoose(item.name).includes('SEDE CENTRAL')) ?? null;
@@ -2647,12 +2893,14 @@ export class PlanningImportService {
     if (scope && Object.keys(scope).length > 0) {
       return {
         semester_id: recordString(scope, 'semester_id')!,
+        vc_period_id: recordString(scope, 'vc_period_id')!,
         campus_id: recordString(scope, 'campus_id')!,
         faculty_id: recordString(scope, 'faculty_id')!,
         academic_program_id: recordString(scope, 'academic_program_id')!,
         study_plan_id: recordString(scope, 'study_plan_id')!,
         cycle: recordNumber(scope, 'cycle'),
         semester_name: recordString(scope, 'semester_name'),
+        vc_period_name: recordString(scope, 'vc_period_name'),
         campus_name: recordString(scope, 'campus_name'),
         faculty_name: recordString(scope, 'faculty_name'),
         academic_program_name: recordString(scope, 'academic_program_name'),
@@ -2661,22 +2909,25 @@ export class PlanningImportService {
       } satisfies ImportScope;
     }
     const semesterId = recordString(resolution, 'semester_id');
+    const vcPeriodId = recordString(resolution, 'vc_period_id');
     const campusId = recordString(resolution, 'campus_id');
     const facultyId = recordString(resolution, 'faculty_id');
     const academicProgramId = recordString(resolution, 'academic_program_id');
     const studyPlanId = recordString(resolution, 'study_plan_id');
     const cycle = recordNumberOrNull(resolution, 'cycle');
-    if (!semesterId || !campusId || !facultyId || !academicProgramId || !studyPlanId || !cycle) {
+    if (!semesterId || !vcPeriodId || !campusId || !facultyId || !academicProgramId || !studyPlanId || !cycle) {
       return null;
     }
     return {
       semester_id: semesterId,
+      vc_period_id: vcPeriodId,
       campus_id: campusId,
       faculty_id: facultyId,
       academic_program_id: academicProgramId,
       study_plan_id: studyPlanId,
       cycle,
       semester_name: null,
+      vc_period_name: null,
       campus_name: null,
       faculty_name: null,
       academic_program_name: null,
@@ -2688,6 +2939,7 @@ export class PlanningImportService {
   private async loadImportCatalog(): Promise<ImportCatalog> {
     const [
       semesters,
+      vcPeriods,
       campuses,
       faculties,
       programs,
@@ -2702,6 +2954,7 @@ export class PlanningImportService {
       aliasMappings,
     ] = await Promise.all([
       this.semestersRepo.find({ order: { name: 'DESC' } }),
+      this.vcPeriodsRepo.find({ where: { is_active: true }, order: { text: 'DESC' } }),
       this.campusesRepo.find({ order: { name: 'ASC' } }),
       this.facultiesRepo.find({ order: { name: 'ASC' } }),
       this.programsRepo.find({ order: { name: 'ASC' } }),
@@ -2718,6 +2971,7 @@ export class PlanningImportService {
 
     return {
       semesters,
+      vcPeriods,
       campuses,
       faculties,
       programs,
@@ -2749,6 +3003,7 @@ export class PlanningImportService {
   private buildPlanRuleLogContext(rule: PlanningCyclePlanRuleEntity) {
     return {
       semester_id: rule.semester_id,
+      vc_period_id: rule.vc_period_id ?? null,
       campus_id: rule.campus_id ?? null,
       faculty_id: rule.faculty_id ?? null,
       academic_program_id: rule.academic_program_id,
@@ -2761,6 +3016,7 @@ export class PlanningImportService {
     return {
       offer_id: offer.id,
       semester_id: offer.semester_id,
+      vc_period_id: offer.vc_period_id ?? null,
       campus_id: offer.campus_id,
       faculty_id: offer.faculty_id ?? null,
       academic_program_id: offer.academic_program_id ?? null,
@@ -2862,6 +3118,7 @@ function resolveAlias(
 function normalizeAliasNamespace(value: string | null | undefined): AliasNamespace | null {
   const normalized = normalizeLoose(value);
   if (
+    normalized === 'VC_PERIOD' ||
     normalized === 'CAMPUS' ||
     normalized === 'FACULTY_CODE' ||
     normalized === 'ACADEMIC_PROGRAM_CODE' ||
@@ -2878,15 +3135,18 @@ function normalizeAliasNamespace(value: string | null | undefined): AliasNamespa
   return null;
 }
 
-function buildScopeKey(scope: Pick<ImportScope, 'semester_id' | 'campus_id' | 'faculty_id' | 'academic_program_id' | 'study_plan_id' | 'cycle'>) {
-  return [
+function buildScopeKey(scope: Pick<ImportScope, 'semester_id' | 'vc_period_id' | 'campus_id' | 'faculty_id' | 'academic_program_id' | 'study_plan_id' | 'cycle'>) {
+  const rawScopeKey = JSON.stringify([
     scope.semester_id,
+    scope.vc_period_id,
     scope.campus_id,
     scope.faculty_id,
     scope.academic_program_id,
     scope.study_plan_id,
     scope.cycle,
-  ].join('::');
+  ]);
+  // Keep the persisted/indexed key short and deterministic even if the scope grows.
+  return createHash('sha256').update(rawScopeKey).digest('hex');
 }
 
 function hasExistingData(value: Record<string, unknown> | null | undefined) {
@@ -2987,6 +3247,36 @@ function normalizeSourceValue(value: string | null | undefined) {
   return normalizeLoose(value);
 }
 
+function normalizePeriodToken(value: string | null | undefined) {
+  const normalized = normalizeLoose(value);
+  if (!normalized) {
+    return '';
+  }
+  const compact = normalized.replace(/\s+/g, '');
+  const match = compact.match(/\d{4}-\d/);
+  return match ? match[0] : compact;
+}
+
+function findSemesterByPeriodValue(semesters: SemesterEntity[], value: string | null | undefined) {
+  const normalized = normalizeLoose(value);
+  const token = normalizePeriodToken(value);
+  return (
+    semesters.find((item) => normalizeLoose(item.name) === normalized) ??
+    semesters.find((item) => normalizePeriodToken(item.name) === token) ??
+    null
+  );
+}
+
+function findVcPeriodByValue(vcPeriods: VcPeriodEntity[], value: string | null | undefined) {
+  const normalized = normalizeLoose(value);
+  const token = normalizePeriodToken(value);
+  return (
+    vcPeriods.find((item) => normalizeLoose(item.text) === normalized) ??
+    vcPeriods.find((item) => normalizePeriodToken(item.text) === token) ??
+    null
+  );
+}
+
 function normalizeCourseName(value: string | null | undefined) {
   const raw = `${value ?? ''}`.trim();
   if (!raw) {
@@ -3007,6 +3297,20 @@ function extractCycleFromStudyPlanCourse(course: Pick<StudyPlanCourseEntity, 'ye
 
 function normalizeCourseCodeValue(value: string | null | undefined) {
   return normalizeLoose(value).replace(/[^0-9A-Z]/g, '');
+}
+
+function vcCourseCodeMatchesStudyPlanYear(
+  vcCourseCode: string | null | undefined,
+  normalizedStudyPlanYear: string,
+) {
+  const normalizedCode = normalizeLoose(vcCourseCode);
+  if (!normalizedCode || !normalizedStudyPlanYear) {
+    return false;
+  }
+  return (
+    normalizedCode === normalizedStudyPlanYear ||
+    normalizedCode.startsWith(`${normalizedStudyPlanYear}-`)
+  );
 }
 
 function courseCodeLikeMatch(candidateCode: string | null | undefined, normalizedCourseCode: string) {
@@ -3043,16 +3347,60 @@ function buildAliasSourceValue(
   return normalizedSource;
 }
 
+function buildCourseSourceValueDisplay(
+  sourceValue: string | null | undefined,
+  courseName: string | null | undefined,
+) {
+  const normalizedSource = `${sourceValue ?? ''}`.trim();
+  const normalizedCourseName = `${courseName ?? ''}`.trim();
+  if (!normalizedCourseName) {
+    return normalizedSource;
+  }
+  return [normalizedSource, normalizedCourseName].filter(Boolean).join(' | ');
+}
+
 function requiresMappingConfirmation(namespace: string, targetId: string | null, matchSource: string | null) {
   if (!targetId) {
     return false;
   }
-  if (String(matchSource ?? '').toLowerCase() === 'alias') {
+  const normalizedNamespace = String(namespace ?? '').trim().toLowerCase();
+  const normalizedMatchSource = String(matchSource ?? '').trim().toLowerCase();
+  if (normalizedMatchSource === 'alias') {
     return false;
   }
-  return ['faculty_code', 'academic_program_code', 'study_plan_code', 'course_code'].includes(
-    String(namespace ?? '').trim().toLowerCase(),
+  if (normalizedNamespace === 'campus') {
+    return normalizedMatchSource === 'heuristic';
+  }
+  return ['faculty_code', 'academic_program_code', 'study_plan_code'].includes(
+    normalizedNamespace,
   );
+}
+
+function pushDependencyEntry(
+  container: Record<string, unknown>,
+  key: 'dependent_campuses' | 'dependent_buildings',
+  entry: Record<string, unknown>,
+) {
+  const sourceValue = `${entry.source_value ?? ''}`.trim();
+  const targetId = `${entry.target_id ?? ''}`.trim();
+  const targetLabel = `${entry.target_label ?? ''}`.trim();
+  if (!sourceValue && !targetId && !targetLabel) {
+    return;
+  }
+
+  const current = Array.isArray(container[key]) ? [...(container[key] as Record<string, unknown>[])] : [];
+  if (
+    current.some(
+      (item) =>
+        `${item?.source_value ?? ''}`.trim() === sourceValue &&
+        `${item?.target_id ?? ''}`.trim() === targetId,
+    )
+  ) {
+    return;
+  }
+
+  current.push(entry);
+  container[key] = current;
 }
 
 function normalizeStudyPlanCode(value: string | null | undefined) {

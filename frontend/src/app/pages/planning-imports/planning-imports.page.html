@@ -123,10 +123,14 @@
           class="btn btn-primary btn-sm"
           type="button"
           (click)="executeBatch()"
-          [disabled]="executing || hasPendingScopeDecisions || hasPendingMappings || !hasBatch">
-          {{ executing ? 'Ejecutando...' : 'Ejecutar carga' }}
+          [disabled]="executeButtonDisabled">
+          {{ executeButtonLabel }}
         </button>
       </div>
+
+      <p class="subtle execute-help">
+        {{ executeHelperText }}
+      </p>
 
       <div class="summary-grid">
         <article class="summary-card">
@@ -137,10 +141,15 @@
           <span>Segun las decisiones actuales</span>
           <strong>{{ countsLabel(current.summary?.effective_create_counts) }}</strong>
         </article>
+        <article class="summary-card success-tone" *ngIf="current.report">
+          <span>Ultima ejecucion</span>
+          <strong>{{ executionReportSummary }}</strong>
+          <small>Esta revision ya fue aplicada en la plataforma.</small>
+        </article>
       </div>
     </section>
 
-    <section class="panel" *ngIf="current.scope_decisions?.length">
+    <section class="panel" *ngIf="existingScopeDecisions.length">
       <div class="section-head">
         <div>
           <p class="eyebrow">Grupos detectados</p>
@@ -166,7 +175,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let item of current.scope_decisions">
+            <tr *ngFor="let item of existingScopeDecisions">
               <td>
                 <strong>{{ scopeLabelDisplay(item) }}</strong>
                 <div class="muted">
@@ -211,7 +220,7 @@
           <tbody>
             <tr *ngFor="let item of current.unresolved_mappings">
               <td>{{ namespaceLabel(item.namespace) }}</td>
-              <td>{{ item.source_value }}</td>
+              <td>{{ mappingSourceLabel(item) }}</td>
               <td>
                 <ng-container *ngIf="item.requires_confirmation; else missingMappingImpact">
                   {{ item.row_count || 0 }} filas | el sistema encontro un posible destino y necesitas confirmarlo antes de cargar
@@ -316,7 +325,11 @@
 
         <label class="field">
           <span>Valor que viene en el Excel</span>
-          <input type="text" [(ngModel)]="aliasForm.source_value" [disabled]="aliasModalMode === 'edit'" />
+          <input
+            type="text"
+            [ngModel]="aliasSourceValueDisplay"
+            (ngModelChange)="aliasForm.source_value = $event"
+            [disabled]="aliasSourceValueLocked" />
         </label>
 
         <label class="field modal-span-2">

@@ -685,6 +685,10 @@ export class CreatePlanningOfferDto {
   @Min(1)
   cycle!: number;
 
+  @IsOptional()
+  @IsString()
+  vc_period_id?: string;
+
   @IsString()
   study_plan_course_id!: string;
 

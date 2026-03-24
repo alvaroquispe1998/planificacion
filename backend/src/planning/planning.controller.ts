@@ -182,6 +182,7 @@ export class PlanningController {
   listPlanRules(
     @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
+    @Query('vc_period_id') vcPeriodId?: string,
     @Query('campus_id') campusId?: string,
     @Query('academic_program_id') academicProgramId?: string,
   ) {
@@ -189,7 +190,7 @@ export class PlanningController {
       this.authService.assertScopeAccess(authUser, null, academicProgramId);
     }
     return this.planningManualService
-      .listPlanRules(semesterId, campusId, academicProgramId)
+      .listPlanRules(semesterId, campusId, academicProgramId, vcPeriodId)
       .then((rows) =>
         this.authService.filterByScope(authUser, rows, (item: any) => ({
           faculty_id: item.faculty_id ?? null,
@@ -202,6 +203,7 @@ export class PlanningController {
   listConfiguredCycles(
     @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
+    @Query('vc_period_id') vcPeriodId?: string,
     @Query('campus_id') campusId?: string,
     @Query('faculty_id') facultyId?: string,
     @Query('academic_program_id') academicProgramId?: string,
@@ -211,6 +213,7 @@ export class PlanningController {
     }
     return this.planningManualService.listConfiguredCycles({
       semester_id: semesterId,
+      vc_period_id: vcPeriodId,
       campus_id: campusId,
       faculty_id: facultyId,
       academic_program_id: academicProgramId,
@@ -328,6 +331,7 @@ export class PlanningController {
   listCourseCandidates(
     @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
+    @Query('vc_period_id') vcPeriodId?: string,
     @Query('campus_id') campusId?: string,
     @Query('faculty_id') facultyId?: string,
     @Query('academic_program_id') academicProgramId?: string,
@@ -339,6 +343,7 @@ export class PlanningController {
     }
     return this.planningManualService.listCourseCandidates({
       semester_id: semesterId,
+      vc_period_id: vcPeriodId,
       campus_id: campusId,
       faculty_id: facultyId,
       academic_program_id: academicProgramId,
@@ -370,6 +375,7 @@ export class PlanningController {
     this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
     return this.assertApprovedPlanMutationAllowed(authUser, {
       semester_id: dto.semester_id,
+      vc_period_id: dto.vc_period_id ?? null,
       campus_id: dto.campus_id,
       academic_program_id: dto.academic_program_id ?? null,
       study_plan_id: dto.study_plan_id,
@@ -381,6 +387,7 @@ export class PlanningController {
   listOffers(
     @CurrentAuthUser() authUser: AuthenticatedRequestUser,
     @Query('semester_id') semesterId?: string,
+    @Query('vc_period_id') vcPeriodId?: string,
     @Query('campus_id') campusId?: string,
     @Query('faculty_id') facultyId?: string,
     @Query('academic_program_id') academicProgramId?: string,
@@ -392,6 +399,7 @@ export class PlanningController {
     }
     return this.planningManualService.listOffers(
       semesterId,
+      vcPeriodId,
       campusId,
       facultyId,
       academicProgramId,
@@ -965,6 +973,7 @@ export class PlanningController {
       | {
           workflow_status?: string | null;
           semester_id?: string;
+          vc_period_id?: string | null;
           campus_id?: string | null;
           academic_program_id?: string | null;
           study_plan_id?: string;
@@ -985,6 +994,7 @@ export class PlanningController {
     ) {
       const rule = await this.planningManualService.getPlanRuleForOfferContext({
         semester_id: ruleOrContext.semester_id,
+        vc_period_id: ruleOrContext.vc_period_id ?? null,
         campus_id: ruleOrContext.campus_id ?? null,
         academic_program_id: ruleOrContext.academic_program_id ?? null,
         study_plan_id: ruleOrContext.study_plan_id,

@@ -7,6 +7,7 @@ import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 
 type PlanningEditorFilters = {
+  vc_period_id: string;
   semester_id: string;
   campus_id: string;
   faculty_id: string;
@@ -51,6 +52,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
   };
 
   filters: PlanningEditorFilters = {
+    vc_period_id: '',
     semester_id: '',
     campus_id: '',
     faculty_id: '',
@@ -59,6 +61,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
   };
 
   catalog: any = {
+    vc_periods: [],
     semesters: [],
     campuses: [],
     faculties: [],
@@ -130,6 +133,10 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     );
   }
 
+  get periodOptions() {
+    return Array.isArray(this.catalog.vc_periods) ? this.catalog.vc_periods : [];
+  }
+
   get availableStudyPlansByProgram() {
     if (!this.filters.academic_program_id) {
       return [];
@@ -164,10 +171,10 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     const configuredCycleValues = new Set(
       this.planRules
         .filter((rule: any) => {
-          const matchesSemester = !this.filters.semester_id || rule.semester_id === this.filters.semester_id;
+          const matchesVcPeriod = !this.filters.vc_period_id || rule.vc_period_id === this.filters.vc_period_id;
           const matchesCampus = !this.filters.campus_id || rule.campus_id === this.filters.campus_id;
           const matchesProgram = !this.filters.academic_program_id || rule.academic_program_id === this.filters.academic_program_id;
-          return matchesSemester && matchesCampus && matchesProgram;
+          return matchesVcPeriod && matchesCampus && matchesProgram;
         })
         .map((rule: any) => String(rule.cycle)),
     );
@@ -197,7 +204,8 @@ export class PlanningCycleEditorPageComponent implements OnInit {
 
   get hasRequiredContext() {
     return Boolean(
-      this.filters.semester_id &&
+      this.filters.vc_period_id &&
+        this.filters.semester_id &&
         this.filters.campus_id &&
         this.filters.academic_program_id &&
         this.filters.cycle,
@@ -348,18 +356,21 @@ export class PlanningCycleEditorPageComponent implements OnInit {
 
   applyQueryState() {
     const query = this.route.snapshot.queryParamMap;
+    this.filters.vc_period_id = query.get('vc_period_id') ?? '';
     this.filters.semester_id = query.get('semester_id') ?? '';
     this.filters.campus_id = query.get('campus_id') ?? '';
     this.filters.faculty_id = query.get('faculty_id') ?? '';
     this.filters.academic_program_id = query.get('academic_program_id') ?? '';
     this.filters.cycle = query.get('cycle') ?? '';
     this.ruleForm.study_plan_id = query.get('study_plan_id') ?? '';
+    this.syncPeriodFiltersFromCatalog();
     this.syncAcademicProgramSelection();
     this.syncCycleSelection();
     this.syncStudyPlanSelection();
   }
 
-  onSemesterChange() {
+  onVcPeriodChange() {
+    this.syncPeriodFiltersFromCatalog();
     this.syncRouteState();
     this.resetOfferDetail();
     this.reloadPlanningView();
@@ -421,6 +432,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
         this.filters.semester_id,
         this.filters.campus_id,
         this.filters.academic_program_id,
+        this.filters.vc_period_id,
       )
       .subscribe((rows) => {
         this.planRules = rows;
@@ -487,6 +499,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     this.saving = true;
     const payload: any = {
       semester_id: this.filters.semester_id,
+      vc_period_id: this.filters.vc_period_id,
       campus_id: this.filters.campus_id,
       academic_program_id: this.filters.academic_program_id,
       faculty_id: this.filters.faculty_id || undefined,
@@ -559,6 +572,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     this.saving = true;
     const payload: any = {
       semester_id: this.filters.semester_id,
+      vc_period_id: this.filters.vc_period_id,
       campus_id: this.filters.campus_id,
       faculty_id: this.filters.faculty_id || undefined,
       academic_program_id: this.filters.academic_program_id || undefined,
@@ -1032,6 +1046,66 @@ export class PlanningCycleEditorPageComponent implements OnInit {
     }
   }
 
+  private syncPeriodFiltersFromCatalog() {
+    const periods = Array.isArray(this.catalog?.vc_periods) ? this.catalog.vc_periods : [];
+    const semesters = Array.isArray(this.catalog?.semesters) ? this.catalog.semesters : [];
+
+    if (
+      this.filters.vc_period_id &&
+      !periods.some((item: any) => item.id === this.filters.vc_period_id)
+    ) {
+      this.filters.vc_period_id = '';
+    }
+    if (
+      this.filters.semester_id &&
+      !semesters.some((item: any) => item.id === this.filters.semester_id)
+    ) {
+      this.filters.semester_id = '';
+    }
+
+    if (!this.filters.vc_period_id && this.filters.semester_id) {
+      const period = this.findVcPeriodBySemesterId(this.filters.semester_id);
+      this.filters.vc_period_id = period?.id ?? '';
+    }
+
+    if (!this.filters.vc_period_id && periods.length > 0) {
+      this.filters.vc_period_id = periods.find((item: any) => item.selected)?.id ?? periods[0].id;
+    }
+
+    this.filters.semester_id = this.resolveSemesterIdFromVcPeriodId(this.filters.vc_period_id) ?? '';
+  }
+
+  private resolveSemesterIdFromVcPeriodId(vcPeriodId: string) {
+    const periods = Array.isArray(this.catalog?.vc_periods) ? this.catalog.vc_periods : [];
+    const semesters = Array.isArray(this.catalog?.semesters) ? this.catalog.semesters : [];
+    const period = periods.find((item: any) => item.id === vcPeriodId);
+    const token = this.normalizePeriodToken(period?.text);
+    if (!token) {
+      return '';
+    }
+    return semesters.find((item: any) => this.normalizePeriodToken(item.name) === token)?.id ?? '';
+  }
+
+  private findVcPeriodBySemesterId(semesterId: string) {
+    const periods = Array.isArray(this.catalog?.vc_periods) ? this.catalog.vc_periods : [];
+    const semesters = Array.isArray(this.catalog?.semesters) ? this.catalog.semesters : [];
+    const semester = semesters.find((item: any) => item.id === semesterId);
+    const token = this.normalizePeriodToken(semester?.name);
+    if (!token) {
+      return null;
+    }
+    return periods.find((item: any) => this.normalizePeriodToken(item.text) === token) ?? null;
+  }
+
+  private normalizePeriodToken(value: string | null | undefined) {
+    const normalized = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!normalized) {
+      return '';
+    }
+    const match = normalized.match(/\d{4}-\d/);
+    return match ? match[0] : normalized;
+  }
+
   private syncCycleSelection() {
     if (
       this.filters.cycle &&
@@ -1055,6 +1129,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
       relativeTo: this.route,
       replaceUrl: true,
       queryParams: {
+        vc_period_id: this.filters.vc_period_id || null,
         semester_id: this.filters.semester_id || null,
         campus_id: this.filters.campus_id || null,
         faculty_id: this.filters.faculty_id || null,
@@ -1067,6 +1142,7 @@ export class PlanningCycleEditorPageComponent implements OnInit {
 
   private summaryQueryParams() {
     return {
+      vc_period_id: this.filters.vc_period_id || null,
       semester_id: this.filters.semester_id || null,
       campus_id: this.filters.campus_id || null,
       faculty_id: this.filters.faculty_id || null,

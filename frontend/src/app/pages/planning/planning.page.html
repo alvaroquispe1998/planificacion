@@ -17,9 +17,9 @@
   </header>
 
   <section class="filters-card">
-    <select [(ngModel)]="filters.semester_id" (ngModelChange)="loadRows()">
-      <option *ngFor="let semester of catalog.semesters" [value]="semester.id">
-        {{ semester.name }}
+    <select [(ngModel)]="filters.vc_period_id" (ngModelChange)="onVcPeriodChange()">
+      <option *ngFor="let period of periodOptions" [value]="period.id">
+        {{ period.text || period.label || period.id }}
       </option>
     </select>
     <select [(ngModel)]="filters.campus_id" (ngModelChange)="loadRows()">
@@ -62,7 +62,7 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>Semestre</th>
+            <th>Periodo VC</th>
             <th>Local</th>
             <th>Facultad</th>
             <th>Programa</th>
@@ -75,7 +75,7 @@
         </thead>
         <tbody>
           <tr *ngFor="let row of rows" class="clickable-row" (click)="openCycleDetail(row)">
-            <td>{{ row.semester?.name || '---' }}</td>
+            <td>{{ row.vc_period?.text || row.semester?.name || '---' }}</td>
             <td>{{ row.campus_display || 'Sin local' }}</td>
             <td>{{ row.faculty?.name || row.study_plan?.faculty || '---' }}</td>
             <td>{{ row.academic_program?.name || row.study_plan?.career || row.career_name || '---' }}</td>

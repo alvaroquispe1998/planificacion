@@ -138,10 +138,18 @@ export class ApiService {
     return this.http.patch<any>(`${this.baseUrl}/planning/import-aliases/${id}`, payload);
   }
 
-  listPlanningPlanRules(semesterId?: string, campusId?: string, academicProgramId?: string) {
+  listPlanningPlanRules(
+    semesterId?: string,
+    campusId?: string,
+    academicProgramId?: string,
+    vcPeriodId?: string,
+  ) {
     let params = new HttpParams();
     if (semesterId) {
       params = params.set('semester_id', semesterId);
+    }
+    if (vcPeriodId) {
+      params = params.set('vc_period_id', vcPeriodId);
     }
     if (campusId) {
       params = params.set('campus_id', campusId);

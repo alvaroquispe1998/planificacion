@@ -5,6 +5,7 @@ import { forkJoin } from 'rxjs';
 import { ApiService } from '../../core/api.service';
 
 type PlanningCycleDetailFilters = {
+  vc_period_id: string;
   semester_id: string;
   campus_id: string;
   faculty_id: string;
@@ -25,6 +26,7 @@ export class PlanningCycleDetailPageComponent implements OnInit {
   error = '';
 
   filters: PlanningCycleDetailFilters = {
+    vc_period_id: '',
     semester_id: '',
     campus_id: '',
     faculty_id: '',
@@ -34,6 +36,7 @@ export class PlanningCycleDetailPageComponent implements OnInit {
   };
 
   catalog: any = {
+    vc_periods: [],
     semesters: [],
     campuses: [],
     faculties: [],
@@ -51,6 +54,7 @@ export class PlanningCycleDetailPageComponent implements OnInit {
 
   ngOnInit(): void {
     const query = this.route.snapshot.queryParamMap;
+    this.filters.vc_period_id = query.get('vc_period_id') ?? '';
     this.filters.semester_id = query.get('semester_id') ?? '';
     this.filters.campus_id = query.get('campus_id') ?? '';
     this.filters.faculty_id = query.get('faculty_id') ?? '';
@@ -62,6 +66,10 @@ export class PlanningCycleDetailPageComponent implements OnInit {
 
   get semesterLabel() {
     return this.catalog.semesters.find((item: any) => item.id === this.filters.semester_id)?.name ?? '---';
+  }
+
+  get vcPeriodLabel() {
+    return this.catalog.vc_periods.find((item: any) => item.id === this.filters.vc_period_id)?.text ?? '---';
   }
 
   get campusLabel() {
@@ -100,6 +108,7 @@ export class PlanningCycleDetailPageComponent implements OnInit {
     forkJoin({
       catalog: this.api.getPlanningCatalogFilters(),
       offers: this.api.listPlanningOffers({
+        vc_period_id: this.filters.vc_period_id,
         semester_id: this.filters.semester_id,
         campus_id: this.filters.campus_id,
         faculty_id: this.filters.faculty_id,
@@ -123,6 +132,7 @@ export class PlanningCycleDetailPageComponent implements OnInit {
   goBack() {
     this.router.navigate(['/planning'], {
       queryParams: {
+        vc_period_id: this.filters.vc_period_id || null,
         semester_id: this.filters.semester_id || null,
         campus_id: this.filters.campus_id || null,
         faculty_id: this.filters.faculty_id || null,

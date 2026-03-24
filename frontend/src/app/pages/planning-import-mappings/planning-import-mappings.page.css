@@ -28,11 +28,14 @@
   display: grid;
   grid-template-columns: minmax(320px, 420px) 1fr;
   gap: 1rem;
+  align-items: start;
 }
 
 .form-panel {
   display: grid;
   gap: 0.9rem;
+  align-self: start;
+  height: fit-content;
 }
 
 .form-panel label {
