@@ -158,7 +158,6 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 URLs:
 
 - Frontend: `http://localhost:4200`
-- Backend: `http://localhost:3000`
 - MySQL: `127.0.0.1:3307`
 
 ### Produccion / publicada

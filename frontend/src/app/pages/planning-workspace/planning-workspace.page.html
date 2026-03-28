@@ -1,0 +1,561 @@
+<div class="workspace-shell">
+  <header class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Planning workspace</p>
+      <h1>Panel operativo</h1>
+      <p class="subtle">
+        Opera horarios, docentes y aulas desde una vista densa, sin mover la pagina resumen.
+      </p>
+    </div>
+
+    <div class="hero-actions">
+      <button type="button" class="btn btn-secondary" (click)="goBack()">Volver al resumen</button>
+      <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="loading || saving">
+        Actualizar
+      </button>
+    </div>
+  </header>
+
+  <p *ngIf="message" class="flash success">{{ message }}</p>
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+
+  <section class="kpi-grid">
+    <article class="kpi-card">
+      <span>Ofertas visibles</span>
+      <strong>{{ visibleTotals.offerings }}</strong>
+      <small>{{ workspace.totals.offerings }} cargadas desde el workspace</small>
+    </article>
+    <article class="kpi-card">
+      <span>Horarios visibles</span>
+      <strong>{{ visibleTotals.rows }}</strong>
+      <small>{{ visibleGroupCount }} grupos en vista</small>
+    </article>
+    <article class="kpi-card">
+      <span>Alertas</span>
+      <strong>{{ visibleTotals.alerts }}</strong>
+      <small>Incluye observaciones y bloqueos</small>
+    </article>
+    <article class="kpi-card blocked">
+      <span>Alertas bloqueantes</span>
+      <strong>{{ visibleTotals.blocking_alerts }}</strong>
+      <small>Filas que requieren atencion inmediata</small>
+    </article>
+  </section>
+
+  <section class="filters-card">
+    <label class="field">
+      <span>Periodo VC</span>
+      <select [(ngModel)]="filters.vc_period_id" (ngModelChange)="onVcPeriodChange()">
+        <option *ngFor="let period of periodOptions" [value]="period.id">
+          {{ period.text || period.label || period.id }}
+        </option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Sede</span>
+      <select [(ngModel)]="filters.campus_id" (ngModelChange)="onServerFilterChange()">
+        <option value="">Todas las sedes</option>
+        <option *ngFor="let campus of catalog.campuses" [value]="campus.id">
+          {{ campus.name }}
+        </option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Facultad</span>
+      <select [(ngModel)]="filters.faculty_id" (ngModelChange)="onFacultyChange()">
+        <option value="">Todas las facultades</option>
+        <option *ngFor="let faculty of catalog.faculties" [value]="faculty.id">
+          {{ faculty.name }}
+        </option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Programa</span>
+      <select [(ngModel)]="filters.academic_program_id" (ngModelChange)="onProgramChange()">
+        <option value="">Todos los programas</option>
+        <option *ngFor="let program of filteredPrograms" [value]="program.id">
+          {{ program.name }}
+        </option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Plan de estudio</span>
+      <select [(ngModel)]="filters.study_plan_id" (ngModelChange)="onServerFilterChange()">
+        <option value="">Todos los planes</option>
+        <option *ngFor="let plan of filteredStudyPlans" [value]="plan.id">
+          {{ plan.name }}
+        </option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Modalidad</span>
+      <select [(ngModel)]="filters.delivery_modality_id" (ngModelChange)="onServerFilterChange()">
+        <option value="">Todas</option>
+        <option *ngFor="let modality of modalityOptions" [value]="modality.id">
+          {{ modality.name }}
+        </option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>Turno</span>
+      <select [(ngModel)]="filters.shift_id" (ngModelChange)="onServerFilterChange()">
+        <option value="">Todos los turnos</option>
+        <option *ngFor="let shift of shiftOptions" [value]="shift.id">
+          {{ shift.label }}
+        </option>
+      </select>
+    </label>
+
+    <label class="field search-field">
+      <span>Busqueda</span>
+      <input
+        type="search"
+        [(ngModel)]="filters.search"
+        placeholder="Curso, docente, grupo o aula"
+        (keyup.enter)="applySearch()" />
+    </label>
+
+    <div class="filter-actions">
+      <button type="button" class="btn btn-primary" (click)="applySearch()" [disabled]="loading || saving">
+        Buscar
+      </button>
+      <button type="button" class="btn btn-secondary" (click)="clearFilters()" [disabled]="loading || saving">
+        Limpiar filtros
+      </button>
+    </div>
+  </section>
+
+  <section class="chips-row">
+    <button
+      *ngFor="let filter of quickFilterKeys"
+      type="button"
+      class="chip-btn"
+      [class.is-active]="quickFilter === filter"
+      (click)="setQuickFilter(filter)">
+      <span>{{ quickFilterLabel(filter) }}</span>
+      <strong>{{ quickFilterCount(filter) }}</strong>
+    </button>
+  </section>
+
+  <section class="toolbar" [class.is-empty]="selectedRowIds.length === 0">
+    <div class="toolbar-copy">
+      <strong>{{ selectedRowIds.length }}</strong>
+      <span>horarios seleccionados</span>
+    </div>
+
+    <div class="toolbar-actions">
+      <button type="button" class="btn btn-secondary btn-sm" (click)="clearSelection()" [disabled]="selectedRowIds.length === 0">
+        Limpiar seleccion
+      </button>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="openTeacherModal()" [disabled]="!canOpenTeacherModal">
+        Asignar docente
+      </button>
+      <button
+        type="button"
+        class="btn btn-secondary btn-sm"
+        (click)="openClassroomModal()"
+        [disabled]="!canOpenClassroomModal">
+        Asignar aula
+      </button>
+      <button
+        type="button"
+        class="btn btn-primary btn-sm"
+        (click)="openReplicateModal()"
+        [disabled]="selectedRowIds.length === 0 || saving || loading">
+        Replicar horario
+      </button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Operacion diaria</p>
+        <h2>Horarios por grupo</h2>
+      </div>
+      <span class="count">{{ visibleRows.length }} visibles</span>
+    </div>
+
+    <div class="table-wrap" *ngIf="visibleRows.length > 0; else workspaceEmpty">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="checkbox-col">
+              <input
+                type="checkbox"
+                [checked]="allVisibleSelected"
+                (click)="stopRowClick($event)"
+                (change)="toggleSelectAllVisible($any($event.target).checked)" />
+            </th>
+            <th>Estado</th>
+            <th>Curso</th>
+            <th>Grupo</th>
+            <th>Docente</th>
+            <th>Horario</th>
+            <th>Aula</th>
+            <th>Modalidad</th>
+            <th>Turno</th>
+            <th>Vac./Cap.</th>
+            <th>Alertas</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of visibleRows" [ngClass]="rowClasses(row)" (click)="openDrawer(row)">
+            <td class="checkbox-col">
+              <input
+                type="checkbox"
+                [checked]="selectedRowIds.includes(row.row_id)"
+                (click)="stopRowClick($event)"
+                (change)="toggleRowSelection(row.row_id, $any($event.target).checked)" />
+            </td>
+            <td>
+              <span class="pill" [ngClass]="rowStateClass(row)">{{ rowStateLabel(row) }}</span>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ courseLabel(row) }}</strong>
+                <span>{{ row.academic_program_name || 'Sin programa' }}</span>
+                <span>{{ row.study_plan_name || 'Sin plan' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ groupLabel(row) }}</strong>
+                <span>{{ groupMetaLabel(row) }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.primary_teacher_name || 'Sin docente' }}</strong>
+                <span>{{ row.teachers.length }} asignado(s)</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ scheduleLabel(row) }}</strong>
+                <span>{{ sessionTypeLabel(row.session_type) }}<ng-container *ngIf="row.minutes"> · {{ row.minutes }} min</ng-container></span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ classroomLabel(row) }}</strong>
+                <span>{{ buildingLabel(row) }}</span>
+              </div>
+            </td>
+            <td>{{ modalityLabel(row) }}</td>
+            <td>{{ shiftLabel(row.shift_id) }}</td>
+            <td>{{ capacityLabel(row) }}</td>
+            <td>
+              <div class="alert-stack" *ngIf="row.alerts.length > 0; else noAlerts">
+                <span *ngFor="let alert of alertPills(row)" class="mini-pill" [class.is-blocking]="alert.blocking">
+                  {{ alert.message }}
+                </span>
+                <span *ngIf="remainingAlertCount(row) > 0" class="mini-pill neutral">
+                  +{{ remainingAlertCount(row) }}
+                </span>
+              </div>
+              <ng-template #noAlerts>
+                <span class="mini-pill ok">Sin alertas</span>
+              </ng-template>
+            </td>
+            <td class="row-actions-cell">
+              <button
+                type="button"
+                class="btn-link"
+                (click)="duplicateGroup($event, row)"
+                [disabled]="saving || loading">
+                Duplicar grupo
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ng-template #workspaceEmpty>
+      <div class="empty-block">
+        <h3>{{ loading ? 'Cargando workspace...' : 'No hay filas operativas para los filtros actuales.' }}</h3>
+        <p>
+          {{
+            loading
+              ? 'Estamos preparando el cockpit operativo.'
+              : 'Prueba con otra combinacion de filtros o limpia la busqueda para ver filas disponibles.'
+          }}
+        </p>
+      </div>
+    </ng-template>
+  </section>
+</div>
+
+<div *ngIf="drawer.open" class="drawer-backdrop" (click)="closeDrawer()"></div>
+<aside class="workspace-drawer" [class.is-open]="drawer.open">
+  <div class="drawer-scroll" *ngIf="activeDrawerRow as row">
+    <div class="drawer-head">
+      <div>
+        <p class="eyebrow">Fila operativa</p>
+        <h3>{{ courseLabel(row) }}</h3>
+        <p>{{ groupLabel(row) }} · {{ groupMetaLabel(row) }} · {{ row.campus_name || 'Sin sede' }}</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeDrawer()">Cerrar</button>
+    </div>
+
+    <div class="drawer-status">
+      <span class="pill" [ngClass]="rowStateClass(row)">{{ rowStateLabel(row) }}</span>
+      <span class="mini-pill neutral">{{ shiftLabel(row.shift_id) }}</span>
+      <span class="mini-pill neutral">{{ modalityLabel(row) }}</span>
+      <span class="mini-pill neutral">{{ sessionTypeLabel(row.session_type) }}</span>
+    </div>
+
+    <section class="drawer-section">
+      <div class="section-minihead">
+        <h4>Asignaciones</h4>
+      </div>
+
+      <label class="field">
+        <span>Docente principal</span>
+        <select [(ngModel)]="drawer.form.teacher_id">
+          <option value="">Sin docente</option>
+          <option *ngFor="let teacher of drawerTeacherOptions" [value]="teacher.id">
+            {{ teacherDisplay(teacher) }}
+          </option>
+        </select>
+      </label>
+
+      <div class="grid-two">
+        <label class="field">
+          <span>Pabellon</span>
+          <select [(ngModel)]="drawer.form.building_id" (ngModelChange)="onDrawerBuildingChange($event)">
+            <option value="">Sin pabellon</option>
+            <option *ngFor="let building of drawerCampusBuildings" [value]="building.id">
+              {{ building.name }}
+            </option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Aula / Laboratorio</span>
+          <select [(ngModel)]="drawer.form.classroom_id" [disabled]="!drawer.form.building_id">
+            <option value="">Sin aula</option>
+            <option *ngFor="let classroom of drawerClassroomOptions" [value]="classroom.id">
+              {{ classroomDisplay(classroom) }}
+            </option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="drawer-section">
+      <div class="section-minihead">
+        <h4>Horario</h4>
+        <small *ngIf="!row.meeting_id">Si completas dia y horas se creara el primer horario.</small>
+      </div>
+
+      <div class="grid-two">
+        <label class="field">
+          <span>Tipo de sesion</span>
+          <select [(ngModel)]="drawer.form.session_type">
+            <option *ngFor="let option of sessionTypeOptions" [value]="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Dia</span>
+          <select [(ngModel)]="drawer.form.day_of_week">
+            <option value="">Selecciona un dia</option>
+            <option *ngFor="let day of dayOptions" [value]="day.value">{{ day.label }}</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="grid-two">
+        <label class="field">
+          <span>Hora inicio</span>
+          <input type="time" [(ngModel)]="drawer.form.start_time" />
+        </label>
+
+        <label class="field">
+          <span>Hora fin</span>
+          <input type="time" [(ngModel)]="drawer.form.end_time" />
+        </label>
+      </div>
+
+      <div class="grid-two">
+        <label class="field">
+          <span>Horas academicas</span>
+          <input type="number" min="0" step="1" [(ngModel)]="drawer.form.academic_hours" />
+        </label>
+      </div>
+    </section>
+
+    <section class="drawer-section">
+      <div class="section-minihead">
+        <h4>Capacidad y oferta</h4>
+      </div>
+
+      <div class="grid-two">
+        <label class="field">
+          <span>Capacidad del grupo</span>
+          <input type="number" min="0" step="1" [(ngModel)]="drawer.form.capacity" />
+        </label>
+
+        <label class="field">
+          <span>Vacantes proyectadas</span>
+          <input type="number" min="0" step="1" [(ngModel)]="drawer.form.projected_vacancies" />
+        </label>
+      </div>
+
+      <label class="field checkbox-field">
+        <input type="checkbox" [(ngModel)]="drawer.form.offering_status" />
+        <span>Oferta activa</span>
+      </label>
+
+      <label class="field">
+        <span>Nota del grupo</span>
+        <textarea rows="4" [(ngModel)]="drawer.form.group_note" placeholder="Observaciones operativas"></textarea>
+      </label>
+    </section>
+
+    <section class="drawer-section" *ngIf="activeDrawerBlockingAlerts.length > 0 || activeDrawerObservedAlerts.length > 0">
+      <div class="section-minihead">
+        <h4>Alertas</h4>
+      </div>
+
+      <div class="alerts-detail" *ngIf="activeDrawerBlockingAlerts.length > 0">
+        <p class="alert-title">Bloqueantes</p>
+        <article *ngFor="let alert of activeDrawerBlockingAlerts" class="alert-card blocking">
+          <strong>{{ alert.message }}</strong>
+          <span>{{ alert.code }}</span>
+        </article>
+      </div>
+
+      <div class="alerts-detail" *ngIf="activeDrawerObservedAlerts.length > 0">
+        <p class="alert-title">Observaciones</p>
+        <article *ngFor="let alert of activeDrawerObservedAlerts" class="alert-card observed">
+          <strong>{{ alert.message }}</strong>
+          <span>{{ alert.code }}</span>
+        </article>
+      </div>
+    </section>
+
+    <div class="drawer-actions">
+      <button type="button" class="btn btn-secondary" (click)="closeDrawer()">Cancelar</button>
+      <button type="button" class="btn btn-primary" (click)="saveDrawer()" [disabled]="saving || loading">
+        Guardar cambios
+      </button>
+    </div>
+  </div>
+</aside>
+
+<div *ngIf="teacherModal.open" class="modal-backdrop">
+  <div class="modal-card" (click)="stopRowClick($event)">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Accion masiva</p>
+        <h3>Asignar docente</h3>
+        <p>{{ selectedRowIds.length }} filas seleccionadas</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeTeacherModal()">Cerrar</button>
+    </div>
+
+    <label class="field">
+      <span>Buscar docente</span>
+      <input type="search" [(ngModel)]="teacherModal.query" placeholder="DNI o nombre" />
+    </label>
+
+    <label class="field">
+      <span>Docente</span>
+      <select [(ngModel)]="teacherModal.teacher_id" size="10">
+        <option *ngFor="let teacher of bulkTeacherOptions" [value]="teacher.id">
+          {{ teacherDisplay(teacher) }}
+        </option>
+      </select>
+    </label>
+
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" (click)="closeTeacherModal()">Cancelar</button>
+      <button type="button" class="btn btn-primary" (click)="confirmBulkTeacher()" [disabled]="saving">
+        Asignar docente
+      </button>
+    </div>
+  </div>
+</div>
+
+<div *ngIf="classroomModal.open" class="modal-backdrop">
+  <div class="modal-card" (click)="stopRowClick($event)">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Accion masiva</p>
+        <h3>Asignar aula</h3>
+        <p>{{ selectedRowIds.length }} filas seleccionadas</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeClassroomModal()">Cerrar</button>
+    </div>
+
+    <label class="field">
+      <span>Buscar aula</span>
+      <input type="search" [(ngModel)]="classroomModal.query" placeholder="Codigo, aula o aforo" />
+    </label>
+
+    <label class="field">
+      <span>Aula</span>
+      <select [(ngModel)]="classroomModal.classroom_id" size="10">
+        <option *ngFor="let classroom of bulkClassroomOptions" [value]="classroom.id">
+          {{ classroomDisplay(classroom) }}
+        </option>
+      </select>
+    </label>
+
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" (click)="closeClassroomModal()">Cancelar</button>
+      <button type="button" class="btn btn-primary" (click)="confirmBulkClassroom()" [disabled]="saving">
+        Asignar aula
+      </button>
+    </div>
+  </div>
+</div>
+
+<div *ngIf="replicateModal.open" class="modal-backdrop">
+  <div class="modal-card" (click)="stopRowClick($event)">
+    <div class="modal-head">
+      <div>
+        <p class="eyebrow">Accion masiva</p>
+        <h3>Replicar horario</h3>
+        <p>La replicacion solo se aplica a grupos del mismo curso y se elige a partir de horarios seleccionados.</p>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="closeReplicateModal()">Cerrar</button>
+    </div>
+
+    <label class="field">
+      <span>Fila origen</span>
+      <select [(ngModel)]="replicateModal.source_row_id">
+        <option *ngFor="let row of replicateSourceOptions()" [value]="row.row_id">
+          {{ courseLabel(row) }} · Grupo {{ row.group_code }} · {{ scheduleLabel(row) }}
+        </option>
+      </select>
+    </label>
+
+    <div class="target-list">
+      <p class="alert-title">Grupos destino</p>
+      <article *ngFor="let row of replicateTargetRows()" class="target-row">
+        <strong>{{ groupLabel(row) }} · Grupo {{ row.group_code }}</strong>
+        <span>{{ row.primary_teacher_name || 'Sin docente' }}</span>
+      </article>
+    </div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn btn-secondary" (click)="closeReplicateModal()">Cancelar</button>
+      <button type="button" class="btn btn-primary" (click)="confirmReplicate()" [disabled]="saving">
+        Replicar horario
+      </button>
+    </div>
+  </div>
+</div>

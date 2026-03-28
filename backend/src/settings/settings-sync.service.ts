@@ -538,6 +538,43 @@ export class SettingsSyncService {
     return results;
   }
 
+  async fetchSourcePayloadByCode(
+    code: string,
+    path: string,
+    query?: Record<string, string>,
+    options?: { skipProbe?: boolean },
+  ) {
+    await this.ensureDefaultSources();
+    if (options?.skipProbe) {
+      const source = await this.findSourceOrFail(code);
+      const session = await this.sessionsRepo.findOne({ where: { source_id: source.id } });
+      if (!session) {
+        throw new BadRequestException(`La fuente ${code} no tiene una cookie/sesion configurada.`);
+      }
+      const payload = await this.fetchPayload(source, this.decryptCookieJar(session.cookie_jar_encrypted), path, query);
+      await this.markSessionStatus(source.id, 'ACTIVE', null);
+      return payload;
+    }
+
+    const result = await this.probeSourceSession(code);
+    if (!result.ok || !result.cookie) {
+      throw new BadRequestException(
+        result.reason || `La fuente ${code} no tiene una sesion valida para consultar datos.`,
+      );
+    }
+    return this.fetchPayload(result.source, result.cookie, path, query);
+  }
+
+  async fetchSourceRowsByCode(
+    code: string,
+    path: string,
+    query?: Record<string, string>,
+    options?: { skipProbe?: boolean },
+  ) {
+    const payload = await this.fetchSourcePayloadByCode(code, path, query, options);
+    return extractRows(payload);
+  }
+
   async runSync(dto: RunSettingsSyncDto) {
     await this.ensureDefaultSources();
     const requestedResources = dto.resources?.length
@@ -1825,10 +1862,7 @@ export class SettingsSyncService {
       const unauthorizedStatus = response.status === 401 || response.status === 403;
       const htmlLooksLikeLogin =
         contentType.includes('text/html') && /login|iniciar sesi[oó]n|password/i.test(bodyText);
-      const explicitSessionError =
-        typeof parsed === 'object' &&
-        parsed !== null &&
-        /session|unauthorized|forbidden/i.test(JSON.stringify(parsed));
+      const explicitSessionError = hasExplicitAuthError(parsed);
       const expired = unauthorizedStatus || redirectedToLogin || htmlLooksLikeLogin || explicitSessionError;
 
       const setCookie = (response.headers as any).getSetCookie?.() as string[] | undefined;
@@ -2511,6 +2545,16 @@ function extractRows(payload: unknown): Record<string, unknown>[] {
     return asRecord.rows.filter((item) => typeof item === 'object') as Record<string, unknown>[];
   }
   return [];
+}
+
+function hasExplicitAuthError(payload: unknown) {
+  if (!payload || typeof payload !== 'object') {
+    return false;
+  }
+  const serialized = JSON.stringify(payload);
+  return /session expired|expired session|sesion vencida|unauthorized|unauthenticated|forbidden|access denied|authentication required|login required|must log in|debe iniciar sesi[oó]n/i.test(
+    serialized,
+  );
 }
 
 function pick(row: Record<string, unknown>, ...paths: string[]) {

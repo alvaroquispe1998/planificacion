@@ -28,6 +28,7 @@ import {
   CreatePlanningSectionDto,
   CreatePlanningSubsectionDto,
   CreatePlanningSubsectionScheduleDto,
+  PreviewPlanningAkademicImportDto,
   ApprovePlanningPlanDto,
   RecalculatePlanningVcMatchesDto,
   CreateClassGroupDto,
@@ -105,6 +106,19 @@ export class PlanningController {
     @UploadedFile() file?: any,
   ) {
     const result = await this.planningImportService.previewExcelImport(file, idActor(authUser));
+    this.assertImportBatchScopeAccess(authUser, result);
+    return result;
+  }
+
+  @Post('imports/akademic/preview')
+  async previewPlanningAkademicImport(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Body() dto: PreviewPlanningAkademicImportDto,
+  ) {
+    if (dto.faculty_id || dto.academic_program_id) {
+      this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
+    }
+    const result = await this.planningImportService.previewAkademicImport(dto, idActor(authUser));
     this.assertImportBatchScopeAccess(authUser, result);
     return result;
   }
@@ -398,6 +412,36 @@ export class PlanningController {
       this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
     }
     return this.planningManualService.listOffers(
+      semesterId,
+      vcPeriodId,
+      campusId,
+      facultyId,
+      academicProgramId,
+      cycle ? Number(cycle) : undefined,
+      studyPlanId,
+    ).then((rows) =>
+      this.authService.filterByScope(authUser, rows, (item: any) => ({
+        faculty_id: item.faculty_id ?? null,
+        academic_program_id: item.academic_program_id ?? null,
+      })),
+    );
+  }
+
+  @Get('offers-expanded')
+  listExpandedOffers(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Query('semester_id') semesterId?: string,
+    @Query('vc_period_id') vcPeriodId?: string,
+    @Query('campus_id') campusId?: string,
+    @Query('faculty_id') facultyId?: string,
+    @Query('academic_program_id') academicProgramId?: string,
+    @Query('cycle') cycle?: string,
+    @Query('study_plan_id') studyPlanId?: string,
+  ) {
+    if (facultyId || academicProgramId) {
+      this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
+    }
+    return this.planningManualService.listExpandedOffers(
       semesterId,
       vcPeriodId,
       campusId,

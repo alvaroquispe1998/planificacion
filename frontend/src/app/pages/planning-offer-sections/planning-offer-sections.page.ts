@@ -388,7 +388,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       })
       .subscribe({
         next: (section) => {
-          this.message = `Seccion ${section.code} creada.`;
+        this.message = `Seccion ${this.sectionPrimaryCode(section)} creada.`;
           this.error = '';
           this.showCreateModal = false;
           this.saving = false;
@@ -471,7 +471,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     this.updateSubsectionField(
       subsection,
       { responsible_teacher_id: teacher?.id ?? '' },
-      `Subseccion ${subsection.code} actualizada.`,
+      `Grupo ${subsection.code} actualizado.`,
     );
   }
 
@@ -544,8 +544,8 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       return;
     }
     const confirmation = await this.dialog.confirm({
-      title: `Eliminar seccion ${section.code}`,
-      message: `Se eliminara la seccion ${section.code} y todas sus subsecciones.\n\nEsta accion no se puede deshacer. Deseas continuar?`,
+      title: `Eliminar seccion ${this.sectionPrimaryCode(section)}`,
+      message: `Se eliminara la seccion ${this.sectionPrimaryCode(section)} y todos sus grupos.\n\nEsta accion no se puede deshacer. Deseas continuar?`,
       confirmLabel: 'Eliminar seccion',
       cancelLabel: 'Cancelar',
       tone: 'danger',
@@ -561,7 +561,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       next: (response) => {
         const deletedSubsections = Number(response?.deleted_subsection_count ?? 0);
         const deletedSchedules = Number(response?.deleted_schedule_count ?? 0);
-        this.message = `Seccion ${section.code} eliminada. ${deletedSubsections} subsecciones y ${deletedSchedules} horarios eliminados.`;
+        this.message = `Seccion ${this.sectionPrimaryCode(section)} eliminada. ${deletedSubsections} grupos y ${deletedSchedules} horarios eliminados.`;
         if (this.expandedSectionId === section.id) {
           this.expandedSectionId = '';
         }
@@ -613,7 +613,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
         this.cdr.detectChanges();
       },
       error: (err) => {
-        this.error = err?.error?.message ?? 'No se pudo actualizar la subseccion.';
+        this.error = err?.error?.message ?? 'No se pudo actualizar el grupo.';
         this.saving = false;
         this.reloadOffer();
         this.cdr.detectChanges();
@@ -718,6 +718,17 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     return teacher.dni ? `${teacher.dni} - ${name}` : name;
   }
 
+  sectionPrimaryCode(section: any) {
+    return section?.external_code || section?.code || 'Seccion';
+  }
+
+  sectionSecondaryCode(section: any) {
+    if (section?.external_code && section?.code && section.external_code !== section.code) {
+      return `Interna ${section.code}`;
+    }
+    return '';
+  }
+
   scheduleSummary(subsection: any) {
     const schedules = subsection?.schedules ?? [];
     if (schedules.length === 0) {
@@ -749,6 +760,32 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   formatAcademicHours(value: number | string | null | undefined) {
     const parsed = Number(value ?? 0);
     return Number.isFinite(parsed) ? parsed.toFixed(1) : '0.0';
+  }
+
+  scheduleSessionTypeLabel(schedule: any) {
+    switch (schedule?.session_type) {
+      case 'THEORY':
+        return 'Teoria';
+      case 'PRACTICE':
+        return 'Practica';
+      case 'LAB':
+        return 'Laboratorio';
+      default:
+        return 'Otro';
+    }
+  }
+
+  scheduleTeacherLabel(schedule: any, subsection: any) {
+    return this.teacherDisplay(schedule?.teacher ?? subsection?.responsible_teacher ?? null);
+  }
+
+  scheduleLocationLabel(schedule: any, subsection: any) {
+    const buildingName = schedule?.building?.name ?? subsection?.building?.name ?? '';
+    const classroomName = schedule?.classroom?.name ?? subsection?.classroom?.name ?? '';
+    if (buildingName && classroomName) {
+      return `${buildingName} / ${classroomName}`;
+    }
+    return buildingName || classroomName || 'Sin ubicar';
   }
 
   subsectionKindLabel(kind: string | null | undefined) {
@@ -803,14 +840,14 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     const subsectionCount = Math.max(1, Number(section?.subsections?.length ?? 0));
     switch (this.offer?.course_type) {
       case 'TEORICO':
-        return 'Este curso solo admite subsecciones teoricas.';
+        return 'Este curso solo admite grupos teoricos.';
       case 'PRACTICO':
-        return 'Este curso solo admite subsecciones practicas.';
+        return 'Este curso solo admite grupos practicos.';
       default:
         if (subsectionCount <= 1) {
-          return 'Si solo existe una subseccion, puedes definirla como teorico practico o practico teorico.';
+          return 'Si solo existe un grupo, puedes definirlo como teorico practico o practico teorico.';
         }
-        return 'En cursos teorico practico con varias subsecciones debe quedar al menos una teorica y una practica.';
+        return 'En cursos teorico practico con varios grupos debe quedar al menos uno teorico y uno practico.';
     }
   }
 
@@ -896,7 +933,13 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     if (!this.canCreateSchedule(subsection.id)) {
       return;
     }
-    const existingSchedule = subsection?.schedules?.[0] ?? null;
+    const existingSchedule =
+      (subsection?.schedules ?? []).find(
+        (item: any) =>
+          item.day_of_week === draft.day_of_week &&
+          this.normalizeScheduleTime(item.start_time, draft.start_time) === draft.start_time &&
+          this.normalizeScheduleTime(item.end_time, draft.end_time) === draft.end_time,
+      ) ?? null;
     this.saving = true;
     const request = existingSchedule
       ? this.api.updatePlanningSubsectionSchedule(existingSchedule.id, draft)
@@ -909,7 +952,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
         this.error = '';
         this.saving = false;
         this.upsertSubsection(updatedSubsection);
-        this.scheduleDraftsBySubsectionId[subsection.id] = this.scheduleDraftFromSubsection(updatedSubsection);
+        this.scheduleDraftsBySubsectionId[subsection.id] = this.defaultScheduleDraft();
         this.cdr.detectChanges();
       },
       error: (err) => {
@@ -986,7 +1029,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     }
     const subsections = section?.subsections ?? [];
     if (subsections.length === 0) {
-      return 'Sin subsecciones';
+      return 'Sin grupos';
     }
     const readyCount = subsections.filter((item: any) => this.subsectionIsReady(item)).length;
     return readyCount === subsections.length ? 'Configurada' : 'En progreso';
@@ -1005,7 +1048,14 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     if (scheduled.length === 1) {
       return `${scheduled[0].code}: ${this.scheduleSummary(scheduled[0])}`;
     }
-    return `${scheduled.length}/${subsections.length} subsecciones con horario`;
+    return `${scheduled.length}/${subsections.length} grupos con horario`;
+  }
+
+  sectionScheduleCount(section: any) {
+    return (section?.subsections ?? []).reduce(
+      (total: number, subsection: any) => total + Number(subsection?.schedules?.length ?? 0),
+      0,
+    );
   }
 
   subsectionLocationSummary(subsection: any) {
@@ -1112,7 +1162,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
 
   sectionDeleteHelper(section: any) {
     if (this.canDeleteSection(section)) {
-      return 'Eliminar esta seccion tambien eliminara sus subsecciones y horarios.';
+      return 'Eliminar esta seccion tambien eliminara sus grupos y horarios.';
     }
     return 'Solo puedes eliminar la ultima seccion para conservar el correlativo.';
   }
@@ -1203,6 +1253,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   private normalizeSection(section: any) {
     return {
       ...section,
+      external_code: section?.external_code ?? '',
       is_cepea: Boolean(section?.is_cepea),
       teacher_id: section.teacher_id ?? '',
       projected_vacancies: Number(section.projected_vacancies ?? 0),
@@ -1228,7 +1279,15 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       assigned_total_hours: Number(subsection.assigned_total_hours ?? 0),
       modality: subsection.modality ?? null,
       responsible_teacher: subsection.responsible_teacher ?? null,
-      schedules: [...(subsection.schedules ?? [])].sort((a: any, b: any) => this.compareSchedules(a, b)),
+      schedules: [...(subsection.schedules ?? [])]
+        .map((schedule: any) => ({
+          ...schedule,
+          teacher: schedule?.teacher ?? null,
+          building: schedule?.building ?? null,
+          classroom: schedule?.classroom ?? null,
+          session_type: schedule?.session_type ?? 'OTHER',
+        }))
+        .sort((a: any, b: any) => this.compareSchedules(a, b)),
       conflicts: [...(subsection.conflicts ?? [])],
     };
   }

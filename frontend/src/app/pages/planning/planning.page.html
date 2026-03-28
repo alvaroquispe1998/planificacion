@@ -5,6 +5,7 @@
       <h1>Ciclos configurados</h1>
     </div>
     <div class="hero-actions">
+      <button class="btn btn-secondary btn-sm" (click)="openWorkspace()">Abrir panel operativo</button>
       <button class="btn btn-secondary btn-sm" (click)="openVcMatch()">Match VC</button>
       <button
         *ngIf="auth.hasPermission('action.planning.change_log.view')"

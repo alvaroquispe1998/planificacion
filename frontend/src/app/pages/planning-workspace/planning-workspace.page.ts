@@ -1,0 +1,1917 @@
+import { CommonModule } from '@angular/common';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
+import { catchError, forkJoin, of } from 'rxjs';
+import { ApiService } from '../../core/api.service';
+import { AuthService } from '../../core/auth.service';
+import { DialogService } from '../../core/dialog.service';
+
+type PlanningWorkspaceFilters = {
+  vc_period_id: string;
+  semester_id: string;
+  campus_id: string;
+  faculty_id: string;
+  academic_program_id: string;
+  study_plan_id: string;
+  delivery_modality_id: string;
+  shift_id: string;
+  search: string;
+};
+
+type WorkspaceQuickFilter = 'ALL' | 'BLOCKED' | 'ALERTS' | 'NO_TEACHER' | 'NO_SCHEDULE' | 'COMPLETE';
+
+type PlanningWorkspaceAlert = {
+  code: string;
+  severity: string;
+  message: string;
+  blocking: boolean;
+};
+
+type PlanningWorkspaceTeacher = {
+  assignment_id: string | null;
+  teacher_id: string;
+  full_name: string | null;
+  role: string;
+  is_primary: boolean;
+};
+
+type PlanningWorkspaceRow = {
+  row_id: string;
+  row_kind: 'GROUP' | 'MEETING';
+  offering_id: string;
+  section_id: string;
+  group_id: string;
+  meeting_id: string | null;
+  semester_id: string;
+  semester_name: string | null;
+  campus_id: string;
+  campus_name: string | null;
+  academic_program_id: string;
+  academic_program_name: string | null;
+  study_plan_id: string;
+  study_plan_name: string | null;
+  course_id: string;
+  course_code: string | null;
+  course_name: string | null;
+  course_section_id: string;
+  course_section_name: string | null;
+  external_section_code: string | null;
+  internal_section_code: string | null;
+  delivery_modality_id: string;
+  shift_id: string;
+  projected_vacancies: number | null;
+  offering_status: boolean;
+  source_status: string;
+  group_type: string;
+  group_code: string;
+  group_capacity: number | null;
+  building_id: string | null;
+  building_name: string | null;
+  group_note: string | null;
+  teachers: PlanningWorkspaceTeacher[];
+  primary_teacher_name: string | null;
+  session_type: string | null;
+  day_of_week: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  minutes: number;
+  academic_hours: number | null;
+  classroom_id: string | null;
+  classroom_name: string | null;
+  classroom_code: string | null;
+  assigned_theoretical_hours: number | null;
+  assigned_practical_hours: number | null;
+  assigned_total_hours: number | null;
+  alerts: PlanningWorkspaceAlert[];
+  alert_count: number;
+  blocking_alert_count: number;
+};
+
+type PlanningWorkspaceSummary = {
+  offering_id: string;
+  semester_id: string;
+  course_id: string;
+  course_code: string | null;
+  course_name: string | null;
+  academic_program_name: string | null;
+  study_plan_name: string | null;
+  campus_name: string | null;
+  group_count: number;
+  row_count: number;
+  scheduled_row_count: number;
+  teacher_count: number;
+  total_alerts: number;
+  blocking_alerts: number;
+  hours_required: {
+    theory: number;
+    practice: number;
+    lab: number;
+  };
+  hours_planned: {
+    theory: number;
+    practice: number;
+    lab: number;
+  };
+  state: 'DRAFT' | 'IN_PROGRESS' | 'COMPLETE' | 'BLOCKED';
+};
+
+type PlanningWorkspaceTotals = {
+  offerings: number;
+  rows: number;
+  alerts: number;
+  blocking_alerts: number;
+};
+
+type PlanningWorkspaceResponse = {
+  filters: Record<string, string>;
+  summaries: PlanningWorkspaceSummary[];
+  rows: PlanningWorkspaceRow[];
+  totals: PlanningWorkspaceTotals;
+};
+
+type WorkspaceDrawerForm = {
+  teacher_id: string;
+  building_id: string;
+  classroom_id: string;
+  session_type: string;
+  day_of_week: string;
+  start_time: string;
+  end_time: string;
+  academic_hours: string;
+  capacity: string;
+  group_note: string;
+  projected_vacancies: string;
+  offering_status: boolean;
+};
+
+type WorkspaceCatalog = {
+  vc_periods: any[];
+  semesters: any[];
+  campuses: any[];
+  faculties: any[];
+  academic_programs: any[];
+  study_plans: any[];
+  course_modalities: any[];
+  shift_options: Array<{ id: string; label: string }>;
+};
+
+@Component({
+  selector: 'app-planning-workspace-page',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  templateUrl: './planning-workspace.page.html',
+  styleUrl: './planning-workspace.page.css',
+})
+export class PlanningWorkspacePageComponent implements OnInit {
+  private readonly filtersStorageKey = 'planning.workspace.filters';
+  private readonly dayOrder: Record<string, number> = {
+    LUNES: 1,
+    MARTES: 2,
+    MIERCOLES: 3,
+    JUEVES: 4,
+    VIERNES: 5,
+    SABADO: 6,
+    DOMINGO: 7,
+  };
+
+  readonly dayOptions = [
+    { value: 'LUNES', label: 'Lunes' },
+    { value: 'MARTES', label: 'Martes' },
+    { value: 'MIERCOLES', label: 'Miercoles' },
+    { value: 'JUEVES', label: 'Jueves' },
+    { value: 'VIERNES', label: 'Viernes' },
+    { value: 'SABADO', label: 'Sabado' },
+    { value: 'DOMINGO', label: 'Domingo' },
+  ];
+
+  readonly sessionTypeOptions = [
+    { value: 'THEORY', label: 'Teoria' },
+    { value: 'PRACTICE', label: 'Practica' },
+    { value: 'LAB', label: 'Laboratorio' },
+    { value: 'OTHER', label: 'Otro' },
+  ];
+
+  readonly fallbackShiftOptions = [
+    { id: 'DIURNO', label: 'Diurno' },
+    { id: 'MANANA', label: 'Manana' },
+    { id: 'TARDE', label: 'Tarde' },
+    { id: 'NOCHE', label: 'Noche' },
+    { id: 'NOCTURNO', label: 'Nocturno' },
+    { id: 'TARDE/NOCHE', label: 'Tarde/Noche' },
+  ];
+
+  readonly quickFilterKeys: WorkspaceQuickFilter[] = [
+    'ALL',
+    'BLOCKED',
+    'ALERTS',
+    'NO_TEACHER',
+    'NO_SCHEDULE',
+    'COMPLETE',
+  ];
+
+  loading = true;
+  saving = false;
+  error = '';
+  message = '';
+  quickFilter: WorkspaceQuickFilter = 'ALL';
+
+  filters: PlanningWorkspaceFilters = this.emptyFilters();
+  catalog: WorkspaceCatalog = this.emptyCatalog();
+  workspace: PlanningWorkspaceResponse = this.emptyWorkspace();
+  offerDetails: any[] = [];
+  teachers: any[] = [];
+  buildings: any[] = [];
+  classrooms: any[] = [];
+  selectedRowIds: string[] = [];
+
+  drawer = {
+    open: false,
+    row_id: '',
+    form: this.emptyDrawerForm(),
+  };
+
+  teacherModal = {
+    open: false,
+    teacher_id: '',
+    query: '',
+  };
+
+  classroomModal = {
+    open: false,
+    classroom_id: '',
+    query: '',
+  };
+
+  replicateModal = {
+    open: false,
+    source_row_id: '',
+  };
+
+  constructor(
+    private readonly api: ApiService,
+    private readonly route: ActivatedRoute,
+    private readonly router: Router,
+    private readonly cdr: ChangeDetectorRef,
+    private readonly dialog: DialogService,
+    readonly auth: AuthService,
+  ) {}
+
+  ngOnInit(): void {
+    this.restoreFilters();
+    this.loadBootstrap();
+  }
+
+  get periodOptions() {
+    return Array.isArray(this.catalog.vc_periods) ? this.catalog.vc_periods : [];
+  }
+
+  get filteredPrograms() {
+    const items = Array.isArray(this.catalog.academic_programs) ? this.catalog.academic_programs : [];
+    if (!this.filters.faculty_id) {
+      return items;
+    }
+    return items.filter((item: any) => item.faculty_id === this.filters.faculty_id);
+  }
+
+  get filteredStudyPlans() {
+    const items = Array.isArray(this.catalog.study_plans) ? this.catalog.study_plans : [];
+    return items.filter((item: any) => {
+      if (this.filters.faculty_id && item.faculty_id !== this.filters.faculty_id) {
+        return false;
+      }
+      if (this.filters.academic_program_id && item.academic_program_id !== this.filters.academic_program_id) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  get modalityOptions() {
+    return Array.isArray(this.catalog.course_modalities) ? this.catalog.course_modalities : [];
+  }
+
+  get shiftOptions() {
+    const options = Array.isArray(this.catalog.shift_options) ? this.catalog.shift_options : [];
+    return options.length > 0 ? options : this.fallbackShiftOptions;
+  }
+
+  get baseRows() {
+    return this.workspace.rows.filter(
+      (row) =>
+        this.matchesFacultyFilter(row) &&
+        this.matchesModalityFilter(row) &&
+        this.matchesShiftFilter(row) &&
+        this.matchesSearchFilter(row),
+    );
+  }
+
+  get visibleRows() {
+    return [...this.baseRows]
+      .filter((row) => this.matchesQuickFilter(row))
+      .sort((left, right) => this.compareRows(left, right));
+  }
+
+  get visibleTotals() {
+    const rows = this.visibleRows;
+    return {
+      offerings: new Set(rows.map((row) => row.offering_id)).size,
+      rows: rows.length,
+      alerts: rows.reduce((sum, row) => sum + row.alert_count, 0),
+      blocking_alerts: rows.reduce((sum, row) => sum + row.blocking_alert_count, 0),
+    };
+  }
+
+  get visibleGroupCount() {
+    return new Set(this.visibleRows.map((row) => row.group_id)).size;
+  }
+
+  get selectedRows() {
+    const selected = new Set(this.selectedRowIds);
+    return this.workspace.rows.filter((row) => selected.has(row.row_id));
+  }
+
+  get allVisibleSelected() {
+    return this.visibleRows.length > 0 && this.visibleRows.every((row) => this.selectedRowIds.includes(row.row_id));
+  }
+
+  get activeDrawerRow() {
+    return this.workspace.rows.find((row) => row.row_id === this.drawer.row_id) ?? null;
+  }
+
+  get activeDrawerBlockingAlerts() {
+    return (this.activeDrawerRow?.alerts ?? []).filter((item) => item.blocking);
+  }
+
+  get activeDrawerObservedAlerts() {
+    return (this.activeDrawerRow?.alerts ?? []).filter((item) => !item.blocking);
+  }
+
+  get selectedCampusId() {
+    const campusIds = [...new Set(this.selectedRows.map((row) => row.campus_id).filter(Boolean))];
+    return campusIds.length === 1 ? campusIds[0] : '';
+  }
+
+  get selectedMeetingRows() {
+    return this.selectedRows.filter((row) => Boolean(row.meeting_id));
+  }
+
+  get canOpenTeacherModal() {
+    return this.selectedRows.length > 0 && !this.loading && !this.saving;
+  }
+
+  get canOpenClassroomModal() {
+    return (
+      this.selectedRows.length > 0 &&
+      Boolean(this.selectedCampusId) &&
+      !this.loading &&
+      !this.saving
+    );
+  }
+
+  get bulkTeacherOptions() {
+    return this.filteredTeachers(this.teacherModal.query);
+  }
+
+  get bulkClassroomOptions() {
+    return this.filteredClassrooms(this.classroomModal.query, this.selectedCampusId);
+  }
+
+  get drawerTeacherOptions() {
+    return this.teachers;
+  }
+
+  get drawerCampusBuildings() {
+    const campusId = this.activeDrawerRow?.campus_id ?? '';
+    if (!campusId) {
+      return [];
+    }
+    return this.buildings.filter((item: any) => item.campus_id === campusId);
+  }
+
+  get drawerClassroomOptions() {
+    const campusId = this.activeDrawerRow?.campus_id ?? '';
+    const buildingId = this.drawer.form.building_id ?? '';
+    if (!campusId || !buildingId) {
+      return [];
+    }
+    return this.classrooms.filter(
+      (item: any) => item.campus_id === campusId && item.building_id === buildingId,
+    );
+  }
+
+  loadBootstrap() {
+    this.loading = true;
+    this.error = '';
+    forkJoin({
+      catalog: this.api.getPlanningCatalogFilters(),
+      teachers: this.api.listTeachers().pipe(catchError(() => of([]))),
+      buildings: this.api.listBuildings().pipe(catchError(() => of([]))),
+      classrooms: this.api.listClassrooms().pipe(catchError(() => of([]))),
+    }).subscribe({
+      next: ({ catalog, teachers, buildings, classrooms }) => {
+        this.catalog = this.normalizeCatalog(catalog);
+        this.teachers = Array.isArray(teachers) ? teachers : [];
+        this.buildings = Array.isArray(buildings) ? buildings : [];
+        this.classrooms = Array.isArray(classrooms) ? classrooms : [];
+        this.syncCatalogSelections();
+        this.persistFilters();
+        this.cdr.detectChanges();
+        this.loadWorkspace();
+      },
+      error: () => {
+        this.loading = false;
+        this.error = 'No se pudo cargar el panel operativo.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  loadWorkspace(focusRowId?: string) {
+    this.loading = true;
+    this.error = '';
+    this.persistFilters();
+    this.cdr.detectChanges();
+    this.api.listPlanningExpandedOffers(this.manualOfferFilters()).subscribe({
+      next: (offers) => {
+        this.offerDetails = Array.isArray(offers) ? offers : [];
+        if (this.offerDetails.length === 0) {
+          this.offerDetails = [];
+          this.workspace = this.emptyWorkspace();
+          this.loading = false;
+          this.syncSelectedRows();
+          this.syncDrawerAfterReload(focusRowId);
+          this.cdr.detectChanges();
+          return;
+        }
+        this.workspace = this.buildManualWorkspace(this.offerDetails);
+        this.loading = false;
+        this.syncSelectedRows();
+        this.syncDrawerAfterReload(focusRowId);
+        this.cdr.detectChanges();
+      },
+      error: (err: any) => {
+        this.loading = false;
+        this.error = err?.error?.message ?? 'No se pudo cargar el panel operativo.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  goBack() {
+    this.router.navigate(['/planning'], {
+      queryParams: this.summaryQueryParams(),
+    });
+  }
+
+  reload() {
+    this.clearSelection();
+    this.closeDrawer();
+    this.loadWorkspace();
+  }
+
+  onFacultyChange() {
+    this.syncProgramSelection();
+    this.syncStudyPlanSelection();
+    this.quickFilter = 'ALL';
+    this.clearSelection();
+    this.closeDrawer();
+    this.persistFilters();
+  }
+
+  onVcPeriodChange() {
+    this.syncPeriodFiltersFromCatalog();
+    this.quickFilter = 'ALL';
+    this.clearSelection();
+    this.closeDrawer();
+    this.loadWorkspace();
+  }
+
+  onProgramChange() {
+    this.syncStudyPlanSelection();
+    this.quickFilter = 'ALL';
+    this.clearSelection();
+    this.closeDrawer();
+    this.loadWorkspace();
+  }
+
+  onServerFilterChange() {
+    this.quickFilter = 'ALL';
+    this.clearSelection();
+    this.closeDrawer();
+    this.loadWorkspace();
+  }
+
+  applySearch() {
+    this.quickFilter = 'ALL';
+    this.clearSelection();
+    this.closeDrawer();
+    this.loadWorkspace();
+  }
+
+  clearFilters() {
+    this.filters = this.emptyFilters();
+    this.syncPeriodFiltersFromCatalog();
+    this.quickFilter = 'ALL';
+    this.message = '';
+    this.error = '';
+    this.clearSelection();
+    this.closeDrawer();
+    this.loadWorkspace();
+  }
+
+  setQuickFilter(filter: WorkspaceQuickFilter) {
+    this.quickFilter = filter;
+    this.clearSelection();
+    this.closeDrawer();
+  }
+
+  quickFilterLabel(filter: WorkspaceQuickFilter) {
+    switch (filter) {
+      case 'BLOCKED':
+        return 'Con bloqueo';
+      case 'ALERTS':
+        return 'Con alertas';
+      case 'NO_TEACHER':
+        return 'Sin docente';
+      case 'NO_SCHEDULE':
+        return 'Sin horario';
+      case 'COMPLETE':
+        return 'Completos';
+      default:
+        return 'Todas';
+    }
+  }
+
+  quickFilterCount(filter: WorkspaceQuickFilter) {
+    return this.baseRows.filter((row) => this.matchesQuickFilter(row, filter)).length;
+  }
+
+  toggleSelectAllVisible(checked: boolean) {
+    if (checked) {
+      const selected = new Set(this.selectedRowIds);
+      this.visibleRows.forEach((row) => selected.add(row.row_id));
+      this.selectedRowIds = [...selected];
+      return;
+    }
+    const visibleIds = new Set(this.visibleRows.map((row) => row.row_id));
+    this.selectedRowIds = this.selectedRowIds.filter((id) => !visibleIds.has(id));
+  }
+
+  toggleRowSelection(rowId: string, checked: boolean) {
+    if (checked) {
+      if (!this.selectedRowIds.includes(rowId)) {
+        this.selectedRowIds = [...this.selectedRowIds, rowId];
+      }
+      return;
+    }
+    this.selectedRowIds = this.selectedRowIds.filter((id) => id !== rowId);
+  }
+
+  clearSelection() {
+    this.selectedRowIds = [];
+  }
+
+  onDrawerBuildingChange(value: string) {
+    this.drawer.form.building_id = value;
+    if (!value) {
+      this.drawer.form.classroom_id = '';
+      return;
+    }
+    const currentClassroom = this.classrooms.find((item: any) => item.id === this.drawer.form.classroom_id) ?? null;
+    if (currentClassroom?.building_id !== value) {
+      this.drawer.form.classroom_id = '';
+    }
+  }
+
+  openDrawer(row: PlanningWorkspaceRow) {
+    this.drawer = {
+      open: true,
+      row_id: row.row_id,
+      form: this.buildDrawerForm(row),
+    };
+    this.message = '';
+  }
+
+  closeDrawer() {
+    this.drawer = {
+      open: false,
+      row_id: '',
+      form: this.emptyDrawerForm(),
+    };
+  }
+
+  saveDrawer() {
+    const row = this.activeDrawerRow;
+    if (!row) {
+      return;
+    }
+
+    const subsectionPayload: Record<string, unknown> = {};
+    const nextTeacherId = this.drawer.form.teacher_id.trim();
+    if (!row.meeting_id && nextTeacherId !== (this.primaryTeacher(row)?.teacher_id ?? '')) {
+      subsectionPayload['responsible_teacher_id'] = nextTeacherId || '';
+    }
+
+    const nextBuildingId = this.drawer.form.building_id.trim();
+    const nextClassroomId = this.drawer.form.classroom_id.trim();
+    if (
+      !row.meeting_id &&
+      (nextBuildingId !== (row.building_id ?? '') || nextClassroomId !== (row.classroom_id ?? ''))
+    ) {
+      const classroom = nextClassroomId
+        ? this.classrooms.find((item: any) => item.id === nextClassroomId) ?? null
+        : null;
+      subsectionPayload['building_id'] = (classroom?.building_id ?? nextBuildingId) || '';
+      subsectionPayload['classroom_id'] = nextClassroomId || '';
+      if (classroom?.capacity !== null && classroom?.capacity !== undefined) {
+        subsectionPayload['capacity_snapshot'] = classroom.capacity;
+      }
+    }
+
+    const academicHours = this.parseOptionalInt(this.drawer.form.academic_hours);
+    if (academicHours !== null && academicHours !== row.academic_hours) {
+      Object.assign(subsectionPayload, this.buildAssignedHoursPayload(row, academicHours));
+    }
+
+    const capacity = this.parseOptionalInt(this.drawer.form.capacity);
+    if (capacity !== null && capacity !== row.group_capacity) {
+      subsectionPayload['capacity_snapshot'] = capacity;
+    }
+
+    if (this.drawer.form.group_note !== (row.group_note ?? '')) {
+      subsectionPayload['denomination'] = this.drawer.form.group_note;
+    }
+
+    const projectedVacancies = this.parseOptionalInt(this.drawer.form.projected_vacancies);
+    if (projectedVacancies !== null && projectedVacancies !== row.projected_vacancies) {
+      subsectionPayload['projected_vacancies'] = projectedVacancies;
+    }
+
+    if (this.drawer.form.offering_status !== row.offering_status) {
+      subsectionPayload['status'] = this.drawer.form.offering_status ? 'ACTIVE' : 'CLOSED';
+    }
+
+    const schedulePayload: Record<string, unknown> = {};
+    const nextDay = this.drawer.form.day_of_week.trim();
+    const nextStart = this.drawer.form.start_time.trim();
+    const nextEnd = this.drawer.form.end_time.trim();
+    const nextSessionType = this.drawer.form.session_type.trim() || 'OTHER';
+    const scheduleTouched =
+      nextDay !== (row.day_of_week ?? '') ||
+      nextStart !== (row.start_time ?? '') ||
+      nextEnd !== (row.end_time ?? '') ||
+      nextSessionType !== (row.session_type ?? 'OTHER');
+
+    if (nextTeacherId !== (this.primaryTeacher(row)?.teacher_id ?? '')) {
+      schedulePayload['teacher_id'] = nextTeacherId || '';
+    }
+    if (nextBuildingId !== (row.building_id ?? '') || nextClassroomId !== (row.classroom_id ?? '')) {
+      const classroom = nextClassroomId
+        ? this.classrooms.find((item: any) => item.id === nextClassroomId) ?? null
+        : null;
+      schedulePayload['building_id'] = (classroom?.building_id ?? nextBuildingId) || '';
+      schedulePayload['classroom_id'] = nextClassroomId || '';
+    }
+    if (nextSessionType !== (row.session_type ?? 'OTHER')) {
+      schedulePayload['session_type'] = nextSessionType;
+    }
+    if (scheduleTouched) {
+      schedulePayload['day_of_week'] = nextDay;
+      schedulePayload['start_time'] = nextStart;
+      schedulePayload['end_time'] = nextEnd;
+    }
+
+    if (!row.meeting_id && (nextDay || nextStart || nextEnd) && (!nextDay || !nextStart || !nextEnd)) {
+      this.error = 'Para crear el primer horario debes indicar dia, hora inicio y hora fin.';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    if (
+      !row.meeting_id &&
+      (scheduleTouched || nextTeacherId || nextBuildingId || nextClassroomId) &&
+      (!nextDay || !nextStart || !nextEnd)
+    ) {
+      this.error = 'Para crear el primer horario debes completar dia y rango horario.';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    const requests = [] as any[];
+    if (Object.keys(subsectionPayload).length > 0) {
+      requests.push(this.api.updatePlanningSubsection(row.group_id, subsectionPayload));
+    }
+    if (row.meeting_id && Object.keys(schedulePayload).length > 0) {
+      if (this.drawer.form.academic_hours.trim()) {
+        schedulePayload['academic_hours'] = this.parseOptionalInt(this.drawer.form.academic_hours);
+      }
+      requests.push(
+        this.api.updatePlanningSubsectionSchedule(row.meeting_id, schedulePayload),
+      );
+    } else if (!row.meeting_id && nextDay && nextStart && nextEnd) {
+      if (this.drawer.form.academic_hours.trim()) {
+        schedulePayload['academic_hours'] = this.parseOptionalInt(this.drawer.form.academic_hours);
+      }
+      requests.push(
+        this.api.createPlanningSubsectionSchedule(row.group_id, {
+          ...schedulePayload,
+          day_of_week: nextDay,
+          start_time: nextStart,
+          end_time: nextEnd,
+          session_type: nextSessionType,
+        }),
+      );
+    }
+
+    if (requests.length === 0) {
+      this.message = 'No hay cambios pendientes en la fila seleccionada.';
+      this.error = '';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.saving = true;
+    this.error = '';
+    forkJoin(requests).subscribe({
+      next: () => {
+        this.message = 'Fila operativa actualizada.';
+        this.clearSelection();
+        this.saving = false;
+        this.loadWorkspace(row.row_id);
+      },
+      error: (err: any) => {
+        this.saving = false;
+        this.error = err?.error?.message ?? 'No se pudo actualizar la fila operativa.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  openTeacherModal() {
+    if (!this.canOpenTeacherModal) {
+      return;
+    }
+    this.teacherModal = {
+      open: true,
+      teacher_id: '',
+      query: '',
+    };
+  }
+
+  closeTeacherModal() {
+    this.teacherModal = {
+      open: false,
+      teacher_id: '',
+      query: '',
+    };
+  }
+
+  confirmBulkTeacher() {
+    if (!this.teacherModal.teacher_id) {
+      this.error = 'Selecciona un docente para la asignacion masiva.';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.saving = true;
+    this.error = '';
+    const meetingRequests = this.selectedRows
+      .filter((row) => Boolean(row.meeting_id))
+      .map((row) =>
+        this.api.updatePlanningSubsectionSchedule(row.meeting_id as string, {
+          teacher_id: this.teacherModal.teacher_id,
+        }),
+      );
+    const groupIdsWithoutMeeting = [
+      ...new Set(this.selectedRows.filter((row) => !row.meeting_id).map((row) => row.group_id)),
+    ];
+    const groupRequests = groupIdsWithoutMeeting.map((subsectionId) =>
+      this.api.updatePlanningSubsection(subsectionId, {
+        responsible_teacher_id: this.teacherModal.teacher_id,
+      }),
+    );
+
+    forkJoin([...meetingRequests, ...groupRequests]).subscribe({
+      next: () => {
+        this.message = `Docente asignado en ${this.selectedRows.length} filas seleccionadas.`;
+        this.closeTeacherModal();
+        this.clearSelection();
+        this.closeDrawer();
+        this.saving = false;
+        this.loadWorkspace();
+      },
+      error: (err: any) => {
+        this.saving = false;
+        this.error = err?.error?.message ?? 'No se pudo asignar el docente.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  openClassroomModal() {
+    if (!this.canOpenClassroomModal) {
+      return;
+    }
+    this.classroomModal = {
+      open: true,
+      classroom_id: '',
+      query: '',
+    };
+  }
+
+  closeClassroomModal() {
+    this.classroomModal = {
+      open: false,
+      classroom_id: '',
+      query: '',
+    };
+  }
+
+  confirmBulkClassroom() {
+    if (!this.classroomModal.classroom_id) {
+      this.error = 'Selecciona un aula para la asignacion masiva.';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.saving = true;
+    this.error = '';
+    const classroom = this.classrooms.find((item: any) => item.id === this.classroomModal.classroom_id) ?? null;
+    const meetingRequests = this.selectedRows
+      .filter((row) => Boolean(row.meeting_id))
+      .map((row) =>
+        this.api.updatePlanningSubsectionSchedule(row.meeting_id as string, {
+          classroom_id: this.classroomModal.classroom_id,
+          building_id: classroom?.building_id ?? '',
+        }),
+      );
+    const groupIdsWithoutMeeting = [
+      ...new Set(this.selectedRows.filter((row) => !row.meeting_id).map((row) => row.group_id)),
+    ];
+    const groupRequests = groupIdsWithoutMeeting.map((subsectionId) =>
+      this.api.updatePlanningSubsection(subsectionId, {
+        classroom_id: this.classroomModal.classroom_id,
+        building_id: classroom?.building_id ?? '',
+        capacity_snapshot: classroom?.capacity ?? null,
+      }),
+    );
+
+    forkJoin([...meetingRequests, ...groupRequests]).subscribe({
+      next: () => {
+        this.message = `Aula asignada en ${this.selectedRows.length} filas seleccionadas.`;
+        this.closeClassroomModal();
+        this.clearSelection();
+        this.closeDrawer();
+        this.saving = false;
+        this.loadWorkspace();
+      },
+      error: (err: any) => {
+        this.saving = false;
+        this.error = err?.error?.message ?? 'No se pudo asignar el aula.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  openReplicateModal() {
+    const source = this.replicateSourceRow();
+    if (!source || this.compatibleReplicateTargetGroups(source).length === 0) {
+      this.error = 'Selecciona al menos una fila con horario y otro grupo compatible del mismo curso.';
+      this.cdr.detectChanges();
+      return;
+    }
+    this.replicateModal = {
+      open: true,
+      source_row_id: source.row_id,
+    };
+  }
+
+  closeReplicateModal() {
+    this.replicateModal = {
+      open: false,
+      source_row_id: '',
+    };
+  }
+
+  confirmReplicate() {
+    const sourceRow = this.replicateSourceRow();
+    const targetGroups = this.compatibleReplicateTargetGroups(sourceRow);
+    if (!sourceRow || !sourceRow.meeting_id || targetGroups.length === 0) {
+      this.error = 'No hay grupos destino compatibles para replicar el horario.';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.saving = true;
+    this.error = '';
+    forkJoin(
+      targetGroups.map((row) =>
+        this.api.createPlanningSubsectionSchedule(row.group_id, {
+          day_of_week: sourceRow.day_of_week,
+          start_time: sourceRow.start_time,
+          end_time: sourceRow.end_time,
+          academic_hours: sourceRow.academic_hours ?? undefined,
+          teacher_id: this.primaryTeacher(sourceRow)?.teacher_id || undefined,
+          building_id: sourceRow.building_id || undefined,
+          classroom_id: sourceRow.classroom_id || undefined,
+          session_type: sourceRow.session_type || undefined,
+        }),
+      ),
+    ).subscribe({
+      next: () => {
+        this.message = `Horario replicado hacia ${targetGroups.length} grupos del mismo curso.`;
+        this.closeReplicateModal();
+        this.clearSelection();
+        this.closeDrawer();
+        this.saving = false;
+        this.loadWorkspace();
+      },
+      error: (err: any) => {
+        this.saving = false;
+        this.error = err?.error?.message ?? 'No se pudo replicar el horario.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  async duplicateGroup(event: Event, row: PlanningWorkspaceRow) {
+    event.stopPropagation();
+    const accepted = await this.dialog.confirm({
+      title: 'Duplicar grupo',
+      message: `Se duplicara el grupo ${row.group_code} junto con sus docentes y horarios actuales.`,
+      confirmLabel: 'Duplicar',
+    });
+    if (!accepted) {
+      return;
+    }
+
+    this.saving = true;
+    this.error = '';
+    const sourceSubsection = this.findSubsectionById(row.group_id);
+    if (!sourceSubsection) {
+      this.saving = false;
+      this.error = 'No se encontro el grupo origen para duplicar.';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.api
+      .createPlanningSubsection(row.section_id, {
+        kind: row.group_type,
+        responsible_teacher_id: this.primaryTeacher(row)?.teacher_id || undefined,
+        course_modality_id: row.delivery_modality_id || undefined,
+        building_id: row.building_id || undefined,
+        classroom_id: row.classroom_id || undefined,
+        capacity_snapshot: row.group_capacity ?? undefined,
+        shift: row.shift_id || undefined,
+        projected_vacancies: row.projected_vacancies ?? undefined,
+        denomination: row.group_note || undefined,
+      })
+      .subscribe({
+        next: (createdSubsection) => {
+          const schedules = Array.isArray(sourceSubsection.schedules) ? sourceSubsection.schedules : [];
+          if (schedules.length === 0) {
+            this.message = `Grupo ${row.group_code} duplicado correctamente.`;
+            this.clearSelection();
+            this.closeDrawer();
+            this.saving = false;
+            this.loadWorkspace();
+            return;
+          }
+
+          forkJoin(
+            schedules.map((schedule: any) =>
+              this.api.createPlanningSubsectionSchedule(createdSubsection.id, {
+                day_of_week: schedule.day_of_week,
+                start_time: schedule.start_time,
+                end_time: schedule.end_time,
+                academic_hours: schedule.academic_hours ?? undefined,
+                teacher_id: schedule.teacher_id ?? undefined,
+                building_id: schedule.building_id ?? undefined,
+                classroom_id: schedule.classroom_id ?? undefined,
+                session_type: schedule.session_type ?? undefined,
+              }),
+            ),
+          ).subscribe({
+            next: () => {
+              this.message = `Grupo ${row.group_code} duplicado correctamente.`;
+              this.clearSelection();
+              this.closeDrawer();
+              this.saving = false;
+              this.loadWorkspace();
+            },
+            error: (err: any) => {
+              this.saving = false;
+              this.error = err?.error?.message ?? 'No se pudieron copiar los horarios del grupo duplicado.';
+              this.cdr.detectChanges();
+            },
+          });
+        },
+        error: (err: any) => {
+          this.saving = false;
+          this.error = err?.error?.message ?? 'No se pudo duplicar el grupo.';
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  rowState(row: PlanningWorkspaceRow) {
+    if (!row.meeting_id) {
+      return 'DRAFT';
+    }
+    if (row.blocking_alert_count > 0) {
+      return 'BLOCKED';
+    }
+    if (row.alert_count > 0) {
+      return 'IN_PROGRESS';
+    }
+    return 'COMPLETE';
+  }
+
+  rowStateLabel(row: PlanningWorkspaceRow) {
+    switch (this.rowState(row)) {
+      case 'BLOCKED':
+        return 'Bloqueado';
+      case 'IN_PROGRESS':
+        return 'En progreso';
+      case 'COMPLETE':
+        return 'Completo';
+      default:
+        return 'Borrador';
+    }
+  }
+
+  rowStateClass(row: PlanningWorkspaceRow) {
+    switch (this.rowState(row)) {
+      case 'BLOCKED':
+        return 'status-blocked';
+      case 'IN_PROGRESS':
+        return 'status-progress';
+      case 'COMPLETE':
+        return 'status-complete';
+      default:
+        return 'status-draft';
+    }
+  }
+
+  alertPills(row: PlanningWorkspaceRow) {
+    return (row.alerts ?? []).slice(0, 2);
+  }
+
+  remainingAlertCount(row: PlanningWorkspaceRow) {
+    return Math.max(0, (row.alerts ?? []).length - this.alertPills(row).length);
+  }
+
+  courseLabel(row: PlanningWorkspaceRow) {
+    if (row.course_code && row.course_name) {
+      return `${row.course_code} - ${row.course_name}`;
+    }
+    return row.course_code || row.course_name || 'Curso sin referencia';
+  }
+
+  groupLabel(row: PlanningWorkspaceRow) {
+    return row.external_section_code || row.course_section_name || 'Seccion sin referencia';
+  }
+
+  groupMetaLabel(row: PlanningWorkspaceRow) {
+    const subsection = row.group_code ? `Grupo ${row.group_code}` : null;
+    const internal = row.internal_section_code ? `Interna ${row.internal_section_code}` : null;
+    return [subsection, internal, this.groupTypeLabel(row.group_type)].filter(Boolean).join(' · ');
+  }
+
+  groupTypeLabel(value: string | null | undefined) {
+    switch (value) {
+      case 'THEORY':
+        return 'Teoria';
+      case 'PRACTICE':
+        return 'Practica';
+      case 'MIXED':
+        return 'Teorico practico';
+      case 'MIXED_PRACTICE_THEORY':
+        return 'Practico teorico';
+      case 'LAB':
+        return 'Laboratorio';
+      default:
+        return value || 'Grupo';
+    }
+  }
+
+  modalityLabel(row: PlanningWorkspaceRow) {
+    return (
+      this.modalityOptions.find((item: any) => item.id === row.delivery_modality_id)?.name ??
+      row.delivery_modality_id ??
+      'Sin modalidad'
+    );
+  }
+
+  shiftLabel(value: string | null | undefined) {
+    return this.shiftOptions.find((item) => item.id === value)?.label ?? value ?? 'Sin turno';
+  }
+
+  dayLabel(value: string | null | undefined) {
+    return this.dayOptions.find((item) => item.value === value)?.label ?? value ?? 'Sin dia';
+  }
+
+  timeLabel(value: string | null | undefined) {
+    return value ? String(value).slice(0, 5) : '--:--';
+  }
+
+  scheduleLabel(row: PlanningWorkspaceRow) {
+    if (!row.meeting_id) {
+      return 'Sin horario';
+    }
+    return `${this.dayLabel(row.day_of_week)} ${this.timeLabel(row.start_time)}-${this.timeLabel(row.end_time)}`;
+  }
+
+  sessionTypeLabel(value: string | null | undefined) {
+    switch (value) {
+      case 'THEORY':
+        return 'Teoria';
+      case 'PRACTICE':
+        return 'Practica';
+      case 'LAB':
+        return 'Laboratorio';
+      case 'OTHER':
+        return 'Otro';
+      default:
+        return value || 'Sin tipo';
+    }
+  }
+
+  capacityLabel(row: PlanningWorkspaceRow) {
+    return `${row.projected_vacancies ?? 0} / ${row.group_capacity ?? 0}`;
+  }
+
+  classroomLabel(row: PlanningWorkspaceRow) {
+    if (row.classroom_name && row.classroom_code) {
+      return `${row.classroom_code} - ${row.classroom_name}`;
+    }
+    return row.classroom_name || row.classroom_code || 'Sin aula';
+  }
+
+  buildingLabel(row: PlanningWorkspaceRow) {
+    return row.building_name || 'Sin pabellon';
+  }
+
+  teacherDisplay(teacher: any | null | undefined) {
+    if (!teacher) {
+      return 'Sin docente';
+    }
+    const name = teacher.full_name || teacher.name || 'Sin nombre';
+    return teacher.dni ? `${teacher.dni} - ${name}` : name;
+  }
+
+  primaryTeacher(row: PlanningWorkspaceRow) {
+    return row.teachers.find((teacher) => teacher.is_primary) ?? row.teachers[0] ?? null;
+  }
+
+  classroomDisplay(classroom: any | null | undefined) {
+    if (!classroom) {
+      return 'Sin aula';
+    }
+    const buildingName =
+      classroom.building_name ||
+      this.buildings.find((item: any) => item.id === classroom.building_id)?.name ||
+      '';
+    const classroomName = [classroom.code, classroom.name].filter(Boolean).join(' - ');
+    const head = [buildingName, classroomName].filter(Boolean).join(' / ');
+    return classroom.capacity ? `${head} - Aforo ${classroom.capacity}` : head || classroom.id;
+  }
+
+  rowClasses(row: PlanningWorkspaceRow) {
+    return {
+      'is-selected': this.selectedRowIds.includes(row.row_id),
+      'is-blocked': row.blocking_alert_count > 0,
+      'is-no-teacher': row.teachers.length === 0,
+      'is-no-schedule': !row.meeting_id,
+    };
+  }
+
+  stopRowClick(event: Event) {
+    event.stopPropagation();
+  }
+
+  replicateSourceOptions() {
+    return this.selectedMeetingRows.sort((left, right) => this.compareRows(left, right));
+  }
+
+  replicateSourceRow() {
+    const sourceId = this.replicateModal.source_row_id;
+    if (sourceId) {
+      return this.selectedMeetingRows.find((row) => row.row_id === sourceId) ?? null;
+    }
+    return this.replicateSourceOptions()[0] ?? null;
+  }
+
+  replicateTargetRows() {
+    return this.compatibleReplicateTargetGroups(this.replicateSourceRow());
+  }
+
+  private emptyFilters(): PlanningWorkspaceFilters {
+    return {
+      vc_period_id: '',
+      semester_id: '',
+      campus_id: '',
+      faculty_id: '',
+      academic_program_id: '',
+      study_plan_id: '',
+      delivery_modality_id: '',
+      shift_id: '',
+      search: '',
+    };
+  }
+
+  private emptyCatalog(): WorkspaceCatalog {
+    return {
+      vc_periods: [],
+      semesters: [],
+      campuses: [],
+      faculties: [],
+      academic_programs: [],
+      study_plans: [],
+      course_modalities: [],
+      shift_options: [],
+    };
+  }
+
+  private emptyWorkspace(): PlanningWorkspaceResponse {
+    return {
+      filters: {},
+      summaries: [],
+      rows: [],
+      totals: {
+        offerings: 0,
+        rows: 0,
+        alerts: 0,
+        blocking_alerts: 0,
+      },
+    };
+  }
+
+  private emptyDrawerForm(): WorkspaceDrawerForm {
+    return {
+      teacher_id: '',
+      building_id: '',
+      classroom_id: '',
+      session_type: 'OTHER',
+      day_of_week: '',
+      start_time: '',
+      end_time: '',
+      academic_hours: '',
+      capacity: '',
+      group_note: '',
+      projected_vacancies: '',
+      offering_status: true,
+    };
+  }
+
+  private buildDrawerForm(row: PlanningWorkspaceRow): WorkspaceDrawerForm {
+    const classroom = this.classrooms.find((item: any) => item.id === row.classroom_id) ?? null;
+    return {
+      teacher_id: this.primaryTeacher(row)?.teacher_id ?? '',
+      building_id: row.building_id ?? classroom?.building_id ?? '',
+      classroom_id: row.classroom_id ?? '',
+      session_type: row.session_type ?? 'OTHER',
+      day_of_week: row.day_of_week ?? '',
+      start_time: row.start_time ?? '',
+      end_time: row.end_time ?? '',
+      academic_hours: row.academic_hours === null || row.academic_hours === undefined ? '' : String(row.academic_hours),
+      capacity: row.group_capacity === null || row.group_capacity === undefined ? '' : String(row.group_capacity),
+      group_note: row.group_note ?? '',
+      projected_vacancies:
+        row.projected_vacancies === null || row.projected_vacancies === undefined
+          ? ''
+          : String(row.projected_vacancies),
+      offering_status: Boolean(row.offering_status),
+    };
+  }
+
+  private normalizeCatalog(catalog: any): WorkspaceCatalog {
+    return {
+      vc_periods: Array.isArray(catalog?.vc_periods) ? catalog.vc_periods : [],
+      semesters: Array.isArray(catalog?.semesters) ? catalog.semesters : [],
+      campuses: Array.isArray(catalog?.campuses) ? catalog.campuses : [],
+      faculties: Array.isArray(catalog?.faculties) ? catalog.faculties : [],
+      academic_programs: Array.isArray(catalog?.academic_programs) ? catalog.academic_programs : [],
+      study_plans: Array.isArray(catalog?.study_plans) ? catalog.study_plans : [],
+      course_modalities: Array.isArray(catalog?.course_modalities) ? catalog.course_modalities : [],
+      shift_options: Array.isArray(catalog?.shift_options) ? catalog.shift_options : [],
+    };
+  }
+
+  private normalizeWorkspace(response: any): PlanningWorkspaceResponse {
+    return {
+      filters: response?.filters ?? {},
+      summaries: Array.isArray(response?.summaries) ? response.summaries : [],
+      rows: Array.isArray(response?.rows) ? response.rows : [],
+      totals: {
+        offerings: Number(response?.totals?.offerings ?? 0),
+        rows: Number(response?.totals?.rows ?? 0),
+        alerts: Number(response?.totals?.alerts ?? 0),
+        blocking_alerts: Number(response?.totals?.blocking_alerts ?? 0),
+      },
+    };
+  }
+
+  private restoreFilters() {
+    const query = this.route.snapshot.queryParamMap;
+    const queryFilters: PlanningWorkspaceFilters = {
+      vc_period_id: query.get('vc_period_id') ?? '',
+      semester_id: query.get('semester_id') ?? '',
+      campus_id: query.get('campus_id') ?? '',
+      faculty_id: query.get('faculty_id') ?? '',
+      academic_program_id: query.get('academic_program_id') ?? '',
+      study_plan_id: query.get('study_plan_id') ?? '',
+      delivery_modality_id: query.get('delivery_modality_id') ?? '',
+      shift_id: query.get('shift_id') ?? '',
+      search: query.get('search') ?? '',
+    };
+    if (Object.values(queryFilters).some((value) => Boolean(value))) {
+      this.filters = queryFilters;
+      this.persistFilters();
+      return;
+    }
+
+    try {
+      const raw = localStorage.getItem(this.filtersStorageKey);
+      if (!raw) {
+        return;
+      }
+      const stored = JSON.parse(raw) as Partial<PlanningWorkspaceFilters>;
+      this.filters = {
+        vc_period_id: stored.vc_period_id ?? '',
+        semester_id: stored.semester_id ?? '',
+        campus_id: stored.campus_id ?? '',
+        faculty_id: stored.faculty_id ?? '',
+        academic_program_id: stored.academic_program_id ?? '',
+        study_plan_id: stored.study_plan_id ?? '',
+        delivery_modality_id: stored.delivery_modality_id ?? '',
+        shift_id: stored.shift_id ?? '',
+        search: stored.search ?? '',
+      };
+    } catch {
+      this.filters = this.emptyFilters();
+    }
+  }
+
+  private persistFilters() {
+    localStorage.setItem(this.filtersStorageKey, JSON.stringify(this.filters));
+  }
+
+  private syncCatalogSelections() {
+    if (this.filters.campus_id && !this.catalog.campuses.some((item: any) => item.id === this.filters.campus_id)) {
+      this.filters.campus_id = '';
+    }
+    if (this.filters.faculty_id && !this.catalog.faculties.some((item: any) => item.id === this.filters.faculty_id)) {
+      this.filters.faculty_id = '';
+    }
+    this.syncProgramSelection();
+    this.syncStudyPlanSelection();
+    this.syncPeriodFiltersFromCatalog();
+    if (
+      this.filters.delivery_modality_id &&
+      !this.modalityOptions.some((item: any) => item.id === this.filters.delivery_modality_id)
+    ) {
+      this.filters.delivery_modality_id = '';
+    }
+    if (this.filters.shift_id && !this.shiftOptions.some((item) => item.id === this.filters.shift_id)) {
+      this.filters.shift_id = '';
+    }
+  }
+
+  private syncProgramSelection() {
+    if (!this.filteredPrograms.some((item: any) => item.id === this.filters.academic_program_id)) {
+      this.filters.academic_program_id = '';
+    }
+  }
+
+  private syncStudyPlanSelection() {
+    if (!this.filteredStudyPlans.some((item: any) => item.id === this.filters.study_plan_id)) {
+      this.filters.study_plan_id = '';
+    }
+  }
+
+  private syncPeriodFiltersFromCatalog() {
+    if (this.filters.vc_period_id && !this.periodOptions.some((item: any) => item.id === this.filters.vc_period_id)) {
+      this.filters.vc_period_id = '';
+    }
+    if (this.filters.semester_id && !this.catalog.semesters.some((item: any) => item.id === this.filters.semester_id)) {
+      this.filters.semester_id = '';
+    }
+
+    if (!this.filters.vc_period_id && this.filters.semester_id) {
+      const vcPeriod = this.findVcPeriodBySemesterId(this.filters.semester_id);
+      this.filters.vc_period_id = vcPeriod?.id ?? '';
+    }
+
+    if (!this.filters.vc_period_id && this.periodOptions.length > 0) {
+      this.filters.vc_period_id = this.periodOptions.find((item: any) => item.selected)?.id ?? this.periodOptions[0].id;
+    }
+
+    this.filters.semester_id = this.resolveSemesterIdFromVcPeriodId(this.filters.vc_period_id) ?? '';
+  }
+
+  private resolveSemesterIdFromVcPeriodId(vcPeriodId: string) {
+    const period = this.periodOptions.find((item: any) => item.id === vcPeriodId);
+    const token = this.normalizePeriodToken(period?.text);
+    if (!token) {
+      return '';
+    }
+    return this.catalog.semesters.find((item: any) => this.normalizePeriodToken(item.name) === token)?.id ?? '';
+  }
+
+  private findVcPeriodBySemesterId(semesterId: string) {
+    const semester = this.catalog.semesters.find((item: any) => item.id === semesterId);
+    const token = this.normalizePeriodToken(semester?.name);
+    if (!token) {
+      return null;
+    }
+    return this.periodOptions.find((item: any) => this.normalizePeriodToken(item.text) === token) ?? null;
+  }
+
+  private normalizePeriodToken(value: string | null | undefined) {
+    const normalized = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!normalized) {
+      return '';
+    }
+    const match = normalized.match(/\d{4}-\d/);
+    return match ? match[0] : normalized;
+  }
+
+  private apiFilters() {
+    return {
+      semester_id: this.filters.semester_id,
+      campus_id: this.filters.campus_id,
+      academic_program_id: this.filters.academic_program_id,
+      study_plan_id: this.filters.study_plan_id,
+      delivery_modality_id: this.filters.delivery_modality_id,
+      shift_id: this.filters.shift_id,
+      search: this.filters.search.trim(),
+    };
+  }
+
+  private summaryQueryParams() {
+    return {
+      vc_period_id: this.filters.vc_period_id || null,
+      semester_id: this.filters.semester_id || null,
+      campus_id: this.filters.campus_id || null,
+      faculty_id: this.filters.faculty_id || null,
+      academic_program_id: this.filters.academic_program_id || null,
+    };
+  }
+
+  private manualOfferFilters() {
+    return {
+      semester_id: this.filters.semester_id,
+      vc_period_id: this.filters.vc_period_id,
+      campus_id: this.filters.campus_id,
+      faculty_id: this.filters.faculty_id,
+      academic_program_id: this.filters.academic_program_id,
+      study_plan_id: this.filters.study_plan_id,
+    };
+  }
+
+  private buildManualWorkspace(offers: any[]): PlanningWorkspaceResponse {
+    const rows = offers.flatMap((offer) => this.buildRowsFromOffer(offer));
+    const summaries = offers.map((offer) => this.buildSummaryFromOffer(offer, rows.filter((row) => row.offering_id === offer.id)));
+    return {
+      filters: this.apiFilters(),
+      summaries,
+      rows,
+      totals: {
+        offerings: summaries.length,
+        rows: rows.length,
+        alerts: rows.reduce((sum, row) => sum + row.alert_count, 0),
+        blocking_alerts: rows.reduce((sum, row) => sum + row.blocking_alert_count, 0),
+      },
+    };
+  }
+
+  private buildRowsFromOffer(offer: any) {
+    const sections = Array.isArray(offer?.sections) ? offer.sections : [];
+    return sections.flatMap((section: any) =>
+      (Array.isArray(section?.subsections) ? section.subsections : []).flatMap((subsection: any) => {
+        const schedules = Array.isArray(subsection?.schedules) ? subsection.schedules : [];
+        if (schedules.length === 0) {
+          return [this.makeManualRow(offer, section, subsection, null)];
+        }
+        return schedules.map((schedule: any) => this.makeManualRow(offer, section, subsection, schedule));
+      }),
+    );
+  }
+
+  private makeManualRow(offer: any, section: any, subsection: any, schedule: any | null): PlanningWorkspaceRow {
+    const effectiveTeacher = schedule?.teacher ?? subsection?.responsible_teacher ?? null;
+    const effectiveTeacherId =
+      schedule?.teacher_id ?? subsection?.responsible_teacher_id ?? effectiveTeacher?.id ?? null;
+    const teachers = effectiveTeacherId
+      ? [
+          {
+            assignment_id: schedule?.id ?? subsection?.id ?? effectiveTeacherId,
+            teacher_id: effectiveTeacherId,
+            full_name: effectiveTeacher?.full_name ?? effectiveTeacher?.name ?? null,
+            role: 'PRIMARY',
+            is_primary: true,
+          } satisfies PlanningWorkspaceTeacher,
+        ]
+      : [];
+    const effectiveBuilding = schedule?.building ?? subsection?.building ?? null;
+    const effectiveClassroom = schedule?.classroom ?? subsection?.classroom ?? null;
+    const alerts = this.buildManualAlerts(subsection, schedule);
+    return {
+      row_id: schedule?.id ?? `subsection:${subsection.id}`,
+      row_kind: schedule ? 'MEETING' : 'GROUP',
+      offering_id: offer.id,
+      section_id: section.id,
+      group_id: subsection.id,
+      meeting_id: schedule?.id ?? null,
+      semester_id: offer.semester_id,
+      semester_name: offer.semester?.name ?? this.catalog.semesters.find((item: any) => item.id === offer.semester_id)?.name ?? null,
+      campus_id: offer.campus_id,
+      campus_name: offer.campus?.name ?? this.catalog.campuses.find((item: any) => item.id === offer.campus_id)?.name ?? null,
+      academic_program_id: offer.academic_program_id,
+      academic_program_name:
+        offer.academic_program?.name ??
+        this.catalog.academic_programs.find((item: any) => item.id === offer.academic_program_id)?.name ??
+        null,
+      study_plan_id: offer.study_plan_id,
+      study_plan_name:
+        offer.study_plan?.name ??
+        this.catalog.study_plans.find((item: any) => item.id === offer.study_plan_id)?.name ??
+        null,
+      course_id: offer.study_plan_course_id ?? offer.id,
+      course_code: offer.course_code ?? null,
+      course_name: offer.course_name ?? null,
+      course_section_id: section.id,
+      course_section_name: section.external_code || section.code || null,
+      external_section_code: section.external_code ?? null,
+      internal_section_code: section.code ?? null,
+      delivery_modality_id: subsection.course_modality_id ?? '',
+      shift_id: subsection.shift ?? '',
+      projected_vacancies: subsection.projected_vacancies ?? section.projected_vacancies ?? null,
+      offering_status: (subsection.status ?? offer.status) !== 'CLOSED',
+      source_status: subsection.status ?? offer.status ?? 'DRAFT',
+      group_type: subsection.kind ?? 'MIXED',
+      group_code: subsection.code ?? '',
+      group_capacity: subsection.capacity_snapshot ?? null,
+      building_id: schedule?.building_id ?? subsection.building_id ?? effectiveBuilding?.id ?? null,
+      building_name: effectiveBuilding?.name ?? null,
+      group_note: subsection.denomination ?? null,
+      teachers,
+      primary_teacher_name: teachers[0]?.full_name ?? null,
+      session_type: schedule?.session_type ?? null,
+      day_of_week: schedule?.day_of_week ?? null,
+      start_time: schedule?.start_time ?? null,
+      end_time: schedule?.end_time ?? null,
+      minutes: schedule ? this.computeMinutes(schedule.start_time, schedule.end_time) : 0,
+      academic_hours: schedule?.academic_hours ?? subsection.assigned_total_hours ?? null,
+      classroom_id: schedule?.classroom_id ?? subsection.classroom_id ?? effectiveClassroom?.id ?? null,
+      classroom_name: effectiveClassroom?.name ?? null,
+      classroom_code: effectiveClassroom?.code ?? null,
+      assigned_theoretical_hours: subsection.assigned_theoretical_hours ?? null,
+      assigned_practical_hours: subsection.assigned_practical_hours ?? null,
+      assigned_total_hours: subsection.assigned_total_hours ?? null,
+      alerts,
+      alert_count: alerts.length,
+      blocking_alert_count: alerts.filter((item) => item.blocking).length,
+    };
+  }
+
+  private buildManualAlerts(subsection: any, schedule: any | null) {
+    const alerts = [] as PlanningWorkspaceAlert[];
+    const conflicts = Array.isArray(subsection?.conflicts) ? subsection.conflicts : [];
+    conflicts.forEach((conflict: any) => {
+      alerts.push({
+        code: conflict.conflict_type ?? 'CONFLICT',
+        severity: conflict.severity ?? 'WARNING',
+        message: this.conflictLabel(conflict.conflict_type),
+        blocking: (conflict.severity ?? 'WARNING') !== 'INFO',
+      });
+    });
+
+    const effectiveTeacherId = schedule?.teacher_id ?? subsection?.responsible_teacher_id;
+    const effectiveClassroomId = schedule?.classroom_id ?? subsection?.classroom_id;
+    if (!effectiveTeacherId) {
+      alerts.push({
+        code: 'NO_TEACHER',
+        severity: 'WARNING',
+        message: 'Falta docente asignado',
+        blocking: true,
+      });
+    }
+    if (!subsection?.course_modality_id) {
+      alerts.push({
+        code: 'NO_MODALITY',
+        severity: 'WARNING',
+        message: 'Falta modalidad',
+        blocking: true,
+      });
+    }
+    if (!subsection?.shift) {
+      alerts.push({
+        code: 'NO_SHIFT',
+        severity: 'WARNING',
+        message: 'Falta turno',
+        blocking: true,
+      });
+    }
+    if (!schedule) {
+      alerts.push({
+        code: 'NO_SCHEDULE',
+        severity: 'WARNING',
+        message: 'Falta horario',
+        blocking: true,
+      });
+    }
+    if (schedule && !effectiveClassroomId) {
+      alerts.push({
+        code: 'NO_CLASSROOM',
+        severity: 'WARNING',
+        message: 'Falta aula asignada',
+        blocking: true,
+      });
+    }
+
+    const deduped = new Map<string, PlanningWorkspaceAlert>();
+    alerts.forEach((alert) => deduped.set(`${alert.code}:${alert.message}`, alert));
+    return [...deduped.values()];
+  }
+
+  private buildSummaryFromOffer(offer: any, rows: PlanningWorkspaceRow[]): PlanningWorkspaceSummary {
+    const state =
+      rows.length === 0
+        ? 'DRAFT'
+        : rows.some((row) => row.blocking_alert_count > 0)
+          ? 'BLOCKED'
+          : rows.some((row) => row.alert_count > 0)
+            ? 'IN_PROGRESS'
+            : 'COMPLETE';
+    return {
+      offering_id: offer.id,
+      semester_id: offer.semester_id,
+      course_id: offer.study_plan_course_id ?? offer.id,
+      course_code: offer.course_code ?? null,
+      course_name: offer.course_name ?? null,
+      academic_program_name: offer.academic_program?.name ?? null,
+      study_plan_name: offer.study_plan?.name ?? null,
+      campus_name: offer.campus?.name ?? null,
+      group_count: new Set(rows.map((row) => row.group_id)).size,
+      row_count: rows.length,
+      scheduled_row_count: rows.filter((row) => Boolean(row.meeting_id)).length,
+      teacher_count: rows.filter((row) => row.teachers.length > 0).length,
+      total_alerts: rows.reduce((sum, row) => sum + row.alert_count, 0),
+      blocking_alerts: rows.reduce((sum, row) => sum + row.blocking_alert_count, 0),
+      hours_required: {
+        theory: Number(offer.theoretical_hours ?? 0),
+        practice: Number(offer.practical_hours ?? 0),
+        lab: 0,
+      },
+      hours_planned: {
+        theory: rows.reduce((sum, row) => sum + Number(row.assigned_theoretical_hours ?? 0), 0),
+        practice: rows.reduce((sum, row) => sum + Number(row.assigned_practical_hours ?? 0), 0),
+        lab: 0,
+      },
+      state,
+    };
+  }
+
+  private buildAssignedHoursPayload(row: PlanningWorkspaceRow, total: number) {
+    if (row.group_type === 'THEORY') {
+      return {
+        assigned_theoretical_hours: total,
+        assigned_practical_hours: 0,
+        assigned_total_hours: total,
+      };
+    }
+    if (row.group_type === 'PRACTICE') {
+      return {
+        assigned_theoretical_hours: 0,
+        assigned_practical_hours: total,
+        assigned_total_hours: total,
+      };
+    }
+
+    const currentTheory = Number(row.assigned_theoretical_hours ?? 0);
+    const currentPractice = Number(row.assigned_practical_hours ?? 0);
+    const currentTotal = Math.max(1, currentTheory + currentPractice);
+    const nextTheory = Math.round((currentTheory / currentTotal) * total);
+    return {
+      assigned_theoretical_hours: nextTheory,
+      assigned_practical_hours: Math.max(0, total - nextTheory),
+      assigned_total_hours: total,
+    };
+  }
+
+  private computeMinutes(start: string | null | undefined, end: string | null | undefined) {
+    if (!start || !end) {
+      return 0;
+    }
+    return Math.max(0, this.toMinutes(end) - this.toMinutes(start));
+  }
+
+  private toMinutes(value: string) {
+    const [hours = '0', minutes = '0'] = String(value).split(':');
+    return Number(hours) * 60 + Number(minutes);
+  }
+
+  private conflictLabel(type: string | null | undefined) {
+    switch (type) {
+      case 'TEACHER_OVERLAP':
+        return 'Cruce docente';
+      case 'CLASSROOM_OVERLAP':
+        return 'Cruce aula';
+      case 'SUBSECTION_OVERLAP':
+        return 'Cruce horario';
+      case 'SECTION_OVERLAP':
+        return 'Cruce seccion';
+      default:
+        return type ?? 'Cruce detectado';
+    }
+  }
+
+  private findSubsectionById(subsectionId: string) {
+    for (const offer of this.offerDetails) {
+      for (const section of offer?.sections ?? []) {
+        const found = (section?.subsections ?? []).find((item: any) => item.id === subsectionId);
+        if (found) {
+          return found;
+        }
+      }
+    }
+    return null;
+  }
+
+  private matchesFacultyFilter(row: PlanningWorkspaceRow) {
+    if (!this.filters.faculty_id) {
+      return true;
+    }
+    const program = this.catalog.academic_programs.find((item: any) => item.id === row.academic_program_id);
+    return program?.faculty_id === this.filters.faculty_id;
+  }
+
+  private matchesModalityFilter(row: PlanningWorkspaceRow) {
+    if (!this.filters.delivery_modality_id) {
+      return true;
+    }
+    return row.delivery_modality_id === this.filters.delivery_modality_id;
+  }
+
+  private matchesShiftFilter(row: PlanningWorkspaceRow) {
+    if (!this.filters.shift_id) {
+      return true;
+    }
+    return row.shift_id === this.filters.shift_id;
+  }
+
+  private matchesSearchFilter(row: PlanningWorkspaceRow) {
+    const query = this.normalizeSearchValue(this.filters.search);
+    if (!query) {
+      return true;
+    }
+    return this.normalizeSearchValue(
+      [
+        row.course_code,
+        row.course_name,
+        row.course_section_name,
+        row.group_code,
+        row.primary_teacher_name,
+        row.classroom_code,
+        row.classroom_name,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    ).includes(query);
+  }
+
+  private matchesQuickFilter(row: PlanningWorkspaceRow, filter: WorkspaceQuickFilter = this.quickFilter) {
+    switch (filter) {
+      case 'BLOCKED':
+        return row.blocking_alert_count > 0;
+      case 'ALERTS':
+        return row.alert_count > 0;
+      case 'NO_TEACHER':
+        return row.teachers.length === 0;
+      case 'NO_SCHEDULE':
+        return !row.meeting_id;
+      case 'COMPLETE':
+        return row.alert_count === 0 && row.teachers.length > 0 && Boolean(row.meeting_id);
+      default:
+        return true;
+    }
+  }
+
+  private compareRows(left: PlanningWorkspaceRow, right: PlanningWorkspaceRow) {
+    const courseDelta = this.courseLabel(left).localeCompare(this.courseLabel(right));
+    if (courseDelta !== 0) {
+      return courseDelta;
+    }
+
+    const sectionDelta = this.groupLabel(left).localeCompare(this.groupLabel(right));
+    if (sectionDelta !== 0) {
+      return sectionDelta;
+    }
+
+    const groupDelta = String(left.group_code ?? '').localeCompare(String(right.group_code ?? ''));
+    if (groupDelta !== 0) {
+      return groupDelta;
+    }
+
+    const dayDelta = (this.dayOrder[left.day_of_week ?? ''] ?? 99) - (this.dayOrder[right.day_of_week ?? ''] ?? 99);
+    if (dayDelta !== 0) {
+      return dayDelta;
+    }
+
+    return String(left.start_time ?? '').localeCompare(String(right.start_time ?? ''));
+  }
+
+  private filteredTeachers(query: string) {
+    const normalized = this.normalizeSearchValue(query);
+    const pool = !normalized
+      ? this.teachers
+      : this.teachers.filter((teacher: any) =>
+          this.normalizeSearchValue([teacher?.dni, teacher?.full_name, teacher?.name].filter(Boolean).join(' ')).includes(normalized),
+        );
+    return pool.slice(0, 200);
+  }
+
+  private filteredClassrooms(query: string, campusId: string) {
+    const normalized = this.normalizeSearchValue(query);
+    const byCampus = campusId ? this.classrooms.filter((classroom: any) => classroom.campus_id === campusId) : this.classrooms;
+    const pool = !normalized
+      ? byCampus
+      : byCampus.filter((classroom: any) =>
+          this.normalizeSearchValue(
+            [classroom?.code, classroom?.name, classroom?.building_name, classroom?.capacity].filter(Boolean).join(' '),
+          ).includes(normalized),
+        );
+    return pool.slice(0, 200);
+  }
+
+  private normalizeSearchValue(value: string | number | null | undefined) {
+    return `${value ?? ''}`
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  private parseOptionalInt(value: string) {
+    const normalized = String(value ?? '').trim();
+    if (!normalized) {
+      return null;
+    }
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    return Math.max(0, Math.trunc(parsed));
+  }
+
+  private syncSelectedRows() {
+    const available = new Set(this.workspace.rows.map((row) => row.row_id));
+    this.selectedRowIds = this.selectedRowIds.filter((id) => available.has(id));
+  }
+
+  private syncDrawerAfterReload(focusRowId?: string) {
+    if (focusRowId) {
+      const focused = this.workspace.rows.find((row) => row.row_id === focusRowId) ?? null;
+      if (focused) {
+        this.openDrawer(focused);
+        return;
+      }
+      this.closeDrawer();
+      return;
+    }
+
+    if (!this.drawer.open) {
+      return;
+    }
+    const refreshed = this.workspace.rows.find((row) => row.row_id === this.drawer.row_id) ?? null;
+    if (!refreshed) {
+      this.closeDrawer();
+      return;
+    }
+    this.openDrawer(refreshed);
+  }
+
+  private compatibleReplicateTargetGroups(sourceRow: PlanningWorkspaceRow | null) {
+    if (!sourceRow) {
+      return [] as PlanningWorkspaceRow[];
+    }
+
+    const uniqueTargets = new Map<string, PlanningWorkspaceRow>();
+    for (const row of this.selectedRows) {
+      if (row.offering_id !== sourceRow.offering_id) {
+        continue;
+      }
+      if (row.group_id === sourceRow.group_id) {
+        continue;
+      }
+      if (!uniqueTargets.has(row.group_id)) {
+        uniqueTargets.set(row.group_id, row);
+      }
+    }
+    return [...uniqueTargets.values()].sort((left, right) => this.compareRows(left, right));
+  }
+}

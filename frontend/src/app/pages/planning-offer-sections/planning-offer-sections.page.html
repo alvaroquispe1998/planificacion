@@ -2,9 +2,9 @@
   <header class="hero">
     <div>
       <p class="eyebrow">Configuracion por oferta</p>
-      <h1>Secciones y subsecciones</h1>
+      <h1>Secciones y grupos</h1>
       <p class="subtle">
-        Administra las secciones creadas para el curso y configura sus subsecciones base.
+        Administra las secciones creadas para el curso y configura sus grupos base con uno o varios horarios.
       </p>
     </div>
     <div class="hero-actions">
@@ -27,7 +27,7 @@
     Este plan esta en {{ workflowStatusLabel(planRule?.workflow_status).toLowerCase() }}. Puedes revisar la configuracion, pero no editarla.
   </p>
   <p *ngIf="canEditApprovedPlan" class="flash">
-    Este plan esta aprobado. Puedes actualizar secciones, subsecciones y horarios, y luego devolverlo a correccion si hace falta.
+    Este plan esta aprobado. Puedes actualizar secciones, grupos y horarios, y luego devolverlo a correccion si hace falta.
   </p>
   <p *ngIf="supportDataLoading && offer" class="flash">
     Cargando catalogos auxiliares. Ya puedes crear la primera seccion.
@@ -91,7 +91,7 @@
 
     <div *ngIf="!loading && offer?.sections?.length === 0" class="empty-block">
       <h3>No hay secciones creadas</h3>
-      <p>Crea la primera seccion para esta oferta y el sistema generara sus subsecciones.</p>
+      <p>Crea la primera seccion para esta oferta y el sistema generara sus grupos.</p>
     </div>
 
     <div *ngIf="!loading && (offer?.sections?.length || 0) > 0" class="sections-grid">
@@ -101,11 +101,13 @@
             <div class="section-summary-top">
               <div class="section-summary-title">
                 <p class="eyebrow">Seccion</p>
-                <h3>{{ section.code }}</h3>
+                <h3>{{ sectionPrimaryCode(section) }}</h3>
+                <p class="subtle" *ngIf="sectionSecondaryCode(section)">{{ sectionSecondaryCode(section) }}</p>
               </div>
               <div class="section-summary-pills">
                 <span *ngIf="section.is_cepea" class="pill neutral">CEPEA</span>
-                <span class="pill neutral">{{ section.subsections?.length || 0 }} subsecciones</span>
+                <span class="pill neutral">{{ section.subsections?.length || 0 }} grupos</span>
+                <span class="pill neutral">{{ sectionScheduleCount(section) }} horarios</span>
                 <span class="pill" [ngClass]="sectionStatusClass(section)">
                   {{ sectionStatusLabel(section) }}
                 </span>
@@ -255,10 +257,10 @@
   <aside class="subsection-drawer" (click)="$event.stopPropagation()">
     <div class="drawer-head">
       <div>
-        <p class="eyebrow">Subseccion</p>
+        <p class="eyebrow">Grupo</p>
         <h3>{{ activeSubsection.code }}</h3>
         <p class="drawer-subtitle">
-          {{ activeSection?.code || 'Seccion' }} - {{ subsectionStatusLabel(activeSubsection) }}
+          {{ sectionPrimaryCode(activeSection) || 'Seccion' }} - {{ subsectionStatusLabel(activeSubsection) }}
         </p>
       </div>
       <button class="btn btn-ghost" (click)="closeSubsectionDrawer()">Cerrar</button>
@@ -349,7 +351,7 @@
           </label>
 
           <label class="field">
-            <span>Tipo de subseccion</span>
+            <span>Tipo de grupo</span>
             <select
               [ngModel]="activeSubsection.kind"
               (ngModelChange)="onSubsectionKindChange(activeSubsection, $event)"
@@ -431,6 +433,8 @@
             <div class="schedule-item-main">
               <strong>{{ dayLabel(schedule.day_of_week) }}</strong>
               <span>{{ timeLabel(schedule.start_time) }} - {{ timeLabel(schedule.end_time) }}</span>
+              <span>{{ scheduleSessionTypeLabel(schedule) }} · {{ scheduleLocationLabel(schedule, activeSubsection) }}</span>
+              <span>{{ scheduleTeacherLabel(schedule, activeSubsection) }}</span>
             </div>
             <div class="schedule-item-side">
               <span>{{ formatAcademicHours(schedule.academic_hours) }} h acad.</span>
@@ -451,7 +455,7 @@
 
         <div class="schedule-form drawer-schedule-form">
           <div class="schedule-form-note">
-            Solo se permite un horario por subseccion, entre 07:40 y 23:30, en bloques de 50 minutos.
+            Puedes cargar varios horarios por grupo. Si necesitas ajustar uno existente, elimina el slot y vuelve a crearlo con la malla de 50 minutos.
           </div>
 
           <div class="hours-warning" [class.hours-warning-alert]="subsectionAssignedHoursMismatch(activeSubsection)">
@@ -510,7 +514,7 @@
               class="btn btn-primary btn-sm"
               (click)="saveSchedule(activeSubsection)"
               [disabled]="saving || isWorkflowReadOnly || !canCreateSchedule(activeSubsection.id)">
-              {{ (activeSubsection.schedules?.length || 0) > 0 ? 'Actualizar horario' : 'Guardar horario' }}
+              {{ (activeSubsection.schedules?.length || 0) > 0 ? 'Agregar horario' : 'Guardar horario' }}
             </button>
             <span *ngIf="scheduleDraftInvalid(activeSubsection.id)" class="schedule-helper error-text">
               Usa horas alineadas a la malla de 50 minutos.
@@ -537,12 +541,12 @@
         <span>Tipo de creacion</span>
         <select [(ngModel)]="createSectionForm.mode" (ngModelChange)="onCreateSectionModeChange()">
           <option value="SINGLE">Seccion unica</option>
-          <option value="MULTIPLE">Con subsecciones</option>
+          <option value="MULTIPLE">Con grupos</option>
         </select>
       </label>
 
       <label class="field" *ngIf="createSectionForm.mode === 'MULTIPLE'">
-        <span>Cantidad de subsecciones</span>
+        <span>Cantidad de grupos</span>
         <input
           type="number"
           min="2"

@@ -14,7 +14,10 @@ import { ApiService } from '../../core/api.service';
   styleUrl: './planning-imports.page.css',
 })
 export class PlanningImportsPageComponent implements OnInit, OnDestroy {
+  readonly akademicOnlyView = true;
   loading = false;
+  semesterOptionsLoading = false;
+  semesterOptionsLoaded = false;
   uploading = false;
   saving = false;
   executing = false;
@@ -32,6 +35,26 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   aliasTargetQuery = '';
   showAliasTargetOptions = false;
   aliasContext: any = null;
+  sourceMode: 'AKADEMIC' | 'EXCEL' = 'AKADEMIC';
+  importCatalogLoading = false;
+  importCatalog: any = {
+    semesters: [],
+    vc_periods: [],
+    campuses: [],
+    faculties: [],
+    academic_programs: [],
+    study_plans: [],
+  };
+  akademicForm = {
+    semester_id: '',
+    campus_id: '',
+    faculty_id: '',
+    academic_program_id: '',
+    study_plan_id: '',
+    cycle: '',
+    study_plan_course_id: '',
+    course_code: '',
+  };
 
   selectedFile: File | null = null;
   batch: any = null;
@@ -70,6 +93,9 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     laboratory: 'Laboratorio',
   };
   private batchPollingTimer: ReturnType<typeof setInterval> | null = null;
+  private batchPollingId = '';
+  private previewDurationTimer: ReturnType<typeof setInterval> | null = null;
+  private previewStartedAtMs: number | null = null;
   private routeSubscription: Subscription | null = null;
 
   constructor(
@@ -80,12 +106,15 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
+    this.sourceMode = 'AKADEMIC';
+    this.loadSemesterOptions();
+    this.loadImportCatalog();
     this.routeSubscription = this.route.queryParamMap.subscribe((params) => {
       const batchId = params.get('batch') ?? '';
       if (!batchId) {
         return;
       }
-      if (this.batch?.id === batchId && this.batch?.status !== 'PREVIEW_PROCESSING') {
+      if (this.batch?.id === batchId && !this.isBatchProcessingStatus(this.batch?.status)) {
         return;
       }
       this.loadBatch(batchId, true);
@@ -94,6 +123,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopBatchPolling();
+    this.stopPreviewDurationTimer();
     this.routeSubscription?.unsubscribe();
     this.routeSubscription = null;
   }
@@ -102,12 +132,167 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     return Boolean(this.batch?.id);
   }
 
+  get hasSemesterOptions() {
+    return Array.isArray(this.importCatalog.semesters) && this.importCatalog.semesters.length > 0;
+  }
+
+  get sourceModeLabel() {
+    return this.isAkademicSourceSelected ? 'Akademic' : 'Excel';
+  }
+
+  get isAkademicSourceSelected() {
+    return this.akademicOnlyView || this.sourceMode === 'AKADEMIC';
+  }
+
+  get akademicSourceDisplay() {
+    const semesterName = this.resolveSemesterName(this.batch?.source_scope?.semester_id ?? this.akademicForm.semester_id);
+    return semesterName ? `Akademic ${semesterName}` : 'Consulta directa contra Akademic';
+  }
+
+  get akademicFilteredPrograms() {
+    const items = Array.isArray(this.importCatalog.academic_programs)
+      ? this.importCatalog.academic_programs
+      : [];
+    if (!this.akademicForm.faculty_id) {
+      return items;
+    }
+    return items.filter((item: any) => item.faculty_id === this.akademicForm.faculty_id);
+  }
+
+  get akademicFilteredStudyPlans() {
+    const items = Array.isArray(this.importCatalog.study_plans) ? this.importCatalog.study_plans : [];
+    return items.filter((item: any) => {
+      if (this.akademicForm.faculty_id && item.faculty_id !== this.akademicForm.faculty_id) {
+        return false;
+      }
+      if (
+        this.akademicForm.academic_program_id &&
+        item.academic_program_id !== this.akademicForm.academic_program_id
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }
+
   get isPreviewProcessing() {
     return this.uploading || this.batch?.status === 'PREVIEW_PROCESSING';
   }
 
+  get isExecutionProcessing() {
+    return this.batch?.status === 'EXECUTING';
+  }
+
+  get showExecutionProgressModal() {
+    return this.executing || this.isExecutionProcessing;
+  }
+
   get showBatchResults() {
     return Boolean(this.batch?.id) && this.batch?.status !== 'PREVIEW_PROCESSING';
+  }
+
+  get previewDurationLabel() {
+    const startedAt = this.previewDurationStartMs();
+    const finishedAt = this.previewDurationEndMs();
+    if (!startedAt || !finishedAt || finishedAt < startedAt) {
+      return '';
+    }
+    return this.formatDuration(finishedAt - startedAt);
+  }
+
+  get executionProgressPercent() {
+    if (this.batch?.status === 'EXECUTED') {
+      return 100;
+    }
+    const reportedPercent = Number(this.batch?.report?.percent ?? (this.executing ? 2 : 0));
+    const processed = Number(this.batch?.report?.processed_scope_count ?? 0);
+    const total = Number(this.batch?.report?.total_scope_count ?? 0);
+    const derivedPercent =
+      total > 0 ? Math.max(0, Math.min(100, Math.round((processed / total) * 100))) : 0;
+    return Math.max(0, Math.min(100, Math.round(Math.max(reportedPercent, derivedPercent))));
+  }
+
+  get executionProgressMessage() {
+    const processed = Number(this.batch?.report?.processed_scope_count ?? 0);
+    const total = Number(this.batch?.report?.total_scope_count ?? 0);
+    const message = String(this.batch?.report?.message ?? '').trim();
+    if (processed > 0 && total > 0 && /^Preparando la carga/i.test(message)) {
+      return `Aplicando grupos en la plataforma (${processed}/${total})...`;
+    }
+    if (message) {
+      return message;
+    }
+    return this.executing ? 'Iniciando la carga masiva...' : 'Aplicando la carga en la plataforma';
+  }
+
+  get executionCurrentScopeLabel() {
+    return String(this.batch?.report?.current_scope_label ?? '').trim();
+  }
+
+  get executionDurationLabel() {
+    const startedAt = this.executionDurationStartMs();
+    const finishedAt = this.executionDurationEndMs();
+    if (!startedAt || !finishedAt || finishedAt < startedAt) {
+      return '';
+    }
+    return this.formatDuration(finishedAt - startedAt);
+  }
+
+  get executionProcessedScopeSummary() {
+    const processed = Number(this.batch?.report?.processed_scope_count ?? 0);
+    const total = Number(this.batch?.report?.total_scope_count ?? 0);
+    if (total > 0) {
+      return `${processed} de ${total} grupos`;
+    }
+    return 'Preparando grupos';
+  }
+
+  get executionScopeOutcomeSummary() {
+    const report = this.batch?.report ?? {};
+    return [
+      `${Number(report.imported_scope_count ?? 0)} cargados`,
+      `${Number(report.skipped_scope_count ?? 0)} omitidos`,
+      `${Number(report.replaced_scope_count ?? 0)} reemplazados`,
+    ].join(' | ');
+  }
+
+  get executionCreatedCountsSummary() {
+    const report = this.batch?.report ?? {};
+    return [
+      `${Number(report.created_plan_rule_count ?? 0)} planes`,
+      `${Number(report.created_offer_count ?? 0)} ofertas`,
+      `${Number(report.created_section_count ?? 0)} secciones`,
+      `${Number(report.created_subsection_count ?? 0)} grupos`,
+      `${Number(report.created_schedule_count ?? 0)} horarios`,
+    ].join(' | ');
+  }
+
+  get executionLastUpdateLabel() {
+    const updatedAt = this.executionProgressUpdatedAtMs();
+    if (!updatedAt) {
+      return '';
+    }
+    const delta = Math.max(0, Date.now() - updatedAt);
+    if (delta < 5000) {
+      return 'hace unos segundos';
+    }
+    return `hace ${this.formatDuration(delta)}`;
+  }
+
+  get executionTimingHelperText() {
+    const duration = this.executionDurationLabel;
+    if (!duration) {
+      return '';
+    }
+    if (this.batch?.status === 'EXECUTING') {
+      return this.executionLastUpdateLabel
+        ? `Tiempo transcurrido: ${duration}. Ultima actualizacion ${this.executionLastUpdateLabel}.`
+        : `Tiempo transcurrido: ${duration}.`;
+    }
+    if (this.batch?.status === 'FAILED') {
+      return `La ejecucion alcanzo a correr ${duration} antes de fallar.`;
+    }
+    return `La ejecucion demoro ${duration}.`;
   }
 
   get hasPendingScopeDecisions() {
@@ -163,6 +348,10 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
 
   get aliasSourceValueLocked() {
     return this.aliasModalMode === 'edit' || this.aliasSourceValueDisplay !== this.aliasForm.source_value;
+  }
+
+  get aliasSourceHelperText() {
+    return this.mappingAffectedRowsLabel(this.aliasContext);
   }
 
   get dependentAcademicPrograms() {
@@ -252,22 +441,54 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     this.selectedFile = input?.files?.[0] ?? null;
   }
 
-  uploadPreview() {
-    if (!this.selectedFile) {
-      this.error = 'Selecciona un archivo Excel antes de generar el preview.';
-      return;
+  setSourceMode(mode: 'AKADEMIC' | 'EXCEL') {
+    this.sourceMode = this.akademicOnlyView ? 'AKADEMIC' : mode;
+    this.error = '';
+    this.message = '';
+  }
+
+  onAkademicFacultyChange() {
+    if (
+      this.akademicForm.academic_program_id &&
+      !this.akademicFilteredPrograms.some(
+        (item: any) => item.id === this.akademicForm.academic_program_id,
+      )
+    ) {
+      this.akademicForm.academic_program_id = '';
     }
+    this.onAkademicProgramChange();
+  }
+
+  onAkademicProgramChange() {
+    if (
+      this.akademicForm.study_plan_id &&
+      !this.akademicFilteredStudyPlans.some((item: any) => item.id === this.akademicForm.study_plan_id)
+    ) {
+      this.akademicForm.study_plan_id = '';
+    }
+  }
+
+  uploadPreview() {
     this.error = '';
     this.message = '';
     this.stopBatchPolling();
     this.batch = null;
+    this.previewStartedAtMs = Date.now();
     this.uploading = true;
     this.startUploadProgress();
-    this.api
-      .previewPlanningImport(this.selectedFile)
+    const request$ =
+      this.isAkademicSourceSelected
+        ? this.previewAkademicImportRequest()
+        : this.previewExcelImportRequest();
+    if (!request$) {
+      this.uploading = false;
+      return;
+    }
+    request$
       .pipe(
         finalize(() => {
           this.uploading = false;
+          this.syncPreviewDurationTimer();
         }),
       )
       .subscribe({
@@ -275,7 +496,6 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
           this.applyBatch(result);
           if (result?.status === 'PREVIEW_PROCESSING') {
             this.message = 'La revision previa esta en proceso. La pantalla se actualizara automaticamente.';
-            this.startBatchPolling(result.id);
             return;
           }
           this.completeUploadProgress();
@@ -311,9 +531,11 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         next: (result) => {
           this.applyBatch(result);
           if (result?.status === 'PREVIEW_READY') {
+            this.error = '';
             this.message = this.message || 'Revision previa generada correctamente.';
           }
           if (result?.status === 'PREVIEW_FAILED') {
+            this.message = '';
             this.error = result?.error_message ?? 'No se pudo generar el preview del archivo.';
           }
         },
@@ -365,8 +587,11 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       .pipe(finalize(() => (this.executing = false)))
       .subscribe({
         next: (result) => {
-          this.executing = false;
           this.applyBatch(result);
+          if (result?.status === 'EXECUTING') {
+            this.message = 'La carga se inicio correctamente. Veras el avance en la ventana de seguimiento.';
+            return;
+          }
           this.message = this.executionReportSummary
             ? `Carga masiva ejecutada correctamente. ${this.executionReportSummary}.`
             : 'Carga masiva ejecutada correctamente.';
@@ -475,6 +700,36 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     return `${sourceValue} | ${campusValues.join(', ')}`;
   }
 
+  mappingAffectedRowsLabel(item: any) {
+    const samples = Array.isArray(item?.sample_rows) ? item.sample_rows : [];
+    const labels = samples.map((sample: any) => this.mappingSampleLabel(sample)).filter(Boolean);
+    if (!labels.length) {
+      return '';
+    }
+
+    const extraCount = Math.max(0, Number(item?.row_count ?? 0) - labels.length);
+    const extraLabel =
+      extraCount > 0 ? `; y ${extraCount} fila${extraCount === 1 ? '' : 's'} mas` : '';
+    return `Cursos detectados: ${labels.join('; ')}${extraLabel}.`;
+  }
+
+  mappingAffectedContextLabel(item: any) {
+    const samples = Array.isArray(item?.sample_rows) ? item.sample_rows : [];
+    const labels = samples.map((sample: any) => this.mappingContextLabel(sample)).filter(Boolean);
+    if (!labels.length) {
+      return '';
+    }
+
+    const extraCount = Math.max(0, Number(item?.row_count ?? 0) - labels.length);
+    const extraLabel =
+      extraCount > 0 ? `; y ${extraCount} fila${extraCount === 1 ? '' : 's'} mas` : '';
+    return `${labels.join('; ')}${extraLabel}.`;
+  }
+
+  rowPreviewContextLabel(item: any) {
+    return this.mappingContextLabel(item);
+  }
+
   get importableRowCount() {
     return Number(this.batch?.summary?.importable_row_count ?? this.batch?.importable_row_count ?? 0);
   }
@@ -496,6 +751,14 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     return this.pendingMappingConfirmationCount > 0;
   }
 
+  get allPendingMappingsAlreadySaved() {
+    const items = Array.isArray(this.batch?.unresolved_mappings) ? this.batch.unresolved_mappings : [];
+    return (
+      items.length > 0 &&
+      items.every((item: any) => Boolean(this.findExistingAlias(item?.namespace, item?.source_value)))
+    );
+  }
+
   get canExecuteBatch() {
     return (
       this.batch?.status === 'PREVIEW_READY' &&
@@ -510,7 +773,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   }
 
   get executeButtonLabel() {
-    if (this.executing) {
+    if (this.executing || this.batch?.status === 'EXECUTING') {
       return 'Ejecutando...';
     }
     if (this.batch?.status === 'EXECUTED') {
@@ -529,7 +792,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       `${Number(report.created_plan_rule_count ?? 0)} planes`,
       `${Number(report.created_offer_count ?? 0)} ofertas`,
       `${Number(report.created_section_count ?? 0)} secciones`,
-      `${Number(report.created_subsection_count ?? 0)} subsecciones`,
+      `${Number(report.created_subsection_count ?? 0)} grupos`,
       `${Number(report.created_schedule_count ?? 0)} horarios`,
     ].join(' | ');
   }
@@ -544,6 +807,9 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     }
     if (status === 'PREVIEW_FAILED') {
       return this.batch?.error_message || 'La revision previa fallo. Genera una nueva antes de ejecutar.';
+    }
+    if (status === 'EXECUTING') {
+      return 'La carga se esta ejecutando. Sigue el avance en la ventana de progreso.';
     }
     if (status === 'FAILED') {
       return (
@@ -562,6 +828,9 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       return 'Primero decide que hacer con los grupos que ya tienen informacion guardada.';
     }
     if (this.hasPendingMappings) {
+      if (this.allPendingMappingsAlreadySaved) {
+        return 'Los mapeos ya estan guardados, pero este preview aun no se recalculo. Genera nuevamente el preview para habilitar la carga.';
+      }
       return 'Primero confirma los mapeos sugeridos que aparecen en la seccion de pendientes.';
     }
     if (this.blockedRowCount > 0) {
@@ -587,7 +856,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       `${Number(counts?.plan_rules ?? 0)} planes`,
       `${Number(counts?.offers ?? 0)} ofertas`,
       `${Number(counts?.sections ?? 0)} secciones`,
-      `${Number(counts?.subsections ?? 0)} subsecciones`,
+      `${Number(counts?.subsections ?? 0)} grupos`,
       `${Number(counts?.schedules ?? 0)} horarios`,
     ].join(' | ');
   }
@@ -686,7 +955,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       `${existing.plan_rule_count ?? 0} planes`,
       `${existing.offer_count ?? 0} ofertas`,
       `${existing.section_count ?? 0} secciones`,
-      `${existing.subsection_count ?? 0} subsecciones`,
+      `${existing.subsection_count ?? 0} grupos`,
       `${existing.schedule_count ?? 0} horarios`,
     ].join(' · ');
   }
@@ -722,7 +991,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       `${existing.plan_rule_count ?? 0} planes`,
       `${existing.offer_count ?? 0} ofertas`,
       `${existing.section_count ?? 0} secciones`,
-      `${existing.subsection_count ?? 0} subsecciones`,
+      `${existing.subsection_count ?? 0} grupos`,
       `${existing.schedule_count ?? 0} horarios`,
     ].join(' | ');
   }
@@ -748,22 +1017,46 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       this.executing = false;
     }
     this.batch = result;
+    if (result?.created_at) {
+      const createdAtMs = Date.parse(String(result.created_at));
+      this.previewStartedAtMs = Number.isFinite(createdAtMs) ? createdAtMs : this.previewStartedAtMs;
+    }
+    this.syncAkademicFormFromBatch(result);
     this.syncUploadProgressFromBatch(result);
     this.decisionDraftByScopeKey = {};
     for (const item of result?.scope_decisions ?? []) {
       this.decisionDraftByScopeKey[item.scope_key] = item.decision;
     }
-    if (result?.status === 'PREVIEW_PROCESSING') {
+    if (this.isBatchProcessingStatus(result?.status)) {
+      if (result?.status === 'PREVIEW_PROCESSING') {
+        this.error = '';
+      }
       this.startBatchPolling(result.id);
     } else {
       this.stopBatchPolling();
     }
+    this.syncPreviewDurationTimer();
     if (previousStatus === 'PREVIEW_PROCESSING' && result?.status === 'PREVIEW_READY') {
+      this.error = '';
       this.completeUploadProgress();
       this.message = 'Revision previa generada correctamente.';
     }
     if (previousStatus === 'PREVIEW_PROCESSING' && result?.status === 'PREVIEW_FAILED') {
+      this.message = '';
       this.error = result?.error_message ?? 'No se pudo generar el preview del archivo.';
+    }
+    if (previousStatus === 'EXECUTING' && result?.status === 'EXECUTED') {
+      this.error = '';
+      this.message = this.executionReportSummary
+        ? `Carga masiva ejecutada correctamente. ${this.executionReportSummary}.`
+        : 'Carga masiva ejecutada correctamente.';
+    }
+    if (previousStatus === 'EXECUTING' && result?.status === 'FAILED') {
+      this.message = '';
+      this.error =
+        result?.error_message ??
+        result?.report?.error_message ??
+        'La carga masiva fallo antes de completar el proceso.';
     }
     if (result?.status === 'PREVIEW_READY' && result?.unresolved_mappings?.length && !this.aliasMappingsLoaded) {
       this.loadAliasMappingsForPreview();
@@ -783,7 +1076,11 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
 
   private startUploadProgress() {
     this.uploadProgress = 5;
-    this.uploadStageLabel = 'Registrando archivo para generar el preview...';
+    this.uploadStageLabel =
+      this.isAkademicSourceSelected
+        ? 'Preparando consulta contra Akademic...'
+        : 'Registrando archivo para generar el preview...';
+    this.syncPreviewDurationTimer();
   }
 
   private completeUploadProgress() {
@@ -792,8 +1089,11 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   }
 
   private startBatchPolling(batchId: string) {
+    if (this.batchPollingTimer && this.batchPollingId === batchId) {
+      return;
+    }
     this.stopBatchPolling();
-    this.loadBatch(batchId, true);
+    this.batchPollingId = batchId;
     this.batchPollingTimer = setInterval(() => {
       this.loadBatch(batchId, true);
     }, 800);
@@ -803,6 +1103,27 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     if (this.batchPollingTimer) {
       clearInterval(this.batchPollingTimer);
       this.batchPollingTimer = null;
+    }
+    this.batchPollingId = '';
+  }
+
+  private syncPreviewDurationTimer() {
+    const shouldRun = this.isPreviewProcessing || this.isExecutionProcessing || this.executing;
+    if (shouldRun && !this.previewDurationTimer) {
+      this.previewDurationTimer = setInterval(() => {
+        this.cdr.detectChanges();
+      }, 1000);
+      return;
+    }
+    if (!shouldRun) {
+      this.stopPreviewDurationTimer();
+    }
+  }
+
+  private stopPreviewDurationTimer() {
+    if (this.previewDurationTimer) {
+      clearInterval(this.previewDurationTimer);
+      this.previewDurationTimer = null;
     }
   }
 
@@ -943,6 +1264,168 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       error: () => {
         this.aliasMappingsLoaded = true;
       },
+      });
+  }
+
+  private previewExcelImportRequest() {
+    if (!this.selectedFile) {
+      this.error = 'Selecciona un archivo Excel antes de generar el preview.';
+      return null;
+    }
+    return this.api.previewPlanningImport(this.selectedFile);
+  }
+
+  private previewAkademicImportRequest() {
+    if (!this.akademicForm.semester_id) {
+      this.error = 'Selecciona el semestre de Akademic antes de generar el preview.';
+      return null;
+    }
+    return this.api.previewPlanningAkademicImport({
+      semester_id: this.akademicForm.semester_id,
+    });
+  }
+
+  private previewDurationStartMs() {
+    const createdAt = Date.parse(String(this.batch?.created_at ?? ''));
+    if (Number.isFinite(createdAt)) {
+      return createdAt;
+    }
+    return this.previewStartedAtMs;
+  }
+
+  private previewDurationEndMs() {
+    if (this.isPreviewProcessing) {
+      return Date.now();
+    }
+    const progressUpdatedAt = Date.parse(String(this.batch?.progress?.updated_at ?? ''));
+    if (Number.isFinite(progressUpdatedAt)) {
+      return progressUpdatedAt;
+    }
+    const updatedAt = Date.parse(String(this.batch?.updated_at ?? ''));
+    if (Number.isFinite(updatedAt)) {
+      return updatedAt;
+    }
+    return this.previewStartedAtMs;
+  }
+
+  private executionDurationStartMs() {
+    const startedAt = Date.parse(String(this.batch?.report?.started_at ?? ''));
+    if (Number.isFinite(startedAt)) {
+      return startedAt;
+    }
+    const createdAt = Date.parse(String(this.batch?.created_at ?? ''));
+    if (Number.isFinite(createdAt)) {
+      return createdAt;
+    }
+    return null;
+  }
+
+  private executionDurationEndMs() {
+    if (this.isExecutionProcessing || this.executing) {
+      return Date.now();
+    }
+    const finishedAt = Date.parse(String(this.batch?.report?.finished_at ?? ''));
+    if (Number.isFinite(finishedAt)) {
+      return finishedAt;
+    }
+    const executedAt = Date.parse(String(this.batch?.executed_at ?? ''));
+    if (Number.isFinite(executedAt)) {
+      return executedAt;
+    }
+    const updatedAt = Date.parse(String(this.batch?.updated_at ?? ''));
+    if (Number.isFinite(updatedAt)) {
+      return updatedAt;
+    }
+    return this.executionDurationStartMs();
+  }
+
+  private executionProgressUpdatedAtMs() {
+    const updatedAt = Date.parse(String(this.batch?.report?.updated_at ?? ''));
+    return Number.isFinite(updatedAt) ? updatedAt : null;
+  }
+
+  private isBatchProcessingStatus(status: unknown) {
+    const currentStatus = String(status ?? '').trim();
+    return currentStatus === 'PREVIEW_PROCESSING' || currentStatus === 'EXECUTING';
+  }
+
+  private formatDuration(durationMs: number) {
+    const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours} h ${String(minutes).padStart(2, '0')} min`;
+    }
+    if (minutes > 0) {
+      return `${minutes} min ${String(seconds).padStart(2, '0')} s`;
+    }
+    return `${seconds} s`;
+  }
+
+  private loadImportCatalog() {
+    this.importCatalogLoading = true;
+    this.api
+      .getPlanningCatalogFilters()
+      .pipe(finalize(() => (this.importCatalogLoading = false)))
+      .subscribe({
+        next: (catalog) => {
+          const catalogSemesters = Array.isArray((catalog as any)?.semesters) ? (catalog as any).semesters : [];
+          this.importCatalog = {
+            ...this.importCatalog,
+            ...(catalog ?? {}),
+            semesters: this.mergeSemesterOptions(catalogSemesters, this.importCatalog.semesters),
+          };
+          this.ensureAkademicSemesterSelection();
+          this.cdr.detectChanges();
+        },
+        error: () => {
+          if (!(this.importCatalog.semesters || []).length) {
+            this.error = 'No se pudo cargar el catalogo para importar desde Akademic.';
+          }
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  private mergeSemesterOptions(primary: any[], fallback: any[]) {
+    const merged = [...primary, ...fallback];
+    const byId = new Map<string, any>();
+    for (const item of merged) {
+      const id = String(item?.id ?? '').trim();
+      if (!id) {
+        continue;
+      }
+      byId.set(id, item);
+    }
+    return [...byId.values()].sort((left: any, right: any) =>
+      this.normalizePeriodToken(right?.name).localeCompare(this.normalizePeriodToken(left?.name)),
+    );
+  }
+
+  private loadSemesterOptions() {
+    this.semesterOptionsLoading = true;
+    this.semesterOptionsLoaded = false;
+    this.api.listSemesters().subscribe({
+      next: (semesters) => {
+        this.importCatalog = {
+          ...this.importCatalog,
+          semesters: this.mergeSemesterOptions(semesters, this.importCatalog.semesters),
+        };
+        this.semesterOptionsLoading = false;
+        this.semesterOptionsLoaded = true;
+        this.ensureAkademicSemesterSelection();
+        this.cdr.detectChanges();
+      },
+      error: () => {
+        this.semesterOptionsLoading = false;
+        this.semesterOptionsLoaded = true;
+        if (!this.importCatalogLoading && !(this.importCatalog.semesters || []).length) {
+          this.error = 'No se pudo cargar la lista de semestres.';
+        }
+        this.cdr.detectChanges();
+      },
     });
   }
 
@@ -958,6 +1441,38 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       return [];
     }
     return studyPlans.filter((item: any) => programIds.includes(String(item?.academic_program_id ?? '').trim()));
+  }
+
+  private syncAkademicFormFromBatch(batch: any) {
+    const semesterId = String(batch?.source_scope?.semester_id ?? '').trim();
+    if (!semesterId) {
+      this.ensureAkademicSemesterSelection();
+      return;
+    }
+    this.akademicForm.semester_id = semesterId;
+  }
+
+  private ensureAkademicSemesterSelection() {
+    const semesters = Array.isArray(this.importCatalog.semesters) ? this.importCatalog.semesters : [];
+    if (!semesters.length) {
+      this.akademicForm.semester_id = '';
+      return;
+    }
+    const selectedSemesterId = String(this.akademicForm.semester_id ?? '').trim();
+    if (selectedSemesterId && semesters.some((item: any) => item.id === selectedSemesterId)) {
+      return;
+    }
+    this.akademicForm.semester_id = String(semesters[0]?.id ?? '').trim();
+  }
+
+  private resolveSemesterName(value: unknown) {
+    const semesterId = String(value ?? '').trim();
+    if (!semesterId) {
+      return '';
+    }
+    const semesters = Array.isArray(this.importCatalog.semesters) ? this.importCatalog.semesters : [];
+    const semester = semesters.find((item: any) => String(item?.id ?? '').trim() === semesterId);
+    return String(semester?.name ?? '').trim();
   }
 
   private filteredCourseTargets() {
@@ -1071,6 +1586,43 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       .trim();
   }
 
+  private mappingSampleLabel(sample: any) {
+    const courseCode = String(sample?.course_code ?? '').trim();
+    const courseName = String(sample?.course_name ?? '').trim();
+    const section = String(sample?.section ?? '').trim();
+    const rowNumber = Number(sample?.row_number ?? 0);
+
+    const courseLabel = [courseCode, courseName].filter(Boolean).join(' - ');
+    const context = [
+      rowNumber > 0 ? `#${rowNumber}` : '',
+      section ? `seccion ${section}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    return [courseLabel || 'Curso sin identificar', context].filter(Boolean).join(' | ');
+  }
+
+  private mappingContextLabel(item: any) {
+    const campus = String(item?.campus ?? '').trim();
+    const academicProgram = String(item?.academic_program ?? '').trim();
+    const cycle = Number(item?.cycle ?? 0);
+
+    return [
+      campus || '',
+      academicProgram || '',
+      Number.isFinite(cycle) && cycle > 0 ? `Ciclo ${cycle}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+  }
+
+  private normalizePeriodToken(value: unknown) {
+    const normalized = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
+    const match = normalized.match(/\d{4}-\d/);
+    return match ? match[0] : normalized;
+  }
+
   private issueMeta(issueCode: string) {
     const normalizedCode = String(issueCode ?? '').trim().toUpperCase();
     const staticMap: Record<string, { title: string; description: string }> = {
@@ -1083,8 +1635,8 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         description: 'Sin ciclo no se puede ubicar correctamente la fila dentro del plan.',
       },
       MULTIPLE_SCHEDULES_FOR_SUBSECTION: {
-        title: 'La misma subseccion tiene mas de un horario',
-        description: 'Conviene revisar esa fila antes de crear horarios duplicados para una sola subseccion.',
+        title: 'El mismo grupo tiene mas de un horario',
+        description: 'Conviene revisar esa fila antes de crear horarios duplicados para un solo grupo.',
       },
       AMBIGUOUS_STUDY_PLAN_COURSE: {
         title: 'El curso coincide con varias opciones del plan',

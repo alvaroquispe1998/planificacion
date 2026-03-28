@@ -68,5 +68,6 @@ import { SettingsSyncService } from './settings-sync.service';
   ],
   controllers: [SettingsSyncController, CatalogController],
   providers: [SettingsSyncService, CatalogService],
+  exports: [SettingsSyncService, CatalogService],
 })
 export class SettingsModule { }

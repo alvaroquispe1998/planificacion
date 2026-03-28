@@ -8,6 +8,7 @@ import { createHash } from 'crypto';
 import { In, Repository } from 'typeorm';
 import * as XLSX from 'xlsx';
 import { newId } from '../common';
+import { SettingsSyncService } from '../settings/settings-sync.service';
 import {
   AcademicProgramEntity,
   BuildingEntity,
@@ -24,23 +25,28 @@ import {
   CourseModalityEntity,
   DayOfWeekValues,
   PlanningChangeLogEntity,
+  PlanningCampusVcLocationMappingEntity,
   PlanningCyclePlanRuleEntity,
   PlanningImportAliasMappingEntity,
   PlanningImportBatchEntity,
   PlanningImportIssueSeverityValues,
   PlanningImportRowEntity,
   PlanningImportRowIssueEntity,
+  PlanningImportSourceKindValues,
   PlanningImportScopeDecisionEntity,
   PlanningImportScopeDecisionValues,
   PlanningOfferEntity,
+  PlanningSessionTypeValues,
   PlanningSectionEntity,
   PlanningSubsectionEntity,
   PlanningSubsectionKindValues,
   PlanningSubsectionScheduleEntity,
+  PlanningSourceSystemValues,
   StudyTypeEntity,
 } from '../entities/planning.entities';
 import {
   CreatePlanningImportAliasDto,
+  PreviewPlanningAkademicImportDto,
   UpdatePlanningImportAliasDto,
   UpdatePlanningImportScopeDecisionsDto,
 } from './dto/planning.dto';
@@ -60,6 +66,9 @@ type ImportActor = {
 
 type PlanningSubsectionKind = (typeof PlanningSubsectionKindValues)[number];
 type PlanningImportIssueSeverity = (typeof PlanningImportIssueSeverityValues)[number];
+type PlanningImportSourceKind = (typeof PlanningImportSourceKindValues)[number];
+type PlanningSourceSystem = (typeof PlanningSourceSystemValues)[number];
+type PlanningSessionType = (typeof PlanningSessionTypeValues)[number];
 
 type AliasNamespace =
   | 'vc_period'
@@ -84,6 +93,7 @@ type ImportCatalog = {
   semesters: SemesterEntity[];
   vcPeriods: VcPeriodEntity[];
   campuses: CampusEntity[];
+  campusVcLocations: PlanningCampusVcLocationMappingEntity[];
   faculties: FacultyEntity[];
   programs: AcademicProgramEntity[];
   studyPlans: StudyPlanEntity[];
@@ -172,9 +182,76 @@ type PreviewRow = {
   issues: PreviewIssue[];
 };
 
+type AkademicCourseRow = {
+  id: string;
+  code: string;
+  name: string;
+  career_name: string | null;
+  credits: number | null;
+  academic_year: number | null;
+  type_raw: string | null;
+  raw: Record<string, unknown>;
+};
+
+type AkademicSectionRow = {
+  id: string;
+  course_id: string;
+  external_code: string;
+  modality_raw: number | string | null;
+  vacancies: number | null;
+  teacher_names: string[];
+  teacher_ids: string[];
+  raw: Record<string, unknown>;
+};
+
+type AkademicScheduleRow = {
+  id: string;
+  section_id: string;
+  day_of_week: (typeof DayOfWeekValues)[number];
+  start_time: string;
+  end_time: string;
+  duration_minutes: number;
+  academic_hours: number;
+  session_type: PlanningSessionType;
+  source_session_type_code: string | null;
+  teacher_external_id: string | null;
+  teacher_name: string | null;
+  classroom_external_id: string | null;
+  building_external_id: string | null;
+  classroom_description: string | null;
+  building_description: string | null;
+  capacity: number | null;
+  section_group_id: string | null;
+  raw: Record<string, unknown>;
+};
+
+type AkademicPreviewInput = {
+  course: AkademicCourseRow;
+  section: AkademicSectionRow;
+  schedules: AkademicScheduleRow[];
+  import_section_code: string;
+  import_subsection_code: string;
+  subsection_kind: PlanningSubsectionKind;
+  scope: ImportScope;
+  semester_resolution: MappingResolution;
+  vc_period_resolution: MappingResolution;
+  campus_resolution: MappingResolution;
+  faculty_resolution: MappingResolution;
+  program_resolution: MappingResolution;
+  study_plan_resolution: MappingResolution;
+  course_resolution: MappingResolution;
+  teacher_resolution: MappingResolution;
+  modality_resolution: MappingResolution;
+  shift_resolution: MappingResolution;
+  building_resolution: MappingResolution;
+  classroom_resolution: MappingResolution;
+  is_cepea: boolean;
+  heuristic_warning?: string | null;
+};
+
 type ImportScope = {
   semester_id: string;
-  vc_period_id: string;
+  vc_period_id: string | null;
   campus_id: string;
   faculty_id: string;
   academic_program_id: string;
@@ -199,12 +276,14 @@ type BatchComposition = {
 };
 
 const IMPORT_SHEET_NAME = 'Hoja1';
+const AKADEMIC_IMPORT_SOURCE_NAME = 'Akademic';
 const ISSUE_PREVIEW_LIMIT = 200;
 const SHIFT_OPTIONS = ['DIURNO', 'MANANA', 'TARDE', 'NOCHE', 'NOCTURNO', 'TARDE/NOCHE'] as const;
 
 @Injectable()
 export class PlanningImportService {
   constructor(
+    private readonly settingsSyncService: SettingsSyncService,
     @InjectRepository(SemesterEntity)
     private readonly semestersRepo: Repository<SemesterEntity>,
     @InjectRepository(VcPeriodEntity)
@@ -237,6 +316,8 @@ export class PlanningImportService {
     private readonly studyTypesRepo: Repository<StudyTypeEntity>,
     @InjectRepository(CourseModalityEntity)
     private readonly courseModalitiesRepo: Repository<CourseModalityEntity>,
+    @InjectRepository(PlanningCampusVcLocationMappingEntity)
+    private readonly campusVcLocationMappingsRepo: Repository<PlanningCampusVcLocationMappingEntity>,
     @InjectRepository(PlanningCyclePlanRuleEntity)
     private readonly planRulesRepo: Repository<PlanningCyclePlanRuleEntity>,
     @InjectRepository(PlanningOfferEntity)
@@ -296,9 +377,65 @@ export class PlanningImportService {
     return this.getBatch(batch.id);
   }
 
+  async previewAkademicImport(
+    dto: PreviewPlanningAkademicImportDto,
+    actor?: ImportActor | null,
+  ) {
+    const now = new Date();
+    const semester = dto.semester_id
+      ? await this.semestersRepo.findOne({ where: { id: dto.semester_id } })
+      : null;
+    const batch = this.importBatchesRepo.create({
+      id: newId(),
+      file_name: semester?.name
+        ? `${AKADEMIC_IMPORT_SOURCE_NAME} ${semester.name}`
+        : AKADEMIC_IMPORT_SOURCE_NAME,
+      source_kind: 'AKADEMIC',
+      sheet_name: null,
+      file_hash: null,
+      status: 'PREVIEW_PROCESSING',
+      total_row_count: 0,
+      importable_row_count: 0,
+      blocked_row_count: 0,
+      warning_row_count: 0,
+      preview_summary_json: null,
+      preview_progress_json: this.buildPreviewProgress('Consultando informacion desde Akademic...', 4, {
+        stage_code: 'QUEUED',
+      }),
+      execution_summary_json: null,
+      source_scope_json: {
+        semester_id: dto.semester_id,
+        vc_period_id: dto.vc_period_id ?? null,
+        campus_id: dto.campus_id ?? null,
+        faculty_id: dto.faculty_id ?? null,
+        academic_program_id: dto.academic_program_id ?? null,
+        study_plan_id: dto.study_plan_id ?? null,
+        cycle: dto.cycle ?? null,
+        study_plan_course_id: dto.study_plan_course_id ?? null,
+        course_code: dto.course_code ?? null,
+      },
+      error_message: null,
+      uploaded_by_user_id: actor?.user_id ?? null,
+      uploaded_by: actor?.display_name || actor?.username || 'SYSTEM',
+      uploaded_from_ip: actor?.ip_address ?? null,
+      executed_at: null,
+      created_at: now,
+      updated_at: now,
+    });
+
+    await this.importBatchesRepo.save(batch);
+    void this.processAkademicPreviewBatch(batch.id, dto);
+    return this.getBatch(batch.id);
+  }
+
   async getBatch(batchId: string) {
-    const batch = await this.requireBatch(batchId);
-    if (batch.status === 'PREVIEW_PROCESSING' || batch.status === 'PREVIEW_FAILED') {
+    const current = await this.requireBatch(batchId);
+    const batch = await this.reconcileFinishedExecutionBatch(current);
+    if (
+      batch.status === 'PREVIEW_PROCESSING' ||
+      batch.status === 'PREVIEW_FAILED' ||
+      batch.status === 'EXECUTING'
+    ) {
       return this.composePendingBatchResponse(batch);
     }
     const [rows, issues, scopeDecisions] = await Promise.all([
@@ -317,6 +454,34 @@ export class PlanningImportService {
     ]);
 
     return this.composeBatchResponse(batch, rows, issues, scopeDecisions);
+  }
+
+  private async reconcileFinishedExecutionBatch(batch: PlanningImportBatchEntity) {
+    if (batch.status !== 'EXECUTING') {
+      return batch;
+    }
+    const report = asRecord(batch.execution_summary_json);
+    const processedScopeCount = numberValue(report.processed_scope_count);
+    const totalScopeCount = numberValue(report.total_scope_count);
+    if (!totalScopeCount || processedScopeCount < totalScopeCount) {
+      return batch;
+    }
+
+    batch.status = 'EXECUTED';
+    batch.error_message = null;
+    batch.executed_at = batch.executed_at ?? new Date();
+    batch.execution_summary_json = this.buildExecutionProgress(
+      'Carga masiva aplicada correctamente.',
+      100,
+      {
+        ...report,
+        stage_code: 'DONE',
+        finished_at: recordString(report, 'finished_at') ?? new Date().toISOString(),
+      },
+    );
+    batch.updated_at = new Date();
+    await this.importBatchesRepo.save(batch);
+    return batch;
   }
 
   async getBatchReport(batchId: string) {
@@ -352,19 +517,16 @@ export class PlanningImportService {
 
   async executeBatch(batchId: string, actor?: ImportActor | null) {
     const batch = await this.requireBatch(batchId);
+    if (batch.status === 'EXECUTING') {
+      return this.getBatch(batchId);
+    }
     if (batch.status !== 'PREVIEW_READY') {
       throw new BadRequestException('El preview aun no esta listo o fallo durante el procesamiento.');
     }
-    const [rows, scopeDecisions] = await Promise.all([
-      this.importRowsRepo.find({
-        where: { batch_id: batchId, can_import: true },
-        order: { row_number: 'ASC' },
-      }),
-      this.importScopeDecisionsRepo.find({
-        where: { batch_id: batchId },
-        order: { scope_key: 'ASC' },
-      }),
-    ]);
+    const scopeDecisions = await this.importScopeDecisionsRepo.find({
+      where: { batch_id: batchId },
+      order: { scope_key: 'ASC' },
+    });
     const blockingScopes = scopeDecisions.filter(
       (item) =>
         hasExistingData(item.existing_summary_json) &&
@@ -376,47 +538,158 @@ export class PlanningImportService {
       );
     }
 
-    const groupedRows = groupBy(rows, (row) => row.scope_key ?? '__NO_SCOPE__');
-    const scopeDecisionMap = new Map(scopeDecisions.map((item) => [item.scope_key, item]));
-    const catalog = await this.loadImportCatalog();
-    const executionSummary: Record<string, unknown> = {
-      imported_scope_count: 0,
-      skipped_scope_count: 0,
-      replaced_scope_count: 0,
-      created_plan_rule_count: 0,
-      created_offer_count: 0,
-      created_section_count: 0,
-      created_subsection_count: 0,
-      created_schedule_count: 0,
-      skipped_row_count: 0,
-      executed_scope_keys: [] as string[],
-    };
+    batch.status = 'EXECUTING';
+    batch.error_message = null;
+    batch.execution_summary_json = this.buildExecutionProgress(
+      'Preparando la carga en la plataforma...',
+      2,
+      {
+        stage_code: 'QUEUED',
+        started_at: new Date().toISOString(),
+        processed_scope_count: 0,
+        total_scope_count: 0,
+        imported_scope_count: 0,
+        skipped_scope_count: 0,
+        replaced_scope_count: 0,
+        created_plan_rule_count: 0,
+        created_offer_count: 0,
+        created_section_count: 0,
+        created_subsection_count: 0,
+        created_schedule_count: 0,
+        skipped_row_count: 0,
+        executed_scope_keys: [] as string[],
+      },
+    );
+    batch.updated_at = new Date();
+    await this.importBatchesRepo.save(batch);
+    void this.processExecuteBatch(batchId, actor);
+    return this.getBatch(batchId);
+  }
+
+  private async processExecuteBatch(batchId: string, actor?: ImportActor | null) {
+    let batch: PlanningImportBatchEntity | null = null;
+    let executionSummary: Record<string, unknown> = {};
+    let totalScopeCount = 0;
 
     try {
-      for (const [scopeKey, scopeRows] of groupedRows.entries()) {
-        if (scopeKey === '__NO_SCOPE__') {
-          continue;
-        }
+      batch = await this.requireBatch(batchId);
+      const [rows, scopeDecisions] = await Promise.all([
+        this.importRowsRepo.find({
+          where: { batch_id: batchId, can_import: true },
+          order: { row_number: 'ASC' },
+        }),
+        this.importScopeDecisionsRepo.find({
+          where: { batch_id: batchId },
+          order: { scope_key: 'ASC' },
+        }),
+      ]);
+
+      const groupedRows = groupBy(rows, (row) => row.scope_key ?? '__NO_SCOPE__');
+      const scopeEntries = [...groupedRows.entries()].filter(([scopeKey]) => scopeKey !== '__NO_SCOPE__');
+      totalScopeCount = scopeEntries.length;
+      const scopeDecisionMap = new Map(scopeDecisions.map((item) => [item.scope_key, item]));
+      executionSummary = {
+        ...(asRecord(batch.execution_summary_json) ?? {}),
+        processed_scope_count: 0,
+        total_scope_count: scopeEntries.length,
+        imported_scope_count: 0,
+        skipped_scope_count: 0,
+        replaced_scope_count: 0,
+        created_plan_rule_count: 0,
+        created_offer_count: 0,
+        created_section_count: 0,
+        created_subsection_count: 0,
+        created_schedule_count: 0,
+        skipped_row_count: 0,
+        executed_scope_keys: [] as string[],
+      };
+
+      executionSummary = await this.updateExecutionBatchProgress(
+        batch,
+        executionSummary,
+        8,
+        'Cargando catalogos para ejecutar la carga...',
+        {
+          stage_code: 'LOADING_CATALOG',
+          total_scope_count: scopeEntries.length,
+        },
+      );
+
+      const catalog = await this.loadImportCatalog();
+
+      for (let index = 0; index < scopeEntries.length; index += 1) {
+        const [scopeKey, scopeRows] = scopeEntries[index];
         const decision = scopeDecisionMap.get(scopeKey);
+        const firstResolution = asRecord(scopeRows[0].resolution_json);
+        const scope = this.scopeFromResolution(firstResolution);
+        const scopeLabel = this.buildExecutionScopeLabel(scope);
+        const progressPercent =
+          10 + Math.round(((index + 1) / Math.max(scopeEntries.length, 1)) * 85);
+
         if (decision?.decision === 'SKIP_SCOPE') {
           executionSummary.skipped_scope_count = numberValue(executionSummary.skipped_scope_count) + 1;
           executionSummary.skipped_row_count = numberValue(executionSummary.skipped_row_count) + scopeRows.length;
+          executionSummary.processed_scope_count = index + 1;
+          executionSummary = await this.updateExecutionBatchProgress(
+            batch,
+            executionSummary,
+            progressPercent,
+            `Omitiendo grupo ${index + 1}/${scopeEntries.length}: ${scopeLabel}.`,
+            {
+              stage_code: 'SKIPPING_SCOPE',
+              current_scope_key: scopeKey,
+              current_scope_label: scopeLabel,
+            },
+          );
           continue;
         }
 
-        const firstResolution = asRecord(scopeRows[0].resolution_json);
-        const scope = this.scopeFromResolution(firstResolution);
         if (!scope) {
           executionSummary.skipped_row_count = numberValue(executionSummary.skipped_row_count) + scopeRows.length;
+          executionSummary.processed_scope_count = index + 1;
+          executionSummary = await this.updateExecutionBatchProgress(
+            batch,
+            executionSummary,
+            progressPercent,
+            `Saltando grupo ${index + 1}/${scopeEntries.length} porque no tiene un scope valido.`,
+            {
+              stage_code: 'SKIPPING_SCOPE',
+              current_scope_key: scopeKey,
+              current_scope_label: scopeLabel,
+            },
+          );
           continue;
         }
 
         if (hasExistingData(decision?.existing_summary_json) && decision?.decision === 'REPLACE_SCOPE') {
+          executionSummary = await this.updateExecutionBatchProgress(
+            batch,
+            executionSummary,
+            Math.max(10, progressPercent - 1),
+            `Reemplazando datos existentes del grupo ${index + 1}/${scopeEntries.length}: ${scopeLabel}.`,
+            {
+              stage_code: 'REPLACING_SCOPE',
+              current_scope_key: scopeKey,
+              current_scope_label: scopeLabel,
+            },
+          );
           const replaced = await this.replaceExistingScope(scope, actor);
           executionSummary.replaced_scope_count = numberValue(executionSummary.replaced_scope_count) + (replaced ? 1 : 0);
         }
 
+        executionSummary = await this.updateExecutionBatchProgress(
+          batch,
+          executionSummary,
+          Math.max(10, progressPercent - 1),
+          `Importando grupo ${index + 1}/${scopeEntries.length}: ${scopeLabel}.`,
+          {
+            stage_code: 'IMPORTING_SCOPE',
+            current_scope_key: scopeKey,
+            current_scope_label: scopeLabel,
+          },
+        );
         const created = await this.importRowsForScope(batchId, scope, scopeRows, catalog, actor);
+        executionSummary.processed_scope_count = index + 1;
         executionSummary.imported_scope_count = numberValue(executionSummary.imported_scope_count) + 1;
         executionSummary.created_plan_rule_count = numberValue(executionSummary.created_plan_rule_count) + created.plan_rules;
         executionSummary.created_offer_count = numberValue(executionSummary.created_offer_count) + created.offers;
@@ -424,25 +697,57 @@ export class PlanningImportService {
         executionSummary.created_subsection_count = numberValue(executionSummary.created_subsection_count) + created.subsections;
         executionSummary.created_schedule_count = numberValue(executionSummary.created_schedule_count) + created.schedules;
         (executionSummary.executed_scope_keys as string[]).push(scopeKey);
+        executionSummary = await this.updateExecutionBatchProgress(
+          batch,
+          executionSummary,
+          progressPercent,
+          `Grupo ${index + 1}/${scopeEntries.length} completado: ${scopeLabel}.`,
+          {
+            stage_code: 'IMPORTING_SCOPE',
+            current_scope_key: scopeKey,
+            current_scope_label: scopeLabel,
+          },
+        );
       }
 
       batch.status = 'EXECUTED';
-      batch.execution_summary_json = executionSummary;
+      batch.error_message = null;
+      batch.execution_summary_json = this.buildExecutionProgress(
+        'Carga masiva aplicada correctamente.',
+        100,
+        {
+          ...executionSummary,
+          stage_code: 'DONE',
+          finished_at: new Date().toISOString(),
+          processed_scope_count: scopeEntries.length,
+          total_scope_count: scopeEntries.length,
+        },
+      );
       batch.executed_at = new Date();
       batch.updated_at = new Date();
       await this.importBatchesRepo.save(batch);
-      return this.getBatchReport(batchId);
     } catch (error) {
+      if (!batch) {
+        return;
+      }
+      const errorMessage =
+        error instanceof Error ? error.message : 'No se pudo ejecutar la importacion.';
       batch.status = 'FAILED';
-      batch.execution_summary_json = {
-        ...(batch.execution_summary_json ?? {}),
-        ...(executionSummary ?? {}),
-        error_message:
-          error instanceof Error ? error.message : 'No se pudo ejecutar la importacion.',
-      };
+      batch.error_message = errorMessage;
+      batch.execution_summary_json = this.buildExecutionProgress(
+        errorMessage,
+        100,
+        {
+          ...(executionSummary ?? {}),
+          stage_code: 'FAILED',
+          error_message: errorMessage,
+          finished_at: new Date().toISOString(),
+          total_scope_count:
+            totalScopeCount || numberValue(executionSummary.total_scope_count),
+        },
+      );
       batch.updated_at = new Date();
       await this.importBatchesRepo.save(batch);
-      throw error;
     }
   }
 
@@ -522,80 +827,10 @@ export class PlanningImportService {
         blocked_rows: batch.blocked_row_count,
       });
 
-      const now = new Date();
-      await this.importBatchesRepo.manager.transaction(async (manager) => {
-        if (previewRows.length > 0) {
-          const rowEntities = previewRows.map((row) =>
-            manager.create(PlanningImportRowEntity, {
-              id: newId(),
-              batch_id: batch.id,
-              row_number: row.row_number,
-              scope_key: row.scope_key,
-              row_hash: row.row_hash,
-              source_json: row.source_json,
-              normalized_json: row.normalized_json,
-              resolution_json: row.resolution_json,
-              can_import: row.can_import,
-              imported: false,
-              created_at: now,
-              updated_at: now,
-            }),
-          );
-          await manager.save(PlanningImportRowEntity, rowEntities, { chunk: 250 });
-
-          const issues = rowEntities.flatMap((entity, index) =>
-            previewRows[index].issues.map((issue) =>
-              manager.create(PlanningImportRowIssueEntity, {
-                id: newId(),
-                batch_id: batch.id,
-                row_id: entity.id,
-                row_number: previewRows[index].row_number,
-                severity: issue.severity,
-                issue_code: issue.issue_code,
-                field_name: issue.field_name ?? null,
-                message: issue.message,
-                meta_json: issue.meta_json ?? null,
-                created_at: now,
-              }),
-            ),
-          );
-          if (issues.length > 0) {
-            await manager.save(PlanningImportRowIssueEntity, issues, { chunk: 250 });
-          }
-        }
+      await this.stagePreviewRowsAndFinalizeBatch(batch, previewRows, {
+        stagingMessage: 'Guardando filas del preview...',
+        readyMessage: 'Preview listo.',
       });
-
-      await this.updatePreviewBatchProgress(batch, 76, 'Analizando scopes y data existente...', {
-        stage_code: 'CHECKING_SCOPES',
-      });
-
-      const scopeEntities = await this.buildScopeDecisionEntities(batch.id, previewRows, now, async (current, total) => {
-        const percent = 76 + Math.round((current / Math.max(total, 1)) * 18);
-        await this.updatePreviewBatchProgress(
-          batch,
-          Math.min(percent, 94),
-          `Revisando data existente por scope (${current}/${total})...`,
-          {
-            stage_code: 'CHECKING_SCOPES',
-            processed_scopes: current,
-            total_scopes: total,
-          },
-        );
-      });
-      if (scopeEntities.length > 0) {
-        await this.importScopeDecisionsRepo.save(scopeEntities, { chunk: 100 });
-      }
-
-      batch.status = 'PREVIEW_READY';
-      batch.preview_progress_json = this.buildPreviewProgress('Preview listo.', 100, {
-        stage_code: 'READY',
-        total_rows: batch.total_row_count,
-        importable_rows: batch.importable_row_count,
-        blocked_rows: batch.blocked_row_count,
-      });
-      batch.error_message = null;
-      batch.updated_at = new Date();
-      await this.importBatchesRepo.save(batch);
     } catch (error) {
       batch.status = 'PREVIEW_FAILED';
       batch.error_message =
@@ -606,6 +841,1328 @@ export class PlanningImportService {
       batch.updated_at = new Date();
       await this.importBatchesRepo.save(batch);
     }
+  }
+
+  private async processAkademicPreviewBatch(
+    batchId: string,
+    dto: PreviewPlanningAkademicImportDto,
+  ) {
+    const batch = await this.requireBatch(batchId);
+
+    try {
+      await this.updatePreviewBatchProgress(batch, 8, 'Validando filtros y catalogos locales...', {
+        stage_code: 'VALIDATING_SCOPE',
+      });
+
+      const catalog = await this.loadImportCatalog();
+      this.validateAkademicPreviewDto(dto, catalog);
+
+      await this.updatePreviewBatchProgress(batch, 18, 'Consultando cursos y secciones desde Akademic...', {
+        stage_code: 'FETCHING_AKADEMIC',
+      });
+
+      const previewRows = await this.buildAkademicPreviewRows(dto, catalog, async (current, total, message) => {
+        const percent = 18 + Math.round((current / Math.max(total, 1)) * 44);
+        await this.updatePreviewBatchProgress(batch, Math.min(percent, 62), message, {
+          stage_code: 'FETCHING_AKADEMIC',
+          processed_courses: current,
+          total_courses: total,
+        });
+      });
+
+      batch.total_row_count = previewRows.length;
+      batch.importable_row_count = previewRows.filter((row) => row.can_import).length;
+      batch.blocked_row_count = previewRows.filter((row) => !row.can_import).length;
+      batch.warning_row_count = previewRows.filter((row) =>
+        row.issues.some((issue) => issue.severity === 'WARNING'),
+      ).length;
+      batch.preview_summary_json = this.buildStoredSummary(previewRows);
+      batch.updated_at = new Date();
+      await this.importBatchesRepo.save(batch);
+
+      await this.stagePreviewRowsAndFinalizeBatch(batch, previewRows, {
+        stagingMessage: 'Guardando filas del preview Akademic...',
+        readyMessage: 'Preview Akademic listo.',
+      });
+    } catch (error) {
+      batch.status = 'PREVIEW_FAILED';
+      batch.error_message =
+        error instanceof Error ? error.message : 'No se pudo generar el preview desde Akademic.';
+      batch.preview_progress_json = this.buildPreviewProgress(batch.error_message, 100, {
+        stage_code: 'FAILED',
+      });
+      batch.updated_at = new Date();
+      await this.importBatchesRepo.save(batch);
+    }
+  }
+
+  private async stagePreviewRowsAndFinalizeBatch(
+    batch: PlanningImportBatchEntity,
+    previewRows: PreviewRow[],
+    options: {
+      stagingMessage: string;
+      readyMessage: string;
+    },
+  ) {
+    await this.updatePreviewBatchProgress(batch, 62, options.stagingMessage, {
+      stage_code: 'STAGING_ROWS',
+      importable_rows: batch.importable_row_count,
+      blocked_rows: batch.blocked_row_count,
+    });
+
+    const now = new Date();
+    await this.importBatchesRepo.manager.transaction(async (manager) => {
+      if (previewRows.length > 0) {
+        const rowEntities = previewRows.map((row) =>
+          manager.create(PlanningImportRowEntity, {
+            id: newId(),
+            batch_id: batch.id,
+            row_number: row.row_number,
+            scope_key: row.scope_key,
+            row_hash: row.row_hash,
+            source_json: row.source_json,
+            normalized_json: row.normalized_json,
+            resolution_json: row.resolution_json,
+            can_import: row.can_import,
+            imported: false,
+            created_at: now,
+            updated_at: now,
+          }),
+        );
+        await manager.save(PlanningImportRowEntity, rowEntities, { chunk: 250 });
+
+        const issues = rowEntities.flatMap((entity, index) =>
+          previewRows[index].issues.map((issue) =>
+            manager.create(PlanningImportRowIssueEntity, {
+              id: newId(),
+              batch_id: batch.id,
+              row_id: entity.id,
+              row_number: previewRows[index].row_number,
+              severity: issue.severity,
+              issue_code: issue.issue_code,
+              field_name: issue.field_name ?? null,
+              message: issue.message,
+              meta_json: issue.meta_json ?? null,
+              created_at: now,
+            }),
+          ),
+        );
+        if (issues.length > 0) {
+          await manager.save(PlanningImportRowIssueEntity, issues, { chunk: 250 });
+        }
+      }
+    });
+
+    await this.updatePreviewBatchProgress(batch, 76, 'Analizando scopes y data existente...', {
+      stage_code: 'CHECKING_SCOPES',
+    });
+
+    const scopeEntities = await this.buildScopeDecisionEntities(batch.id, previewRows, now, async (current, total) => {
+      const percent = 76 + Math.round((current / Math.max(total, 1)) * 18);
+      await this.updatePreviewBatchProgress(
+        batch,
+        Math.min(percent, 94),
+        `Revisando data existente por scope (${current}/${total})...`,
+        {
+          stage_code: 'CHECKING_SCOPES',
+          processed_scopes: current,
+          total_scopes: total,
+        },
+      );
+    });
+    if (scopeEntities.length > 0) {
+      await this.importScopeDecisionsRepo.save(scopeEntities, { chunk: 100 });
+    }
+
+    batch.status = 'PREVIEW_READY';
+    batch.preview_progress_json = this.buildPreviewProgress(options.readyMessage, 100, {
+      stage_code: 'READY',
+      total_rows: batch.total_row_count,
+      importable_rows: batch.importable_row_count,
+      blocked_rows: batch.blocked_row_count,
+    });
+    batch.error_message = null;
+    batch.updated_at = new Date();
+    await this.importBatchesRepo.save(batch);
+  }
+
+  private validateAkademicPreviewDto(
+    dto: PreviewPlanningAkademicImportDto,
+    catalog: ImportCatalog,
+  ) {
+    if (!catalog.semesters.some((item) => item.id === dto.semester_id)) {
+      throw new BadRequestException('El semestre seleccionado no existe en el catalogo local.');
+    }
+    if (dto.vc_period_id && !catalog.vcPeriods.some((item) => item.id === dto.vc_period_id)) {
+      throw new BadRequestException('El periodo VC seleccionado no existe en el catalogo local.');
+    }
+    if (dto.campus_id && !catalog.campuses.some((item) => item.id === dto.campus_id)) {
+      throw new BadRequestException('La sede seleccionada no existe en el catalogo local.');
+    }
+    if (dto.faculty_id && !catalog.faculties.some((item) => item.id === dto.faculty_id)) {
+      throw new BadRequestException('La facultad seleccionada no existe en el catalogo local.');
+    }
+    if (
+      dto.academic_program_id &&
+      !catalog.programs.some((item) => item.id === dto.academic_program_id)
+    ) {
+      throw new BadRequestException('El programa seleccionado no existe en el catalogo local.');
+    }
+    if (dto.study_plan_id && !catalog.studyPlans.some((item) => item.id === dto.study_plan_id)) {
+      throw new BadRequestException('El plan de estudios seleccionado no existe en el catalogo local.');
+    }
+    if (
+      dto.study_plan_course_id &&
+      !catalog.studyPlanCourses.some((item) => item.id === dto.study_plan_course_id)
+    ) {
+      throw new BadRequestException('El curso seleccionado no existe dentro del catalogo local.');
+    }
+  }
+
+  private async buildAkademicPreviewRows(
+    dto: PreviewPlanningAkademicImportDto,
+    catalog: ImportCatalog,
+    onProgress?: (current: number, total: number, message: string) => Promise<void> | void,
+  ): Promise<PreviewRow[]> {
+    const requestedCourseCode =
+      dto.course_code?.trim() ||
+      recordString(
+        asRecord(
+          catalog.studyPlanCourseDetails.find(
+            (item) => item.study_plan_course_id === dto.study_plan_course_id,
+          ) ?? null,
+        ),
+        'short_code',
+      ) ||
+      catalog.studyPlanCourses.find((item) => item.id === dto.study_plan_course_id)?.course_code ||
+      '';
+
+    const courses = (await this.fetchAkademicCourses(dto.semester_id)).filter((course) => {
+      if (!requestedCourseCode) {
+        return true;
+      }
+      return courseCodeLikeMatch(course.code, normalizeCourseCodeValue(requestedCourseCode));
+    });
+
+    const totalCourses = courses.length;
+    const byCourse = await runWithConcurrency(courses, 4, async (course, index) => {
+      const enrichedCourse = await this.enrichAkademicCourse(course, dto.semester_id);
+      if (dto.cycle && enrichedCourse.academic_year && dto.cycle !== enrichedCourse.academic_year) {
+        await onProgress?.(
+          index + 1,
+          totalCourses,
+          `Filtrando cursos por ciclo (${index + 1}/${Math.max(totalCourses, 1)})...`,
+        );
+        return [] as PreviewRow[];
+      }
+
+      const sections = await this.fetchAkademicSections(enrichedCourse.id, dto.semester_id);
+      const sectionRows = await runWithConcurrency(sections, 3, async (section) => {
+        const [detail, schedules] = await Promise.all([
+          this.fetchAkademicSectionDetail(section.id),
+          this.fetchAkademicSectionSchedules(section.id),
+        ]);
+        return this.buildAkademicPreviewRowsForSection(dto, catalog, enrichedCourse, section, detail, schedules);
+      });
+
+      await onProgress?.(
+        index + 1,
+        totalCourses,
+        `Procesando cursos y secciones (${index + 1}/${Math.max(totalCourses, 1)})...`,
+      );
+      return sectionRows.flat();
+    });
+
+    return byCourse
+      .flat()
+      .map((row, index) => ({
+        ...row,
+        row_number: index + 2,
+      }))
+      .sort((left, right) => left.row_number - right.row_number);
+  }
+
+  private async fetchAkademicCourses(termId: string): Promise<AkademicCourseRow[]> {
+    const rows = await this.settingsSyncService.fetchSourceRowsByCode(
+      'DOCENTE',
+      '/admin/secciones-profesores/cursos/get',
+      {
+        draw: '1',
+        tid: termId,
+        acid: '0',
+        acaprog: 'null',
+        ayid: 'null',
+        onlyWithSections: 'true',
+        onlyWithoutCoordinator: 'false',
+        start: '0',
+        length: '2500',
+        'search[value]': '',
+        'search[regex]': 'false',
+        keyName: '',
+        curriculumId: 'null',
+        _: `${Date.now()}`,
+      },
+      { skipProbe: true },
+    );
+    return deduplicateRows(rows)
+      .map((row) => ({
+        id: asString(row.id),
+        code: asString(row.code),
+        name: asString(row.name),
+        career_name:
+          asNullableString(pick(asRecord(row.career) ?? {}, 'name')) ??
+          asNullableString(pick(row, 'careerName', 'areaCareer', 'program')),
+        credits: asNullableNumber(row.credits),
+        academic_year: asNullableInt(pick(row, 'academicYear')),
+        type_raw: asNullableString(pick(row, 'type', 'courseType.name')),
+        raw: row,
+      }))
+      .filter((item) => item.id && item.code && item.name);
+  }
+
+  private async enrichAkademicCourse(
+    course: AkademicCourseRow,
+    termId: string,
+  ): Promise<AkademicCourseRow> {
+    if (course.academic_year && course.type_raw) {
+      return course;
+    }
+    try {
+      const rows = await this.settingsSyncService.fetchSourceRowsByCode(
+        'DOCENTE',
+        '/admin/cursos/get',
+        {
+          start: '0',
+          length: '10',
+          search: course.code,
+          tid: termId,
+        },
+        { skipProbe: true },
+      );
+      const detail = rows.find((item) => normalizeLoose(asString(item.code)) === normalizeLoose(course.code)) ?? null;
+      if (!detail) {
+        return course;
+      }
+      return {
+        ...course,
+        career_name:
+          course.career_name ??
+          asNullableString(pick(detail, 'areaCareer', 'program')) ??
+          course.career_name,
+        academic_year: asNullableInt(pick(detail, 'academicYear')) ?? course.academic_year,
+        type_raw: asNullableString(pick(detail, 'type')) ?? course.type_raw,
+        raw: {
+          ...course.raw,
+          detail,
+        },
+      };
+    } catch {
+      return course;
+    }
+  }
+
+  private async fetchAkademicSections(courseId: string, termId: string): Promise<AkademicSectionRow[]> {
+    const rows = await this.settingsSyncService.fetchSourceRowsByCode(
+      'DOCENTE',
+      `/admin/secciones-profesores/cursos/${encodeURIComponent(courseId)}/secciones/get`,
+      {
+        tid: termId,
+        start: '0',
+        length: '500',
+      },
+      { skipProbe: true },
+    );
+    return deduplicateRows(rows)
+      .map((row) => {
+        const rawModality = pick(row, 'modality');
+        return {
+          id: asString(row.id),
+          course_id: courseId,
+          external_code: asString(row.code),
+          modality_raw:
+            typeof rawModality === 'string' || typeof rawModality === 'number'
+              ? rawModality
+              : null,
+          vacancies: asNullableInt(pick(row, 'vacancies')),
+          teacher_names: asStringArray(row.teacherNames) ?? [],
+          teacher_ids: (Array.isArray(row.teacherSections) ? row.teacherSections : [])
+          .map((item) => asNullableString(pick(asRecord(item) ?? {}, 'teacherId', 'userId')))
+          .filter((item): item is string => Boolean(item)),
+          raw: row,
+        };
+      })
+      .filter((item) => item.id && item.external_code);
+  }
+
+  private async fetchAkademicSectionDetail(
+    sectionId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const payload = await this.settingsSyncService.fetchSourcePayloadByCode(
+      'DOCENTE',
+      '/admin/secciones-profesores/cursos/0/secciones/seccion/get',
+      { id: sectionId },
+      { skipProbe: true },
+    );
+    return asRecord(payload);
+  }
+
+  private async fetchAkademicSectionSchedules(sectionId: string): Promise<AkademicScheduleRow[]> {
+    const rows = await this.settingsSyncService.fetchSourceRowsByCode(
+      'DOCENTE',
+      `/admin/secciones-profesores/cursos/0/secciones/${encodeURIComponent(sectionId)}/horarios/get`,
+      undefined,
+      { skipProbe: true },
+    );
+
+    return deduplicateRows(rows)
+      .map((row) => this.normalizeAkademicScheduleRow(row, sectionId))
+      .filter((item): item is AkademicScheduleRow => Boolean(item));
+  }
+
+  private buildAkademicPreviewRowsForSection(
+    dto: PreviewPlanningAkademicImportDto,
+    catalog: ImportCatalog,
+    course: AkademicCourseRow,
+    section: AkademicSectionRow,
+    detail: Record<string, unknown> | null,
+    schedules: AkademicScheduleRow[],
+  ): PreviewRow[] {
+    const issues: PreviewIssue[] = [];
+    const parsedSection = parseAkademicExternalSectionCode(section.external_code);
+    if (!parsedSection.section_code) {
+      return [
+        {
+          row_number: 0,
+          source_json: {
+            course: course.raw,
+            section: section.raw,
+            detail,
+            schedules: schedules.map((item) => item.raw),
+          },
+          normalized_json: {
+            source_kind: 'AKADEMIC',
+            semester_raw: dto.semester_id,
+            section_raw: section.external_code,
+            course_code_raw: course.code,
+            course_name_raw: course.name,
+            academic_program_code_raw: course.career_name ?? '',
+            cycle_raw: course.academic_year,
+          },
+          resolution_json: {
+            source_kind: 'AKADEMIC',
+            source_system: 'AKADEMIC',
+            external_section_code: section.external_code,
+          },
+          scope_key: null,
+          row_hash: null,
+          can_import: false,
+          issues: [
+            {
+              severity: 'BLOCKING',
+              issue_code: 'INVALID_EXTERNAL_SECTION',
+              field_name: 'SECCION',
+              message: `No se pudo interpretar el codigo ${section.external_code} de Akademic.`,
+            },
+          ],
+        },
+      ];
+    }
+
+    const sectionTeacherIds = [
+      ...section.teacher_ids,
+      ...(Array.isArray(detail?.teacherSections)
+        ? detail.teacherSections
+            .map((item) => asNullableString(pick(asRecord(item) ?? {}, 'userId', 'teacherId')))
+            .filter((item): item is string => Boolean(item))
+        : []),
+    ];
+    const sectionTeacherNames = [
+      ...section.teacher_names,
+      ...(Array.isArray(detail?.teacherSections)
+        ? detail.teacherSections
+            .map((item) => asNullableString(pick(asRecord(item) ?? {}, 'fullName')))
+            .filter((item): item is string => Boolean(item))
+        : []),
+    ];
+
+    const semester = catalog.semesters.find((item) => item.id === dto.semester_id) ?? null;
+    const semesterResolution = toResolution(
+      dto.semester_id,
+      dto.semester_id,
+      semester?.name ?? dto.semester_id,
+      'manual_value',
+    );
+    const vcPeriod =
+      (dto.vc_period_id
+        ? catalog.vcPeriods.find((item) => item.id === dto.vc_period_id) ?? null
+        : findVcPeriodByValue(catalog.vcPeriods, semester?.name ?? dto.semester_id)) ?? null;
+    const effectiveVcPeriodId = vcPeriod?.id ?? dto.vc_period_id ?? null;
+    const vcPeriodResolution = effectiveVcPeriodId
+      ? toResolution(
+          dto.vc_period_id ?? semester?.name ?? dto.semester_id,
+          effectiveVcPeriodId,
+          vcPeriod?.text ?? effectiveVcPeriodId,
+          dto.vc_period_id ? 'manual_value' : 'catalog',
+        )
+      : toResolution('', null, null, 'none');
+    const campusResolution = this.resolveAkademicCampus(parsedSection.location_token, dto.campus_id, catalog, issues);
+    if (dto.campus_id && campusResolution.target_id && dto.campus_id !== campusResolution.target_id) {
+      issues.push({
+        severity: 'BLOCKING',
+        issue_code: 'CAMPUS_SUFFIX_MISMATCH',
+        field_name: 'SECCION',
+        message: `La seccion ${section.external_code} pertenece a otra sede segun su sufijo.`,
+      });
+    }
+
+    const programResolution = this.resolveAkademicProgram(dto, course, catalog, issues);
+    const facultyResolution = this.resolveAkademicFaculty(dto, programResolution, catalog, issues);
+    const cycle = dto.cycle ?? course.academic_year ?? null;
+    if (!cycle) {
+      issues.push({
+        severity: 'BLOCKING',
+        issue_code: 'MISSING_CYCLE',
+        field_name: 'CICLO',
+        message: `No se pudo resolver el ciclo para ${course.code}.`,
+      });
+    }
+    const studyPlanResolution = this.resolveAkademicStudyPlan(
+      dto,
+      course,
+      programResolution,
+      cycle,
+      catalog,
+      issues,
+    );
+    const courseResolution = this.resolveAkademicCourse(
+      dto,
+      course,
+      studyPlanResolution,
+      cycle,
+      programResolution,
+      catalog,
+      issues,
+    );
+    const modalityResolution = this.resolveAkademicCourseModality(
+      section.modality_raw,
+      parsedSection.modality_token,
+      catalog,
+      issues,
+    );
+    const shiftResolution = this.resolveAkademicShift(schedules);
+    const groupedSubsections = this.groupAkademicSubsections(
+      parsedSection.section_code,
+      schedules,
+      this.normalizeAkademicCourseType(course.type_raw),
+    );
+
+    const allRows = [] as PreviewRow[];
+    const subsectionGroups = groupedSubsections.length
+      ? groupedSubsections
+      : [
+          {
+            import_subsection_code: parsedSection.section_code,
+            subsection_kind: this.deriveAkademicSubsectionKindFromSchedules(
+              this.normalizeAkademicCourseType(course.type_raw),
+              [],
+            ),
+            schedules: [] as AkademicScheduleRow[],
+            warning: null,
+          },
+        ];
+
+    for (const group of subsectionGroups) {
+      const groupSchedules = group.schedules.length ? group.schedules : [null];
+      const groupHours = this.computeAkademicAssignedHours(group.schedules);
+      const summaryTeacherResolution = this.resolveAkademicTeacherMatch(
+        sectionTeacherIds[0] ?? null,
+        sectionTeacherNames[0] ?? null,
+        catalog,
+        issues,
+      );
+
+      for (const schedule of groupSchedules) {
+        const rowIssues = [...issues];
+        if (group.warning) {
+          rowIssues.push({
+            severity: 'WARNING',
+            issue_code: 'SUBSECTION_SPLIT_HEURISTIC',
+            field_name: 'HORARIO',
+            message: group.warning,
+          });
+        }
+        const scheduleTeacherResolution = schedule
+          ? this.resolveAkademicTeacherMatch(
+              schedule.teacher_external_id,
+              schedule.teacher_name ?? sectionTeacherNames[0] ?? null,
+              catalog,
+              rowIssues,
+            )
+          : summaryTeacherResolution;
+        const locationResolution = schedule
+          ? this.resolveAkademicScheduleLocation(schedule, campusResolution.target_id, catalog, rowIssues)
+          : {
+              building: toResolution('', null, null, 'none'),
+              classroom: toResolution('', null, null, 'none'),
+            };
+
+        const canImport =
+          Boolean(campusResolution.target_id) &&
+          Boolean(facultyResolution.target_id) &&
+          Boolean(programResolution.target_id) &&
+          Boolean(studyPlanResolution.target_id) &&
+          Boolean(courseResolution.target_id) &&
+          Boolean(cycle) &&
+          !rowIssues.some((issue) => issue.severity === 'BLOCKING');
+        const scope =
+          canImport && campusResolution.target_id && facultyResolution.target_id && programResolution.target_id && studyPlanResolution.target_id && cycle
+            ? {
+                semester_id: dto.semester_id,
+                vc_period_id: effectiveVcPeriodId,
+                campus_id: campusResolution.target_id,
+                faculty_id: facultyResolution.target_id,
+                academic_program_id: programResolution.target_id,
+                study_plan_id: studyPlanResolution.target_id,
+                cycle,
+                semester_name: semester?.name ?? dto.semester_id,
+                vc_period_name: vcPeriod?.text ?? null,
+                campus_name: campusResolution.target_label,
+                faculty_name: facultyResolution.target_label,
+                academic_program_name: programResolution.target_label,
+                study_plan_name: studyPlanResolution.target_label,
+                study_plan_year: recordString(asRecord(studyPlanResolution.target_extra ?? {}), 'year'),
+              }
+            : null;
+        const scopeKey = scope ? buildScopeKey(scope) : null;
+        const schedulePayload = schedule
+          ? {
+              day_of_week: schedule.day_of_week,
+              start_time: schedule.start_time,
+              end_time: schedule.end_time,
+              duration_minutes: schedule.duration_minutes,
+              academic_hours: schedule.academic_hours,
+              signature: `${schedule.day_of_week}|${schedule.start_time}|${schedule.end_time}`,
+              session_type: schedule.session_type,
+              source_session_type_code: schedule.source_session_type_code,
+              teacher_id: scheduleTeacherResolution.target_id,
+              building_id: locationResolution.building.target_id,
+              classroom_id: locationResolution.classroom.target_id,
+              source_schedule_id: schedule.id,
+              source_payload_json: schedule.raw,
+            }
+          : null;
+
+        allRows.push({
+          row_number: 0,
+          source_json: {
+            course: course.raw,
+            section: section.raw,
+            detail,
+            schedule: schedule?.raw ?? null,
+          },
+          normalized_json: {
+            source_kind: 'AKADEMIC',
+            semester_raw: dto.semester_id,
+            campus_raw: parsedSection.location_token ?? '',
+            faculty_code_raw: facultyResolution.source_value,
+            academic_program_code_raw: course.career_name ?? '',
+            cycle_raw: cycle,
+            study_plan_code_raw: studyPlanResolution.source_value,
+            section_raw: section.external_code,
+            course_code_raw: course.code,
+            course_name_raw: course.name,
+            teacher_name_raw: schedule?.teacher_name ?? sectionTeacherNames[0] ?? '',
+            day_raw: schedule?.day_of_week ?? '',
+            denomination_raw: section.external_code,
+          },
+          resolution_json: {
+            source_kind: 'AKADEMIC',
+            source_system: 'AKADEMIC',
+            semester_id: dto.semester_id,
+            vc_period_id: effectiveVcPeriodId,
+            campus_id: campusResolution.target_id,
+            faculty_id: facultyResolution.target_id,
+            academic_program_id: programResolution.target_id,
+            study_plan_id: studyPlanResolution.target_id,
+            study_plan_course_id: courseResolution.target_id,
+            teacher_id: summaryTeacherResolution.target_id,
+            schedule_teacher_id: scheduleTeacherResolution.target_id,
+            course_modality_id: modalityResolution.target_id,
+            building_id: locationResolution.building.target_id,
+            classroom_id: locationResolution.classroom.target_id,
+            shift: shiftResolution.target_id,
+            cycle,
+            scope_key: scopeKey,
+            scope,
+            section_base_code: parsedSection.section_code,
+            explicit_subsection_code: group.import_subsection_code,
+            import_section_code: parsedSection.section_code,
+            import_subsection_code: group.import_subsection_code,
+            external_section_code: section.external_code,
+            source_section_id: section.id,
+            source_course_id: course.id,
+            source_term_id: dto.semester_id,
+            is_cepea: parsedSection.is_cepea,
+            offer_course_code:
+              recordString(asRecord(courseResolution.target_extra ?? {}), 'course_code') ?? course.code,
+            offer_course_name:
+              recordString(asRecord(courseResolution.target_extra ?? {}), 'course_name') ?? course.name,
+            offer_theoretical_hours: groupHours.offer_theoretical_hours,
+            offer_practical_hours: groupHours.offer_practical_hours,
+            offer_total_hours: groupHours.offer_total_hours,
+            offer_course_type:
+              groupHours.offer_theoretical_hours > 0 && groupHours.offer_practical_hours > 0
+                ? 'TEORICO_PRACTICO'
+                : groupHours.offer_practical_hours > 0
+                  ? 'PRACTICO'
+                  : 'TEORICO',
+            projected_vacancies: section.vacancies,
+            capacity_snapshot: schedule?.capacity ?? section.vacancies ?? null,
+            subsection_kind: group.subsection_kind,
+            assigned_theoretical_hours: groupHours.assigned_theoretical_hours,
+            assigned_practical_hours: groupHours.assigned_practical_hours,
+            assigned_total_hours: groupHours.assigned_total_hours,
+            denomination: buildDenomination(
+              course.code,
+              course.name,
+              parsedSection.section_code,
+              group.import_subsection_code,
+              campusResolution.target_id ?? '',
+            ),
+            schedule: schedulePayload,
+            mapping_resolution: {
+              vc_period: vcPeriodResolution,
+              campus: campusResolution,
+              faculty_code: facultyResolution,
+              academic_program_code: programResolution,
+              study_plan_code: studyPlanResolution,
+              course_code: courseResolution,
+              course_modality: modalityResolution,
+              shift: shiftResolution,
+              building: locationResolution.building,
+              classroom: locationResolution.classroom,
+            },
+          },
+          scope_key: scopeKey,
+          row_hash: hashRowKey([
+            scopeKey,
+            courseResolution.target_id,
+            parsedSection.section_code,
+            group.import_subsection_code,
+            schedule?.id ?? 'no-schedule',
+          ]),
+          can_import: canImport,
+          issues: rowIssues,
+        });
+      }
+    }
+
+    return allRows.filter((row) => this.matchesAkademicFilterScope(dto, asRecord(row.resolution_json)));
+  }
+
+  private matchesAkademicFilterScope(
+    dto: PreviewPlanningAkademicImportDto,
+    resolution: Record<string, unknown>,
+  ) {
+    if (dto.faculty_id && recordString(resolution, 'faculty_id') && dto.faculty_id !== recordString(resolution, 'faculty_id')) {
+      return false;
+    }
+    if (
+      dto.academic_program_id &&
+      recordString(resolution, 'academic_program_id') &&
+      dto.academic_program_id !== recordString(resolution, 'academic_program_id')
+    ) {
+      return false;
+    }
+    if (dto.study_plan_id && recordString(resolution, 'study_plan_id') && dto.study_plan_id !== recordString(resolution, 'study_plan_id')) {
+      return false;
+    }
+    return true;
+  }
+
+  private normalizeAkademicScheduleRow(
+    row: Record<string, unknown>,
+    sectionId: string,
+  ): AkademicScheduleRow | null {
+    const startTime =
+      normalizeAkademicTimeValue(asNullableString(pick(row, 'startTimeText'))) ??
+      normalizeAkademicTimeValue(asNullableString(pick(row, 'startTime')));
+    const endTime =
+      normalizeAkademicTimeValue(asNullableString(pick(row, 'endTimeText'))) ??
+      normalizeAkademicTimeValue(asNullableString(pick(row, 'endTime')));
+    const weekDay = asNullableInt(pick(row, 'weekDay'));
+    if (!startTime || !endTime || !weekDay) {
+      return null;
+    }
+
+    const day_of_week = parseDayOfWeek(String(weekDay));
+    if (!day_of_week) {
+      return null;
+    }
+
+    const durationMinutes = Math.max(0, toMinutes(endTime) - toMinutes(startTime));
+    const teacherSchedules = Array.isArray(row.teacherSchedules) ? row.teacherSchedules : [];
+    const firstTeacherSchedule = asRecord(teacherSchedules[0]) ?? null;
+    const teacherNode = asRecord(pick(firstTeacherSchedule ?? {}, 'teacher')) ?? null;
+    const teacherUser = asRecord(pick(teacherNode ?? {}, 'user')) ?? null;
+    const classroomNode = asRecord(pick(row, 'classroom')) ?? null;
+
+    return {
+      id: asString(row.id),
+      section_id: sectionId,
+      day_of_week,
+      start_time: startTime,
+      end_time: endTime,
+      duration_minutes: durationMinutes,
+      academic_hours: roundToTwo(durationMinutes / 50),
+      session_type: this.normalizeAkademicSessionType(pick(row, 'sessionType')),
+      source_session_type_code: asNullableString(pick(row, 'sessionType')),
+      teacher_external_id:
+        asNullableString(pick(firstTeacherSchedule ?? {}, 'teacherId')) ??
+        asNullableString(pick(teacherNode ?? {}, 'userId')) ??
+        asNullableString(pick(teacherUser ?? {}, 'id')),
+      teacher_name:
+        asNullableString(pick(teacherUser ?? {}, 'fullName')) ??
+        asNullableString(pick(teacherNode ?? {}, 'fullName')),
+      classroom_external_id:
+        asNullableString(pick(row, 'classroomId')) ??
+        asNullableString(pick(classroomNode ?? {}, 'id')),
+      building_external_id:
+        asNullableString(pick(classroomNode ?? {}, 'buildingId')) ??
+        asNullableString(pick(classroomNode ?? {}, 'building.id')),
+      classroom_description:
+        asNullableString(pick(classroomNode ?? {}, 'description')) ??
+        asNullableString(pick(classroomNode ?? {}, 'code')),
+      building_description: asNullableString(pick(classroomNode ?? {}, 'building.description', 'building.name')),
+      capacity: asNullableInt(pick(classroomNode ?? {}, 'capacity')),
+      section_group_id: asNullableString(pick(row, 'sectionGroupId')),
+      raw: row,
+    };
+  }
+
+  private normalizeAkademicSessionType(value: unknown): PlanningSessionType {
+    const normalized = normalizeLoose(`${value ?? ''}`);
+    if (['TEORIA', 'THEORY'].includes(normalized)) {
+      return 'THEORY';
+    }
+    if (['PRACTICA', 'PRACTICE'].includes(normalized)) {
+      return 'PRACTICE';
+    }
+    if (['LAB', 'LABORATORIO', 'LABORATORY'].includes(normalized)) {
+      return 'LAB';
+    }
+    return 'OTHER';
+  }
+
+  private resolveAkademicCampus(
+    locationToken: string | null,
+    requestedCampusId: string | undefined,
+    catalog: ImportCatalog,
+    issues: PreviewIssue[],
+  ) {
+    const sourceValue = locationToken ?? requestedCampusId ?? '';
+    const alias = resolveAlias(catalog.aliasMap, 'campus', sourceValue);
+    if (alias?.target_id) {
+      const campus = catalog.campuses.find((item) => item.id === alias.target_id) ?? null;
+      return toResolution(
+        sourceValue,
+        campus?.id ?? null,
+        campus?.name ?? alias.target_label ?? null,
+        campus ? 'alias' : 'none',
+      );
+    }
+    if (requestedCampusId && !locationToken) {
+      const campus = catalog.campuses.find((item) => item.id === requestedCampusId) ?? null;
+      return toResolution(sourceValue, campus?.id ?? null, campus?.name ?? null, 'manual_value');
+    }
+    const mappedCampus =
+      catalog.campusVcLocations.find((item) => item.vc_location_code === locationToken)?.campus_id ?? null;
+    if (mappedCampus) {
+      const campus = catalog.campuses.find((item) => item.id === mappedCampus) ?? null;
+      return toResolution(sourceValue, campus?.id ?? null, campus?.name ?? null, 'catalog');
+    }
+    const campus =
+      catalog.campuses.find((item) => normalizeLoose(item.code) === normalizeLoose(locationToken)) ??
+      catalog.campuses.find((item) => normalizeLoose(item.name).includes(normalizeLoose(locationToken))) ??
+      null;
+    if (!campus) {
+      issues.push(missingCriticalIssue('campus', sourceValue, 'No se pudo resolver la sede desde el codigo de Akademic.'));
+    }
+    return toResolution(sourceValue, campus?.id ?? null, campus?.name ?? null, campus ? 'heuristic' : 'none');
+  }
+
+  private resolveAkademicProgram(
+    dto: PreviewPlanningAkademicImportDto,
+    course: AkademicCourseRow,
+    catalog: ImportCatalog,
+    issues: PreviewIssue[],
+  ) {
+    if (dto.academic_program_id) {
+      const program = catalog.programs.find((item) => item.id === dto.academic_program_id) ?? null;
+      return toResolution(
+        course.career_name ?? dto.academic_program_id,
+        program?.id ?? null,
+        program?.name ?? null,
+        'manual_value',
+      );
+    }
+    return this.resolveAcademicProgram(course.career_name ?? '', catalog, issues);
+  }
+
+  private resolveAkademicFaculty(
+    dto: PreviewPlanningAkademicImportDto,
+    programResolution: MappingResolution,
+    catalog: ImportCatalog,
+    issues: PreviewIssue[],
+  ) {
+    if (dto.faculty_id) {
+      const faculty = catalog.faculties.find((item) => item.id === dto.faculty_id) ?? null;
+      return toResolution(dto.faculty_id, faculty?.id ?? null, faculty?.name ?? null, 'manual_value');
+    }
+    const program = catalog.programs.find((item) => item.id === programResolution.target_id) ?? null;
+    const faculty = program?.faculty_id
+      ? catalog.faculties.find((item) => item.id === program.faculty_id) ?? null
+      : null;
+    if (!faculty) {
+      issues.push(
+        missingCriticalIssue(
+          'faculty_code',
+          programResolution.source_value,
+          'No se pudo resolver la facultad del programa importado.',
+        ),
+      );
+    }
+    return toResolution(
+      faculty?.code ?? programResolution.source_value,
+      faculty?.id ?? null,
+      faculty?.name ?? null,
+      faculty ? 'catalog' : 'none',
+    );
+  }
+
+  private resolveAkademicStudyPlan(
+    dto: PreviewPlanningAkademicImportDto,
+    course: AkademicCourseRow,
+    programResolution: MappingResolution,
+    cycle: number | null,
+    catalog: ImportCatalog,
+    issues: PreviewIssue[],
+  ) {
+    if (dto.study_plan_id) {
+      const plan = catalog.studyPlans.find((item) => item.id === dto.study_plan_id) ?? null;
+      return toResolution(
+        plan?.year ?? dto.study_plan_id,
+        plan?.id ?? null,
+        [plan?.year, plan?.career, plan?.name].filter(Boolean).join(' - ') || null,
+        'manual_value',
+        { year: plan?.year ?? null },
+      );
+    }
+    const plans = this.findStudyPlansByCourseCode(
+      course.code,
+      programResolution.target_id,
+      cycle,
+      catalog,
+    );
+    if (plans.length === 1) {
+      const plan = plans[0];
+      return toResolution(
+        plan.year ?? course.code,
+        plan.id,
+        [plan.year, plan.career, plan.name].filter(Boolean).join(' - ') || null,
+        'catalog',
+        { year: plan.year ?? null },
+      );
+    }
+    issues.push(
+      missingCriticalIssue(
+        'study_plan_code',
+        course.code,
+        plans.length > 1
+          ? `El curso ${course.code} coincide con mas de un plan de estudios para el ciclo ${cycle ?? '-'}.`
+          : `No se encontro el plan de estudios para ${course.code}.`,
+      ),
+    );
+    return toResolution(course.code, null, null, 'none');
+  }
+
+  private resolveAkademicCourse(
+    dto: PreviewPlanningAkademicImportDto,
+    course: AkademicCourseRow,
+    studyPlanResolution: MappingResolution,
+    cycle: number | null,
+    programResolution: MappingResolution,
+    catalog: ImportCatalog,
+    issues: PreviewIssue[],
+  ) {
+    if (dto.study_plan_course_id) {
+      const item = catalog.studyPlanCourses.find((candidate) => candidate.id === dto.study_plan_course_id) ?? null;
+      const detail = item ? catalog.studyPlanCourseDetailById.get(item.id) ?? null : null;
+      return toResolution(
+        course.code,
+        item?.id ?? null,
+        [detail?.short_code ?? item?.course_code, detail?.name ?? item?.course_name].filter(Boolean).join(' - ') || null,
+        'manual_value',
+        {
+          course_code: detail?.short_code ?? item?.course_code ?? null,
+          course_name: detail?.name ?? item?.course_name ?? null,
+          cycle,
+        },
+      );
+    }
+    return this.resolveStudyPlanCourse(
+      course.code,
+      course.name,
+      studyPlanResolution.target_id,
+      cycle,
+      {
+        academic_program_code_raw: programResolution.source_value,
+        study_plan_code_raw: studyPlanResolution.source_value,
+        cycle_raw: cycle,
+      },
+      catalog,
+      issues,
+    );
+  }
+
+  private resolveAkademicCourseModality(
+    rawValue: string | number | null,
+    modalityToken: string | null,
+    catalog: ImportCatalog,
+    issues: PreviewIssue[],
+  ) {
+    const normalizedToken = normalizeLoose(modalityToken);
+    let value = '';
+    if (normalizedToken === 'V') {
+      value = 'VIRTUAL';
+    } else if (normalizedToken === 'P') {
+      value = 'PRESENCIAL';
+    } else {
+      value = `${rawValue ?? ''}`;
+    }
+    const alias = resolveAlias(catalog.aliasMap, 'course_modality', value);
+    if (alias?.target_id) {
+      const modality = catalog.courseModalities.find((item) => item.id === alias.target_id) ?? null;
+      return toResolution(
+        value,
+        modality?.id ?? null,
+        modality?.name ?? alias.target_label ?? null,
+        modality ? 'alias' : 'none',
+      );
+    }
+    const modality = catalog.courseModalities.find((item) => {
+      const normalized = normalizeLoose(item.name || item.code);
+      if (normalizedToken === 'V') {
+        return normalized.includes('VIRTUAL');
+      }
+      if (normalizedToken === 'P') {
+        return normalized.includes('PRESENCIAL');
+      }
+      return normalized === normalizeLoose(value);
+    }) ?? null;
+    if (!modality && value) {
+      issues.push({
+        severity: 'WARNING',
+        issue_code: 'UNMATCHED_COURSE_MODALITY',
+        field_name: 'MODALIDAD',
+        message: 'No se pudo resolver la modalidad enviada por Akademic.',
+        meta_json: {
+          namespace: 'course_modality',
+          source_value: value,
+        },
+      });
+    }
+    return toResolution(value, modality?.id ?? null, modality?.name ?? null, modality ? 'heuristic' : 'none');
+  }
+
+  private resolveAkademicShift(schedules: AkademicScheduleRow[]) {
+    if (!schedules.length) {
+      return toResolution('', null, null, 'none');
+    }
+    const firstStart = schedules
+      .map((item) => toMinutes(item.start_time))
+      .filter((value) => Number.isFinite(value))
+      .sort((left, right) => left - right)[0];
+    let shift = 'DIURNO';
+    if (firstStart >= 18 * 60) {
+      shift = 'NOCHE';
+    } else if (firstStart >= 13 * 60) {
+      shift = 'TARDE';
+    }
+    return toResolution(shift, shift, shift, 'heuristic');
+  }
+
+  private resolveAkademicTeacherMatch(
+    externalTeacherId: string | null,
+    teacherName: string | null,
+    catalog: ImportCatalog,
+    issues: PreviewIssue[],
+  ): MappingResolution {
+    const byId = externalTeacherId
+      ? catalog.teachers.find((item) => item.id === externalTeacherId) ?? null
+      : null;
+    if (byId) {
+      return toResolution(
+        teacherName ?? byId.full_name ?? byId.name ?? externalTeacherId ?? '',
+        byId.id,
+        byId.full_name ?? byId.name ?? null,
+        'catalog',
+      );
+    }
+    const normalizedTeacherName = normalizeLoose(teacherName);
+    const byName = normalizedTeacherName
+      ? catalog.teachers.find((item) =>
+          normalizeLoose(item.full_name || item.name).includes(normalizedTeacherName),
+        ) ?? null
+      : null;
+    if (byName) {
+      return toResolution(
+        teacherName ?? byName.full_name ?? byName.name ?? byName.id,
+        byName.id,
+        byName.full_name ?? byName.name ?? null,
+        'heuristic',
+      );
+    }
+    if (teacherName || externalTeacherId) {
+      issues.push({
+        severity: 'WARNING',
+        issue_code: 'UNMATCHED_TEACHER',
+        field_name: 'DOCENTE',
+        message: 'No se pudo resolver el docente de Akademic; se importara en null.',
+      });
+    }
+    return toResolution(teacherName ?? externalTeacherId ?? '', null, null, 'none');
+  }
+
+  private resolveAkademicScheduleLocation(
+    schedule: AkademicScheduleRow,
+    campusId: string | null,
+    catalog: ImportCatalog,
+    issues: PreviewIssue[],
+  ): { building: MappingResolution; classroom: MappingResolution } {
+    const buildingCandidates = buildLocationCandidateLabels(schedule.building_description);
+    const classroomMatch = this.findCatalogClassroomMatch(schedule.classroom_description, catalog, {
+      classroomId: schedule.classroom_external_id,
+      campusId,
+    });
+    const classroom = classroomMatch.classroom;
+    const building = classroom?.building_id
+      ? catalog.buildings.find((item) => item.id === classroom.building_id) ?? null
+      : schedule.building_external_id
+        ? catalog.buildings.find((item) => item.id === schedule.building_external_id) ?? null
+      : schedule.building_description
+        ? catalog.buildings.find((item) => {
+            if (campusId && item.campus_id !== campusId) {
+              return false;
+            }
+            return buildingCandidates.some((candidate) => normalizeLoose(item.name) === normalizeLoose(candidate));
+          }) ?? null
+        : null;
+    const classroomByName =
+      classroom ??
+      this.findCatalogClassroomMatch(schedule.classroom_description, catalog, {
+        campusId,
+        buildingId: building?.id ?? null,
+        allowGlobalUniqueFallback: true,
+      }).classroom;
+    const resolvedBuilding = classroomByName?.building_id
+      ? catalog.buildings.find((item) => item.id === classroomByName.building_id) ?? null
+      : building;
+    const buildingMatchSource =
+      classroomByName?.building_id && resolvedBuilding
+        ? classroomMatch.classroom === classroomByName
+          ? classroomMatch.match_source
+          : 'heuristic'
+        : resolvedBuilding
+          ? 'catalog'
+          : 'none';
+    const classroomMatchSource =
+      classroomMatch.classroom === classroomByName && classroomByName
+        ? classroomMatch.match_source
+        : classroomByName
+          ? 'heuristic'
+          : 'none';
+
+    if (!classroomByName && schedule.classroom_description) {
+      issues.push({
+        severity: 'WARNING',
+        issue_code: 'UNMATCHED_CLASSROOM',
+        field_name: 'AULA',
+        message: 'No se pudo resolver el aula de Akademic; se importara en null.',
+        meta_json: {
+          namespace: 'classroom',
+          source_value: schedule.classroom_description,
+        },
+      });
+    }
+
+    return {
+      building: toResolution(
+        schedule.building_description ?? resolvedBuilding?.name ?? '',
+        resolvedBuilding?.id ?? null,
+        resolvedBuilding?.name ?? null,
+        buildingMatchSource,
+      ),
+      classroom: toResolution(
+        schedule.classroom_description ?? classroomByName?.name ?? '',
+        classroomByName?.id ?? null,
+        classroomByName?.name ?? classroomByName?.code ?? null,
+        classroomMatchSource,
+      ),
+    };
+  }
+
+  private findCatalogClassroomMatch(
+    value: string | null | undefined,
+    catalog: ImportCatalog,
+    options?: {
+      classroomId?: string | null;
+      campusId?: string | null;
+      buildingId?: string | null;
+      allowGlobalUniqueFallback?: boolean;
+    },
+  ): { classroom: ClassroomEntity | null; match_source: MappingResolution['match_source'] } {
+    const classroomId = options?.classroomId ?? null;
+    if (classroomId) {
+      const byId = catalog.classrooms.find((item) => item.id === classroomId) ?? null;
+      if (byId) {
+        return { classroom: byId, match_source: 'catalog' };
+      }
+    }
+
+    const normalizedCandidates = buildLocationCandidateLabels(value).map((item) => normalizeLoose(item)).filter(Boolean);
+    if (!normalizedCandidates.length) {
+      return { classroom: null, match_source: 'none' };
+    }
+
+    const matchesCandidate = (item: ClassroomEntity) =>
+      normalizedCandidates.includes(normalizeLoose(item.code)) ||
+      normalizedCandidates.includes(normalizeLoose(item.name));
+
+    const scopedMatches = catalog.classrooms.filter((item) => {
+      if (options?.campusId && item.campus_id !== options.campusId) {
+        return false;
+      }
+      if (options?.buildingId && item.building_id && item.building_id !== options.buildingId) {
+        return false;
+      }
+      return matchesCandidate(item);
+    });
+    if (scopedMatches.length > 0) {
+      return { classroom: scopedMatches[0] ?? null, match_source: 'catalog' };
+    }
+
+    if (!options?.allowGlobalUniqueFallback) {
+      return { classroom: null, match_source: 'none' };
+    }
+
+    const globalMatches = catalog.classrooms.filter(matchesCandidate);
+    if (globalMatches.length === 1) {
+      return { classroom: globalMatches[0] ?? null, match_source: 'heuristic' };
+    }
+
+    return { classroom: null, match_source: 'none' };
+  }
+
+  private normalizeAkademicCourseType(value: string | null | undefined) {
+    const normalized = normalizeLoose(value);
+    if (normalized === 'PRACTICO' || normalized === 'PRACTICA') {
+      return 'PRACTICO';
+    }
+    if (normalized === 'TEORICO' || normalized === 'TEORIA') {
+      return 'TEORICO';
+    }
+    return 'TEORICO_PRACTICO';
+  }
+
+  private deriveAkademicSubsectionKindFromSchedules(
+    courseType: string,
+    schedules: AkademicScheduleRow[],
+  ): PlanningSubsectionKind {
+    const hasTheory = schedules.some((item) => item.session_type === 'THEORY');
+    const hasPractice = schedules.some((item) => item.session_type === 'PRACTICE' || item.session_type === 'LAB');
+    if (hasTheory && hasPractice) {
+      return 'MIXED';
+    }
+    if (hasPractice) {
+      return 'PRACTICE';
+    }
+    if (hasTheory) {
+      return 'THEORY';
+    }
+    return courseType === 'PRACTICO' ? 'PRACTICE' : courseType === 'TEORICO' ? 'THEORY' : 'MIXED';
+  }
+
+  private groupAkademicSubsections(
+    sectionCode: string,
+    schedules: AkademicScheduleRow[],
+    courseType: string,
+  ): Array<{
+    import_subsection_code: string;
+    subsection_kind: PlanningSubsectionKind;
+    schedules: AkademicScheduleRow[];
+    warning: string | null;
+  }> {
+    const sortedSchedules = [...schedules].sort((left, right) =>
+      `${left.day_of_week}|${left.start_time}|${left.end_time}`.localeCompare(
+        `${right.day_of_week}|${right.start_time}|${right.end_time}`,
+      ),
+    );
+    const normalizedSchedules = this.applyAkademicScheduleHeuristics(sortedSchedules);
+    return [
+      {
+        import_subsection_code: sectionCode,
+        subsection_kind: this.deriveAkademicSubsectionKindFromSchedules(
+          courseType,
+          normalizedSchedules,
+        ),
+        schedules: normalizedSchedules,
+        warning: null,
+      },
+    ];
+  }
+
+  private applyAkademicScheduleHeuristics(
+    schedules: AkademicScheduleRow[],
+  ): AkademicScheduleRow[] {
+    if (!schedules.length) {
+      return [];
+    }
+    const knownTypes = schedules.filter((item) => item.session_type !== 'OTHER').length;
+    if (knownTypes > 0) {
+      return schedules;
+    }
+    return schedules.map((item, index) => ({
+      ...item,
+      session_type:
+        schedules.length === 1
+          ? 'THEORY'
+          : index === 0
+            ? 'THEORY'
+            : 'PRACTICE',
+    }));
+  }
+
+  private computeAkademicAssignedHours(schedules: AkademicScheduleRow[]) {
+    const theoretical = roundToTwo(
+      schedules
+        .filter((item) => item.session_type === 'THEORY')
+        .reduce((sum, item) => sum + item.academic_hours, 0),
+    );
+    const practical = roundToTwo(
+      schedules
+        .filter((item) => item.session_type === 'PRACTICE' || item.session_type === 'LAB')
+        .reduce((sum, item) => sum + item.academic_hours, 0),
+    );
+    const total = roundToTwo(schedules.reduce((sum, item) => sum + item.academic_hours, 0));
+    return {
+      offer_theoretical_hours: theoretical,
+      offer_practical_hours: practical,
+      offer_total_hours: total,
+      assigned_theoretical_hours: theoretical,
+      assigned_practical_hours: practical,
+      assigned_total_hours: total,
+    };
   }
 
   private async updatePreviewBatchProgress(
@@ -625,11 +2182,56 @@ export class PlanningImportService {
     meta: Record<string, unknown> = {},
   ) {
     return {
+      ...meta,
       percent: Math.max(0, Math.min(100, Math.round(percent))),
       message,
-      ...meta,
       updated_at: new Date().toISOString(),
     };
+  }
+
+  private async updateExecutionBatchProgress(
+    batch: PlanningImportBatchEntity,
+    summary: Record<string, unknown>,
+    percent: number,
+    message: string,
+    meta: Record<string, unknown> = {},
+  ) {
+    const nextSummary = this.buildExecutionProgress(message, percent, {
+      ...summary,
+      ...meta,
+    });
+    batch.execution_summary_json = nextSummary;
+    batch.updated_at = new Date();
+    await this.importBatchesRepo.save(batch);
+    return nextSummary;
+  }
+
+  private buildExecutionProgress(
+    message: string,
+    percent: number,
+    meta: Record<string, unknown> = {},
+  ) {
+    return {
+      ...meta,
+      percent: Math.max(0, Math.min(100, Math.round(percent))),
+      message,
+      updated_at: new Date().toISOString(),
+    };
+  }
+
+  private buildExecutionScopeLabel(scope: ImportScope | null) {
+    if (!scope) {
+      return 'grupo sin contexto';
+    }
+    const parts = [
+      scope.campus_name,
+      scope.academic_program_name,
+      scope.study_plan_year ? `Plan ${scope.study_plan_year}` : null,
+      scope.cycle ? `Ciclo ${scope.cycle}` : null,
+    ]
+      .map((item) => String(item ?? '').trim())
+      .filter(Boolean);
+    return parts.length ? parts.join(' | ') : 'grupo sin contexto';
   }
 
   async listAliasMappings(namespace?: string, search?: string) {
@@ -891,6 +2493,12 @@ export class PlanningImportService {
           representative,
           'offer_course_code',
         )}`;
+        const offerResolutions = offerRows.map((row) => asRecord(row.resolution_json));
+        const sourceSystem =
+          (firstNonEmpty(
+            offerResolutions.map((row) => recordString(row, 'source_system')),
+          ) as PlanningSourceSystem | null) ?? 'EXCEL';
+        const firstOfferSource = asRecord(offerRows[0]?.source_json);
         const offer = manager.create(PlanningOfferEntity, {
           id: newId(),
           semester_id: scope.semester_id,
@@ -908,9 +2516,24 @@ export class PlanningImportService {
           course_name: recordString(representative, 'offer_course_name'),
           study_type_id: catalog.defaultStudyTypeId,
           course_type: recordString(representative, 'offer_course_type') ?? 'TEORICO_PRACTICO',
-          theoretical_hours: recordNumber(representative, 'offer_theoretical_hours'),
-          practical_hours: recordNumber(representative, 'offer_practical_hours'),
-          total_hours: recordNumber(representative, 'offer_total_hours'),
+          source_system: sourceSystem,
+          source_course_id: firstNonEmpty(
+            offerResolutions.map((row) => recordString(row, 'source_course_id')),
+          ),
+          source_term_id: firstNonEmpty(
+            offerResolutions.map((row) => recordString(row, 'source_term_id')),
+          ),
+          last_synced_at: sourceSystem === 'AKADEMIC' ? now : null,
+          source_payload_json:
+            asRecord(recordValue(firstOfferSource, 'course')) ??
+            firstOfferSource ??
+            null,
+          theoretical_hours:
+            maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_theoretical_hours'))) ?? 0,
+          practical_hours:
+            maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_practical_hours'))) ?? 0,
+          total_hours:
+            maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_total_hours'))) ?? 0,
           status: 'DRAFT',
           created_at: now,
           updated_at: now,
@@ -941,6 +2564,16 @@ export class PlanningImportService {
             id: newId(),
             planning_offer_id: offer.id,
             code: sectionCode,
+            external_code: firstNonEmpty(
+              sectionResolutions.map((row) => recordString(row, 'external_section_code')),
+            ),
+            source_section_id: firstNonEmpty(
+              sectionResolutions.map((row) => recordString(row, 'source_section_id')),
+            ),
+            source_payload_json:
+              asRecord(recordValue(asRecord(sectionRows[0]?.source_json), 'section')) ??
+              asRecord(sectionRows[0]?.source_json) ??
+              null,
             teacher_id: firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'teacher_id'))),
             course_modality_id: firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'course_modality_id'))),
             projected_vacancies: maxNumber(sectionResolutions.map((row) => recordNumberOrNull(row, 'projected_vacancies'))),
@@ -990,6 +2623,18 @@ export class PlanningImportService {
             const assignedTotal = maxNumber(
               subsectionResolutions.map((row) => recordNumberOrNull(row, 'assigned_total_hours')),
             ) ?? assignedTheoretical + assignedPractical;
+            const schedulePayloads = subsectionResolutions
+              .map((row) => asRecord(recordValue(row, 'schedule')))
+              .filter((item) => Object.keys(item).length > 0);
+            const uniqueScheduleTeacherIds = uniqueIds(
+              schedulePayloads.map((row) => recordString(row, 'teacher_id')),
+            );
+            const uniqueScheduleBuildingIds = uniqueIds(
+              schedulePayloads.map((row) => recordString(row, 'building_id')),
+            );
+            const uniqueScheduleClassroomIds = uniqueIds(
+              schedulePayloads.map((row) => recordString(row, 'classroom_id')),
+            );
             const subsectionKind = (
               firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'subsection_kind'))) ??
               deriveSubsectionKind(assignedTheoretical, assignedPractical)
@@ -999,18 +2644,21 @@ export class PlanningImportService {
               planning_section_id: section.id,
               code: subsectionCode,
               kind: subsectionKind,
-              responsible_teacher_id: firstNonEmpty(
-                subsectionResolutions.map((row) => recordString(row, 'teacher_id')),
-              ),
+              responsible_teacher_id:
+                uniqueScheduleTeacherIds.length === 1
+                  ? uniqueScheduleTeacherIds[0]
+                  : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'teacher_id'))),
               course_modality_id: firstNonEmpty(
                 subsectionResolutions.map((row) => recordString(row, 'course_modality_id')),
               ),
-              building_id: firstNonEmpty(
-                subsectionResolutions.map((row) => recordString(row, 'building_id')),
-              ),
-              classroom_id: firstNonEmpty(
-                subsectionResolutions.map((row) => recordString(row, 'classroom_id')),
-              ),
+              building_id:
+                uniqueScheduleBuildingIds.length === 1
+                  ? uniqueScheduleBuildingIds[0]
+                  : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'building_id'))),
+              classroom_id:
+                uniqueScheduleClassroomIds.length === 1
+                  ? uniqueScheduleClassroomIds[0]
+                  : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'classroom_id'))),
               capacity_snapshot: maxNumber(
                 subsectionResolutions.map((row) => recordNumberOrNull(row, 'capacity_snapshot')),
               ),
@@ -1044,16 +2692,24 @@ export class PlanningImportService {
             );
             result.subsections += 1;
 
-            const selectedSchedule = subsectionResolutions
-              .map((row) => asRecord(recordValue(row, 'schedule')))
-              .find((schedule) => schedule && Object.keys(schedule).length > 0);
-            if (selectedSchedule) {
+            const uniqueSchedules = dedupeImportedSchedules(schedulePayloads);
+            for (const selectedSchedule of uniqueSchedules) {
               const schedule = manager.create(PlanningSubsectionScheduleEntity, {
                 id: newId(),
                 planning_subsection_id: subsection.id,
                 day_of_week: recordString(selectedSchedule, 'day_of_week') as (typeof DayOfWeekValues)[number],
                 start_time: recordString(selectedSchedule, 'start_time')!,
                 end_time: recordString(selectedSchedule, 'end_time')!,
+                session_type:
+                  (recordString(selectedSchedule, 'session_type') as PlanningSessionType | null) ?? 'OTHER',
+                source_session_type_code: recordString(selectedSchedule, 'source_session_type_code'),
+                teacher_id: recordString(selectedSchedule, 'teacher_id'),
+                building_id: recordString(selectedSchedule, 'building_id'),
+                classroom_id: recordString(selectedSchedule, 'classroom_id'),
+                source_schedule_id: recordString(selectedSchedule, 'source_schedule_id'),
+                source_payload_json:
+                  asRecord(recordValue(selectedSchedule, 'source_payload_json')) ??
+                  null,
                 duration_minutes: recordNumber(selectedSchedule, 'duration_minutes'),
                 academic_hours: recordNumber(selectedSchedule, 'academic_hours'),
                 created_at: now,
@@ -1202,29 +2858,22 @@ export class PlanningImportService {
   }
 
   private async replaceExistingScope(scope: ImportScope, actor?: ImportActor | null) {
+    const scopeWhere = {
+      semester_id: scope.semester_id,
+      ...(scope.vc_period_id ? { vc_period_id: scope.vc_period_id } : {}),
+      campus_id: scope.campus_id,
+      faculty_id: scope.faculty_id,
+      academic_program_id: scope.academic_program_id,
+      study_plan_id: scope.study_plan_id,
+      cycle: scope.cycle,
+    };
     const rules = await this.planRulesRepo.find({
-      where: {
-        semester_id: scope.semester_id,
-        vc_period_id: scope.vc_period_id,
-        campus_id: scope.campus_id,
-        faculty_id: scope.faculty_id,
-        academic_program_id: scope.academic_program_id,
-        study_plan_id: scope.study_plan_id,
-        cycle: scope.cycle,
-      },
+      where: scopeWhere,
       order: { created_at: 'ASC' },
     });
 
     const offers = await this.offersRepo.find({
-      where: {
-        semester_id: scope.semester_id,
-        vc_period_id: scope.vc_period_id,
-        campus_id: scope.campus_id,
-        faculty_id: scope.faculty_id,
-        academic_program_id: scope.academic_program_id,
-        study_plan_id: scope.study_plan_id,
-        cycle: scope.cycle,
-      },
+      where: scopeWhere,
       order: { created_at: 'ASC' },
     });
     if (rules.length === 0 && offers.length === 0) {
@@ -1414,28 +3063,21 @@ export class PlanningImportService {
   }
 
   private async findExistingScopeSummary(scope: ImportScope) {
+    const scopeWhere = {
+      semester_id: scope.semester_id,
+      ...(scope.vc_period_id ? { vc_period_id: scope.vc_period_id } : {}),
+      campus_id: scope.campus_id,
+      faculty_id: scope.faculty_id,
+      academic_program_id: scope.academic_program_id,
+      study_plan_id: scope.study_plan_id,
+      cycle: scope.cycle,
+    };
     const planRules = await this.planRulesRepo.find({
-      where: {
-        semester_id: scope.semester_id,
-        vc_period_id: scope.vc_period_id,
-        campus_id: scope.campus_id,
-        faculty_id: scope.faculty_id,
-        academic_program_id: scope.academic_program_id,
-        study_plan_id: scope.study_plan_id,
-        cycle: scope.cycle,
-      },
+      where: scopeWhere,
       order: { created_at: 'DESC' },
     });
     const offers = await this.offersRepo.find({
-      where: {
-        semester_id: scope.semester_id,
-        vc_period_id: scope.vc_period_id,
-        campus_id: scope.campus_id,
-        faculty_id: scope.faculty_id,
-        academic_program_id: scope.academic_program_id,
-        study_plan_id: scope.study_plan_id,
-        cycle: scope.cycle,
-      },
+      where: scopeWhere,
       select: ['id'],
     });
     const offerIds = offers.map((item) => item.id);
@@ -1486,6 +3128,8 @@ export class PlanningImportService {
     return {
       id: batch.id,
       file_name: batch.file_name,
+      source_kind: batch.source_kind,
+      source_scope: batch.source_scope_json ?? null,
       sheet_name: batch.sheet_name,
       status: batch.status,
       total_row_count: batch.total_row_count,
@@ -1511,6 +3155,8 @@ export class PlanningImportService {
     return {
       id: batch.id,
       file_name: batch.file_name,
+      source_kind: batch.source_kind,
+      source_scope: batch.source_scope_json ?? null,
       sheet_name: batch.sheet_name,
       status: batch.status,
       total_row_count: batch.total_row_count,
@@ -1563,7 +3209,9 @@ export class PlanningImportService {
         blocking_count: 0,
         warning_count: 0,
         dependent_academic_programs: [],
+        sample_rows: [],
       };
+      const relatedRow = issue.row_id ? rowsById.get(issue.row_id) ?? null : null;
       current.row_count = numberValue(current.row_count) + 1;
       current.issue_count = numberValue(current.issue_count) + 1;
       if (issue.severity === 'BLOCKING') {
@@ -1572,9 +3220,10 @@ export class PlanningImportService {
       if (issue.severity === 'WARNING') {
         current.warning_count = numberValue(current.warning_count) + 1;
       }
-      if (namespace === 'study_plan_code' && issue.row_id) {
-        const relatedRow = rowsById.get(issue.row_id);
-        if (relatedRow) {
+      if (relatedRow) {
+        pushMappingSampleRow(current, relatedRow);
+      }
+      if (namespace === 'study_plan_code' && relatedRow) {
           const normalized = asRecord(relatedRow.normalized_json);
           const resolution = asRecord(relatedRow.resolution_json);
           const mappingResolution = asRecord(recordValue(resolution, 'mapping_resolution'));
@@ -1599,11 +3248,8 @@ export class PlanningImportService {
             dependentPrograms.push(dependentProgram);
             current.dependent_academic_programs = dependentPrograms;
           }
-        }
       }
-      if (namespace === 'course_code' && issue.row_id) {
-        const relatedRow = rowsById.get(issue.row_id);
-        if (relatedRow) {
+      if (namespace === 'course_code' && relatedRow) {
           const normalized = asRecord(relatedRow.normalized_json);
           const resolution = asRecord(relatedRow.resolution_json);
           const mappingResolution = asRecord(recordValue(resolution, 'mapping_resolution'));
@@ -1659,35 +3305,31 @@ export class PlanningImportService {
             sourceValue,
             recordString(normalized, 'course_name_raw'),
           );
-        }
       }
       if (
         (namespace === 'building' || namespace === 'classroom' || namespace === 'laboratory') &&
-        issue.row_id
+        relatedRow
       ) {
-        const relatedRow = rowsById.get(issue.row_id);
-        if (relatedRow) {
-          const normalized = asRecord(relatedRow.normalized_json);
-          const resolution = asRecord(relatedRow.resolution_json);
-          const mappingResolution = asRecord(recordValue(resolution, 'mapping_resolution'));
-          const campusResolution = asRecord(recordValue(mappingResolution, 'campus'));
-          pushDependencyEntry(current, 'dependent_campuses', {
+        const normalized = asRecord(relatedRow.normalized_json);
+        const resolution = asRecord(relatedRow.resolution_json);
+        const mappingResolution = asRecord(recordValue(resolution, 'mapping_resolution'));
+        const campusResolution = asRecord(recordValue(mappingResolution, 'campus'));
+        pushDependencyEntry(current, 'dependent_campuses', {
+          source_value:
+            recordString(campusResolution, 'source_value') ?? recordString(normalized, 'campus_raw') ?? '',
+          target_id: recordString(campusResolution, 'target_id'),
+          target_label: recordString(campusResolution, 'target_label'),
+          match_source: recordString(campusResolution, 'match_source') ?? 'none',
+        });
+        if (namespace === 'classroom' || namespace === 'laboratory') {
+          const buildingResolution = asRecord(recordValue(mappingResolution, 'building'));
+          pushDependencyEntry(current, 'dependent_buildings', {
             source_value:
-              recordString(campusResolution, 'source_value') ?? recordString(normalized, 'campus_raw') ?? '',
-            target_id: recordString(campusResolution, 'target_id'),
-            target_label: recordString(campusResolution, 'target_label'),
-            match_source: recordString(campusResolution, 'match_source') ?? 'none',
+              recordString(buildingResolution, 'source_value') ?? recordString(normalized, 'building_raw') ?? '',
+            target_id: recordString(buildingResolution, 'target_id'),
+            target_label: recordString(buildingResolution, 'target_label'),
+            match_source: recordString(buildingResolution, 'match_source') ?? 'none',
           });
-          if (namespace === 'classroom' || namespace === 'laboratory') {
-            const buildingResolution = asRecord(recordValue(mappingResolution, 'building'));
-            pushDependencyEntry(current, 'dependent_buildings', {
-              source_value:
-                recordString(buildingResolution, 'source_value') ?? recordString(normalized, 'building_raw') ?? '',
-              target_id: recordString(buildingResolution, 'target_id'),
-              target_label: recordString(buildingResolution, 'target_label'),
-              match_source: recordString(buildingResolution, 'match_source') ?? 'none',
-            });
-          }
         }
       }
       unresolvedMappingMap.set(key, current);
@@ -1724,12 +3366,14 @@ export class PlanningImportService {
               ? details.dependent_study_plans
               : [],
             dependent_cycles: Array.isArray(details.dependent_cycles) ? details.dependent_cycles : [],
+            sample_rows: [],
           };
           current.row_count = numberValue(current.row_count) + 1;
           current.target_id = targetId;
           current.target_label = targetLabel;
           current.match_source = recordString(details, 'match_source') ?? 'catalog';
           current.requires_confirmation = true;
+          pushMappingSampleRow(current, row);
           unresolvedMappingMap.set(confirmationKey, current);
         }
         const key = `${namespace}::${sourceValue}::${targetId}`;
@@ -1789,11 +3433,8 @@ export class PlanningImportService {
       ).size;
       const scheduleCount = new Set(
         resolutionRows
-          .filter((row) => asRecord(recordValue(row, 'schedule')))
-          .map(
-            (row) =>
-              `${recordString(row, 'study_plan_course_id')}::${recordString(row, 'import_section_code')}::${recordString(row, 'import_subsection_code')}`,
-          ),
+          .map((row) => buildPreviewScheduleKey(row))
+          .filter(Boolean),
       ).size;
       return {
         id: scopeDecision.id,
@@ -2075,6 +3716,8 @@ export class PlanningImportService {
         : null;
     const scopeKey = scope ? buildScopeKey(scope) : null;
     const resolution = {
+      source_kind: 'EXCEL',
+      source_system: 'EXCEL',
       semester_id: semesterResolution.target_id,
       vc_period_id: vcPeriodResolution.target_id,
       campus_id: campusResolution.target_id,
@@ -2094,6 +3737,10 @@ export class PlanningImportService {
       explicit_subsection_code: section.explicit_subsection_code,
       import_section_code: null,
       import_subsection_code: null,
+      external_section_code: null,
+      source_section_id: null,
+      source_course_id: null,
+      source_term_id: null,
       is_cepea: section.is_cepea,
       offer_course_code:
         recordString(asRecord(courseResolution.target_extra ?? {}), 'course_code') ?? row.course_code_raw,
@@ -2270,21 +3917,17 @@ export class PlanningImportService {
         if (!signature) {
           continue;
         }
-        if (!hasSelectedSchedule) {
+        if (!hasSelectedSchedule || !seenSignatures.has(signature)) {
           seenSignatures.add(signature);
           hasSelectedSchedule = true;
           continue;
         }
-        if (!seenSignatures.has(signature)) {
-          row.issues.push({
-            severity: 'WARNING',
-            issue_code: 'MULTIPLE_SCHEDULES_FOR_SUBSECTION',
-            field_name: 'HORARIO',
-            message:
-              'La plataforma solo permite un horario por subseccion; se conservara el primer horario valido.',
-          });
-        }
-        resolution.schedule = null;
+        row.issues.push({
+          severity: 'WARNING',
+          issue_code: 'DUPLICATED_SCHEDULE_SIGNATURE',
+          field_name: 'HORARIO',
+          message: 'Se detecto un horario repetido para el mismo grupo; solo se conservara una firma unica.',
+        });
       }
     }
   }
@@ -2398,11 +4041,11 @@ export class PlanningImportService {
     catalog: ImportCatalog,
   ) {
     const normalizedCourseCode = normalizeCourseCodeValue(courseCode);
-    if (!normalizedCourseCode || !cycle) {
+    if (!normalizedCourseCode) {
       return [];
     }
 
-    const planCandidates = catalog.studyPlanCourses
+    const candidates = catalog.studyPlanCourses
       .map((item) => {
         const plan = catalog.studyPlanById.get(item.study_plan_id) ?? null;
         if (!plan) {
@@ -2413,20 +4056,55 @@ export class PlanningImportService {
         }
         const detail = catalog.studyPlanCourseDetailById.get(item.id) ?? null;
         const resolvedCycle = detail?.academic_year ?? extractCycleFromStudyPlanCourse(item) ?? null;
-        if (resolvedCycle !== cycle) {
-          return null;
-        }
-        const candidateCodes = [detail?.short_code, item.course_code].filter(
-          (candidate): candidate is string => Boolean(candidate),
-        );
-        if (!candidateCodes.some((candidate) => courseCodeLikeMatch(candidate, normalizedCourseCode))) {
-          return null;
-        }
-        return plan;
+        return {
+          plan,
+          course: item,
+          detail,
+          resolvedCycle,
+        };
       })
-      .filter((item): item is StudyPlanEntity => Boolean(item));
+      .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
-    return uniqueById(planCandidates);
+    const uniquePlans = (items: typeof candidates) => uniqueById(items.map((item) => item.plan));
+    const preferCycle = (items: typeof candidates) => {
+      if (!cycle) {
+        return items;
+      }
+      const cycleMatches = items.filter((item) => item.resolvedCycle === cycle);
+      return cycleMatches.length > 0 ? cycleMatches : items;
+    };
+
+    const exactCourseCodeMatches = preferCycle(
+      candidates.filter((item) => normalizeCourseCodeValue(item.course.course_code) === normalizedCourseCode),
+    );
+    if (exactCourseCodeMatches.length > 0) {
+      return uniquePlans(exactCourseCodeMatches);
+    }
+
+    const exactShortCodeMatches = preferCycle(
+      candidates.filter(
+        (item) => normalizeCourseCodeValue(item.detail?.short_code) === normalizedCourseCode,
+      ),
+    );
+    if (exactShortCodeMatches.length > 0) {
+      return uniquePlans(exactShortCodeMatches);
+    }
+
+    if (!cycle) {
+      return [];
+    }
+
+    const fuzzyMatches = candidates.filter((item) => {
+      if (item.resolvedCycle !== cycle) {
+        return false;
+      }
+      const candidateCodes = [item.detail?.short_code, item.course.course_code].filter(
+        (candidate): candidate is string => Boolean(candidate),
+      );
+      return candidateCodes.some((candidate) => courseCodeLikeMatch(candidate, normalizedCourseCode));
+    });
+
+    return uniquePlans(fuzzyMatches);
   }
 
   private resolveStudyPlan(
@@ -2452,16 +4130,28 @@ export class PlanningImportService {
         { year: plan?.year ?? null },
       );
     }
+    const directPlan = catalog.studyPlans.find((item) => item.id === value) ?? null;
+    if (directPlan) {
+      return toResolution(
+        contextualSourceValue || value,
+        directPlan.id,
+        [directPlan.year, directPlan.career, directPlan.name].filter(Boolean).join(' - ') || null,
+        'catalog',
+        { year: directPlan.year ?? null },
+      );
+    }
     const normalized = normalizeStudyPlanCode(value);
+    const normalizedName = normalizeLoose(value);
     const candidates = catalog.studyPlans.filter((item) => {
       if (academicProgramId && item.academic_program_id !== academicProgramId) {
         return false;
       }
       const year = normalizeStudyPlanCode(item.year);
-      if (!year) {
-        return false;
-      }
-      return year === normalized || year.endsWith(`-${normalized}`);
+      const name = normalizeLoose(item.name);
+      return (
+        Boolean(year) && (year === normalized || year.endsWith(`-${normalized}`)) ||
+        Boolean(normalizedName) && name === normalizedName
+      );
     });
     const unique = uniqueById(candidates);
     if (unique.length === 1) {
@@ -2482,7 +4172,7 @@ export class PlanningImportService {
         contextualSourceValue || value || courseCode,
         plan.id,
         [plan.year, plan.career, plan.name].filter(Boolean).join(' - ') || null,
-        'heuristic',
+        'catalog',
         {
           year: plan.year ?? null,
           inferred_by: 'course_code_like',
@@ -2537,7 +4227,9 @@ export class PlanningImportService {
           course: item,
           detail,
           resolvedCycle,
-          resolvedCourseCode: detail?.short_code ?? item.course_code ?? null,
+          sourceCourseCode: item.course_code ?? null,
+          shortCourseCode: detail?.short_code ?? null,
+          resolvedCourseCode: item.course_code ?? detail?.short_code ?? null,
           resolvedCourseName: detail?.name ?? item.course_name ?? null,
         };
       })
@@ -2560,24 +4252,41 @@ export class PlanningImportService {
       }
     }
     const normalizedCourseCode = normalizeCourseCodeValue(courseCode);
-    if (normalizedCourseCode) {
-      const direct = candidates.filter(
-        (item) => normalizeCourseCodeValue(item.resolvedCourseCode) === normalizedCourseCode,
-      );
-      if (direct.length === 1) {
+    const rawCourseCode = asNullableString(courseCode);
+    if (rawCourseCode) {
+      const directById = candidates.filter((item) => item.course.id === rawCourseCode);
+      if (directById.length === 1) {
         return toResolution(
           contextualSourceValue || courseCode || courseName,
-          direct[0].course.id,
-          [direct[0].resolvedCourseCode, direct[0].resolvedCourseName].filter(Boolean).join(' - ') || null,
+          directById[0].course.id,
+          [directById[0].resolvedCourseCode, directById[0].resolvedCourseName].filter(Boolean).join(' - ') || null,
           'catalog',
           {
-            course_code: direct[0].resolvedCourseCode ?? null,
-            course_name: direct[0].resolvedCourseName ?? null,
-            cycle: direct[0].resolvedCycle,
+            course_code: directById[0].resolvedCourseCode ?? null,
+            course_name: directById[0].resolvedCourseName ?? null,
+            cycle: directById[0].resolvedCycle,
           },
         );
       }
-      if (direct.length > 1) {
+    }
+    if (normalizedCourseCode) {
+      const directByCourseCode = candidates.filter(
+        (item) => normalizeCourseCodeValue(item.sourceCourseCode) === normalizedCourseCode,
+      );
+      if (directByCourseCode.length === 1) {
+        return toResolution(
+          contextualSourceValue || courseCode || courseName,
+          directByCourseCode[0].course.id,
+          [directByCourseCode[0].resolvedCourseCode, directByCourseCode[0].resolvedCourseName].filter(Boolean).join(' - ') || null,
+          'catalog',
+          {
+            course_code: directByCourseCode[0].resolvedCourseCode ?? null,
+            course_name: directByCourseCode[0].resolvedCourseName ?? null,
+            cycle: directByCourseCode[0].resolvedCycle,
+          },
+        );
+      }
+      if (directByCourseCode.length > 1) {
         issues.push({
           severity: 'BLOCKING',
           issue_code: 'AMBIGUOUS_STUDY_PLAN_COURSE',
@@ -2591,8 +4300,41 @@ export class PlanningImportService {
         return toResolution(contextualSourceValue || courseCode, null, null, 'none');
       }
 
+      const directByShortCode = candidates.filter(
+        (item) => normalizeCourseCodeValue(item.shortCourseCode) === normalizedCourseCode,
+      );
+      if (directByShortCode.length === 1) {
+        return toResolution(
+          contextualSourceValue || courseCode || courseName,
+          directByShortCode[0].course.id,
+          [directByShortCode[0].resolvedCourseCode, directByShortCode[0].resolvedCourseName]
+            .filter(Boolean)
+            .join(' - ') || null,
+          'catalog',
+          {
+            course_code: directByShortCode[0].resolvedCourseCode ?? null,
+            course_name: directByShortCode[0].resolvedCourseName ?? null,
+            cycle: directByShortCode[0].resolvedCycle,
+          },
+        );
+      }
+      if (directByShortCode.length > 1) {
+        issues.push({
+          severity: 'BLOCKING',
+          issue_code: 'AMBIGUOUS_STUDY_PLAN_COURSE',
+          field_name: 'CODIGO',
+          message: `El codigo corto del curso coincide con mas de un curso del ciclo ${cycle} en el plan de estudios.`,
+          meta_json: {
+            namespace: 'course_code',
+            source_value: contextualSourceValue || courseCode,
+          },
+        });
+        return toResolution(contextualSourceValue || courseCode, null, null, 'none');
+      }
+
       const likeMatches = candidates.filter((item) =>
-        courseCodeLikeMatch(item.resolvedCourseCode, normalizedCourseCode),
+        courseCodeLikeMatch(item.sourceCourseCode, normalizedCourseCode) ||
+        courseCodeLikeMatch(item.shortCourseCode, normalizedCourseCode),
       );
       if (likeMatches.length === 1) {
         return toResolution(
@@ -2777,10 +4519,10 @@ export class PlanningImportService {
       const building = catalog.buildings.find((item) => item.id === alias.target_id) ?? null;
       return toResolution(value, building?.id ?? null, building?.name ?? alias.target_label ?? null, building ? 'alias' : 'none');
     }
-    const normalized = normalizeLoose(value);
+    const normalizedCandidates = buildLocationCandidateLabels(value).map((item) => normalizeLoose(item));
     const candidates = catalog.buildings.filter((item) => !campusId || item.campus_id === campusId);
     const building =
-      candidates.find((item) => normalizeLoose(item.name) === normalized) ??
+      candidates.find((item) => normalizedCandidates.includes(normalizeLoose(item.name))) ??
       null;
     if (!building) {
       issues.push({
@@ -2813,20 +4555,12 @@ export class PlanningImportService {
       const classroom = catalog.classrooms.find((item) => item.id === alias.target_id) ?? null;
       return toResolution(value, classroom?.id ?? null, classroom?.name ?? alias.target_label ?? null, classroom ? 'alias' : 'none');
     }
-    const normalized = normalizeLoose(value);
-    const candidates = catalog.classrooms.filter((item) => {
-      if (campusId && item.campus_id !== campusId) {
-        return false;
-      }
-      if (buildingId && item.building_id && item.building_id !== buildingId) {
-        return false;
-      }
-      return true;
+    const classroomMatch = this.findCatalogClassroomMatch(value, catalog, {
+      campusId,
+      buildingId,
+      allowGlobalUniqueFallback: true,
     });
-    const classroom =
-      candidates.find((item) => normalizeLoose(item.code) === normalized) ??
-      candidates.find((item) => normalizeLoose(item.name) === normalized) ??
-      null;
+    const classroom = classroomMatch.classroom;
     if (!classroom) {
       issues.push({
         severity: 'WARNING',
@@ -2842,7 +4576,12 @@ export class PlanningImportService {
         },
       });
     }
-    return toResolution(value, classroom?.id ?? null, classroom?.name ?? null, classroom ? 'catalog' : 'none');
+    return toResolution(
+      value,
+      classroom?.id ?? null,
+      classroom?.name ?? null,
+      classroom ? classroomMatch.match_source : 'none',
+    );
   }
 
   private resolveSchedule(row: NormalizedImportRow, issues: PreviewIssue[]) {
@@ -2893,7 +4632,7 @@ export class PlanningImportService {
     if (scope && Object.keys(scope).length > 0) {
       return {
         semester_id: recordString(scope, 'semester_id')!,
-        vc_period_id: recordString(scope, 'vc_period_id')!,
+        vc_period_id: recordString(scope, 'vc_period_id'),
         campus_id: recordString(scope, 'campus_id')!,
         faculty_id: recordString(scope, 'faculty_id')!,
         academic_program_id: recordString(scope, 'academic_program_id')!,
@@ -2915,7 +4654,7 @@ export class PlanningImportService {
     const academicProgramId = recordString(resolution, 'academic_program_id');
     const studyPlanId = recordString(resolution, 'study_plan_id');
     const cycle = recordNumberOrNull(resolution, 'cycle');
-    if (!semesterId || !vcPeriodId || !campusId || !facultyId || !academicProgramId || !studyPlanId || !cycle) {
+    if (!semesterId || !campusId || !facultyId || !academicProgramId || !studyPlanId || !cycle) {
       return null;
     }
     return {
@@ -2951,6 +4690,7 @@ export class PlanningImportService {
       studyTypes,
       buildings,
       classrooms,
+      campusVcLocations,
       aliasMappings,
     ] = await Promise.all([
       this.semestersRepo.find({ order: { name: 'DESC' } }),
@@ -2966,17 +4706,19 @@ export class PlanningImportService {
       this.studyTypesRepo.find({ where: { is_active: true }, order: { name: 'ASC' } }),
       this.buildingsRepo.find({ order: { name: 'ASC' } }),
       this.classroomsRepo.find({ order: { name: 'ASC' } }),
+      this.campusVcLocationMappingsRepo.find({ order: { campus_id: 'ASC' } }),
       this.importAliasMappingsRepo.find({ where: { is_active: true }, order: { namespace: 'ASC', source_value: 'ASC' } }),
     ]);
+    const derivedCatalog = buildStudyPlanCatalogForImport(studyPlans, faculties, programs);
 
     return {
       semesters,
       vcPeriods,
       campuses,
-      faculties,
-      programs,
-      studyPlans,
-      studyPlanById: new Map(studyPlans.map((item) => [item.id, item] as const)),
+      faculties: derivedCatalog.faculties,
+      programs: derivedCatalog.academicPrograms,
+      studyPlans: derivedCatalog.studyPlans,
+      studyPlanById: new Map(derivedCatalog.studyPlans.map((item) => [item.id, item] as const)),
       studyPlanCourses,
       studyPlanCourseDetails,
       studyPlanCourseDetailById: new Map(
@@ -2987,6 +4729,7 @@ export class PlanningImportService {
       studyTypes,
       buildings,
       classrooms,
+      campusVcLocations,
       defaultStudyTypeId: studyTypes[0]?.id ?? null,
       aliasMap: buildAliasMap(aliasMappings),
     };
@@ -3101,6 +4844,143 @@ function buildAliasMap(rows: PlanningImportAliasMappingEntity[]) {
     aliasMap.set(namespace, namespaceMap);
   }
   return aliasMap;
+}
+
+function buildStudyPlanCatalogForImport(
+  studyPlans: StudyPlanEntity[],
+  faculties: FacultyEntity[],
+  academicPrograms: AcademicProgramEntity[],
+) {
+  if (studyPlans.length === 0) {
+    return {
+      faculties,
+      academicPrograms,
+      studyPlans,
+    };
+  }
+
+  const facultyIdByName = new Map(
+    faculties
+      .filter((item) => item.name)
+      .map((item) => [normalizeCatalogName(item.name), item.id] as const),
+  );
+  const programsByName = new Map<string, AcademicProgramEntity[]>();
+  for (const program of academicPrograms) {
+    const key = normalizeCatalogName(program.name);
+    if (!key) {
+      continue;
+    }
+    const bucket = programsByName.get(key) ?? [];
+    bucket.push(program);
+    programsByName.set(key, bucket);
+  }
+
+  const normalizedStudyPlans = studyPlans.map((plan) => {
+    const facultyName = coalesceCatalogLabel(plan.faculty);
+    const careerName = coalesceCatalogLabel(plan.career, plan.academic_program);
+    const resolvedFacultyId =
+      plan.faculty_id ??
+      (facultyName ? facultyIdByName.get(normalizeCatalogName(facultyName)) ?? null : null) ??
+      (facultyName ? buildStableCatalogId('faculty', facultyName) : null);
+    const resolvedProgramId =
+      plan.academic_program_id ??
+      resolveCatalogProgramIdForImport(
+        programsByName,
+        careerName,
+        facultyName,
+        resolvedFacultyId,
+      ) ??
+      (careerName ? buildStableCatalogId('program', facultyName, careerName) : null);
+
+    return {
+      ...plan,
+      faculty: facultyName,
+      career: careerName,
+      academic_program: careerName,
+      faculty_id: resolvedFacultyId,
+      academic_program_id: resolvedProgramId,
+    } as StudyPlanEntity;
+  });
+
+  const facultyMap = new Map<string, FacultyEntity>();
+  const academicProgramMap = new Map<string, AcademicProgramEntity>();
+
+  for (const plan of normalizedStudyPlans) {
+    if (plan.faculty && plan.faculty_id && !facultyMap.has(plan.faculty_id)) {
+      facultyMap.set(plan.faculty_id, {
+        id: plan.faculty_id,
+        code: null,
+        name: plan.faculty,
+        abbreviation: null,
+        institucional_email: null,
+        is_active: true,
+        is_valid: true,
+      } as FacultyEntity);
+    }
+    if (plan.career && plan.academic_program_id && !academicProgramMap.has(plan.academic_program_id)) {
+      academicProgramMap.set(plan.academic_program_id, {
+        id: plan.academic_program_id,
+        code: null,
+        name: plan.career,
+        faculty_id: plan.faculty_id ?? null,
+        faculty: plan.faculty ?? null,
+        graduate_profile: null,
+        general_information: null,
+        comments: null,
+        decanal_resolution: null,
+        rectoral_resolution: null,
+        is_active: true,
+        is_valid: true,
+      } as AcademicProgramEntity);
+    }
+  }
+
+  return {
+    faculties: [...facultyMap.values()].sort((a, b) => compareCatalogLabels(a.name, b.name)),
+    academicPrograms: [...academicProgramMap.values()].sort((a, b) =>
+      compareCatalogLabels(`${a.faculty ?? ''} ${a.name ?? ''}`, `${b.faculty ?? ''} ${b.name ?? ''}`),
+    ),
+    studyPlans: normalizedStudyPlans,
+  };
+}
+
+function resolveCatalogProgramIdForImport(
+  programsByName: Map<string, AcademicProgramEntity[]>,
+  careerName: string | null,
+  facultyName: string | null,
+  facultyId: string | null,
+) {
+  const normalizedCareer = normalizeCatalogName(careerName);
+  if (!normalizedCareer) {
+    return null;
+  }
+
+  const matches = programsByName.get(normalizedCareer) ?? [];
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length === 1) {
+    return matches[0].id;
+  }
+
+  if (facultyId) {
+    const byFacultyId = matches.find((item) => item.faculty_id === facultyId);
+    if (byFacultyId) {
+      return byFacultyId.id;
+    }
+  }
+
+  const normalizedFaculty = normalizeCatalogName(facultyName);
+  if (normalizedFaculty) {
+    const byFacultyName = matches.find(
+      (item) => normalizeCatalogName(item.faculty) === normalizedFaculty,
+    );
+    if (byFacultyName) {
+      return byFacultyName.id;
+    }
+  }
+
+  return matches[0].id;
 }
 
 function resolveAlias(
@@ -3243,6 +5123,34 @@ function normalizeLoose(value: string | null | undefined) {
     .toUpperCase();
 }
 
+function coalesceCatalogLabel(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    const normalized = value?.trim().replace(/\s+/g, ' ') ?? '';
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function normalizeCatalogName(value: string | null | undefined) {
+  const normalized = coalesceCatalogLabel(value);
+  if (!normalized) {
+    return '';
+  }
+  return normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+}
+
+function compareCatalogLabels(left: string | null | undefined, right: string | null | undefined) {
+  return (left ?? '').localeCompare(right ?? '', 'es', { sensitivity: 'base' });
+}
+
+function buildStableCatalogId(namespace: string, ...parts: Array<string | null | undefined>) {
+  const seed = [namespace, ...parts.map((item) => normalizeCatalogName(item)).filter(Boolean)].join('|');
+  const digest = createHash('sha1').update(seed).digest('hex').slice(0, 32);
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
+}
+
 function normalizeSourceValue(value: string | null | undefined) {
   return normalizeLoose(value);
 }
@@ -3297,6 +5205,24 @@ function extractCycleFromStudyPlanCourse(course: Pick<StudyPlanCourseEntity, 'ye
 
 function normalizeCourseCodeValue(value: string | null | undefined) {
   return normalizeLoose(value).replace(/[^0-9A-Z]/g, '');
+}
+
+function buildLocationCandidateLabels(value: string | null | undefined) {
+  const raw = `${value ?? ''}`.replace(/\s+/g, ' ').trim();
+  if (!raw) {
+    return [];
+  }
+  const candidates = new Set<string>();
+  candidates.add(raw);
+  const beforePipe = raw.split('|')[0]?.trim() ?? '';
+  if (beforePipe) {
+    candidates.add(beforePipe);
+  }
+  const withoutSuffix = raw.replace(/\s*\|\s*[A-Z0-9-]{1,12}\s*$/i, '').trim();
+  if (withoutSuffix) {
+    candidates.add(withoutSuffix);
+  }
+  return [...candidates];
 }
 
 function vcCourseCodeMatchesStudyPlanYear(
@@ -3365,13 +5291,10 @@ function requiresMappingConfirmation(namespace: string, targetId: string | null,
   }
   const normalizedNamespace = String(namespace ?? '').trim().toLowerCase();
   const normalizedMatchSource = String(matchSource ?? '').trim().toLowerCase();
-  if (normalizedMatchSource === 'alias') {
+  if (['alias', 'catalog', 'manual_value'].includes(normalizedMatchSource)) {
     return false;
   }
-  if (normalizedNamespace === 'campus') {
-    return normalizedMatchSource === 'heuristic';
-  }
-  return ['faculty_code', 'academic_program_code', 'study_plan_code'].includes(
+  return normalizedMatchSource === 'heuristic' && ['campus', 'faculty_code', 'academic_program_code', 'study_plan_code'].includes(
     normalizedNamespace,
   );
 }
@@ -3401,6 +5324,57 @@ function pushDependencyEntry(
 
   current.push(entry);
   container[key] = current;
+}
+
+function pushMappingSampleRow(
+  container: Record<string, unknown>,
+  row: PlanningImportRowEntity,
+) {
+  const sample = buildMappingSampleRow(row);
+  if (!sample) {
+    return;
+  }
+
+  const current = Array.isArray(container.sample_rows)
+    ? [...(container.sample_rows as Record<string, unknown>[])]
+    : [];
+  if (
+    current.some(
+      (item) =>
+        `${item?.course_code ?? ''}`.trim() === `${sample.course_code ?? ''}`.trim() &&
+        `${item?.course_name ?? ''}`.trim() === `${sample.course_name ?? ''}`.trim() &&
+        `${item?.section ?? ''}`.trim() === `${sample.section ?? ''}`.trim(),
+    )
+  ) {
+    return;
+  }
+
+  current.push(sample);
+  container.sample_rows = current.slice(0, 3);
+}
+
+function buildMappingSampleRow(row: PlanningImportRowEntity) {
+  const normalized = asRecord(row.normalized_json);
+  const rowNumber = row.row_number;
+  const courseCode = recordString(normalized, 'course_code_raw');
+  const courseName = recordString(normalized, 'course_name_raw');
+  const section = recordString(normalized, 'section_raw');
+  const campus = recordString(normalized, 'campus_raw');
+  const academicProgram = recordString(normalized, 'academic_program_code_raw');
+  const cycle = recordNumberOrNull(normalized, 'cycle_raw');
+  if (!rowNumber && !courseCode && !courseName && !section && !campus && !academicProgram && !cycle) {
+    return null;
+  }
+
+  return {
+    row_number: rowNumber,
+    course_code: courseCode,
+    course_name: courseName,
+    section,
+    campus,
+    academic_program: academicProgram,
+    cycle,
+  };
 }
 
 function normalizeStudyPlanCode(value: string | null | undefined) {
@@ -3457,6 +5431,32 @@ function parseSectionToken(value: string | null | undefined) {
   };
 }
 
+function parseAkademicExternalSectionCode(value: string | null | undefined) {
+  const raw = normalizeLoose(value);
+  const isCepea = raw.includes('CEPEA');
+  const withoutCepea = raw.replace(/\bCEPEA\b/g, '').trim();
+  const compact = withoutCepea.replace(/\s+/g, '');
+  const match = compact.match(/^([A-Z]+)-([A-Z]{2,})$/);
+  if (!match) {
+    return {
+      section_code: null,
+      modality_token: null,
+      location_token: null,
+      is_cepea: isCepea,
+    };
+  }
+  const prefix = match[1];
+  const locationToken = match[2];
+  const sectionCode = prefix.length > 1 ? prefix.slice(0, -1) : prefix;
+  const modalityToken = prefix.length > 1 ? prefix.slice(-1) : null;
+  return {
+    section_code: sectionCode || null,
+    modality_token: modalityToken,
+    location_token: locationToken,
+    is_cepea: isCepea,
+  };
+}
+
 function parseDayOfWeek(value: string | null | undefined) {
   const normalized = normalizeLoose(value);
   if (!normalized) {
@@ -3491,6 +5491,42 @@ function buildTimeFromParts(hourValue: string | null | undefined, minuteValue: s
     throw new Error('Hora fuera de rango.');
   }
   return `${String(Math.trunc(hour)).padStart(2, '0')}:${String(Math.trunc(minute)).padStart(2, '0')}:00`;
+}
+
+function normalizeAkademicTimeValue(value: string | null | undefined) {
+  const normalized = `${value ?? ''}`.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const meridiemMatch = normalized.match(/^(\d{1,2}):(\d{2})\s*([AP]M)$/i);
+  if (meridiemMatch) {
+    let hour = Number(meridiemMatch[1]);
+    const minute = Number(meridiemMatch[2]);
+    const meridiem = meridiemMatch[3].toUpperCase();
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) {
+      return null;
+    }
+    if (meridiem === 'AM') {
+      hour = hour === 12 ? 0 : hour;
+    } else {
+      hour = hour === 12 ? 12 : hour + 12;
+    }
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+  }
+
+  const twentyFourHourMatch = normalized.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (!twentyFourHourMatch) {
+    return null;
+  }
+
+  const hour = Number(twentyFourHourMatch[1]);
+  const minute = Number(twentyFourHourMatch[2]);
+  const second = Number(twentyFourHourMatch[3] ?? '0');
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return null;
+  }
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`;
 }
 
 function computeMinutesFromTimes(start: string, end: string) {
@@ -3582,6 +5618,60 @@ function asRecord(value: unknown) {
   return value as Record<string, unknown>;
 }
 
+function pick(row: Record<string, unknown>, ...paths: string[]) {
+  for (const path of paths) {
+    const value = getByPath(row, path);
+    if (value !== undefined && value !== null && `${value}`.trim() !== '') {
+      return value;
+    }
+  }
+  return null;
+}
+
+function getByPath(obj: Record<string, unknown>, path: string): unknown {
+  if (!path.includes('.')) {
+    return obj[path];
+  }
+  return path.split('.').reduce<unknown>((acc, key) => {
+    if (!acc || typeof acc !== 'object') {
+      return undefined;
+    }
+    return (acc as Record<string, unknown>)[key];
+  }, obj);
+}
+
+function asString(value: unknown) {
+  return `${value ?? ''}`.trim();
+}
+
+function asNullableString(value: unknown) {
+  const normalized = `${value ?? ''}`.trim();
+  return normalized ? normalized : null;
+}
+
+function asNullableInt(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
+}
+
+function asNullableNumber(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function asStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  return value.map((item) => asString(item)).filter((item) => item !== '');
+}
+
 function recordValue(value: Record<string, unknown>, key: string) {
   return value[key];
 }
@@ -3636,8 +5726,77 @@ function groupBy<T>(rows: T[], keyFactory: (row: T) => string) {
   return grouped;
 }
 
+function dedupeImportedSchedules(rows: Record<string, unknown>[]) {
+  const map = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const sourceId = recordString(row, 'source_schedule_id');
+    const signature =
+      recordString(row, 'signature') ??
+      [
+        recordString(row, 'day_of_week'),
+        recordString(row, 'start_time'),
+        recordString(row, 'end_time'),
+        recordString(row, 'session_type'),
+      ]
+        .filter(Boolean)
+        .join('|');
+    const key = sourceId || signature;
+    if (!key) {
+      continue;
+    }
+    map.set(key, row);
+  }
+  return [...map.values()];
+}
+
+function buildPreviewScheduleKey(row: Record<string, unknown>) {
+  const schedule = asRecord(recordValue(row, 'schedule'));
+  if (Object.keys(schedule).length === 0) {
+    return '';
+  }
+  const sourceId = recordString(schedule, 'source_schedule_id');
+  const signature =
+    recordString(schedule, 'signature') ??
+    [
+      recordString(schedule, 'day_of_week'),
+      recordString(schedule, 'start_time'),
+      recordString(schedule, 'end_time'),
+      recordString(schedule, 'session_type'),
+    ]
+      .filter(Boolean)
+      .join('|');
+  const key = sourceId || signature;
+  if (!key) {
+    return '';
+  }
+  return [
+    recordString(row, 'study_plan_course_id'),
+    recordString(row, 'import_section_code'),
+    recordString(row, 'import_subsection_code'),
+    key,
+  ]
+    .filter(Boolean)
+    .join('::');
+}
+
+function deduplicateRows(rows: Array<Record<string, unknown>>) {
+  const map = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const id = `${row.id ?? ''}`.trim();
+    if (!id) {
+      continue;
+    }
+    map.set(id, row);
+  }
+  return [...map.values()];
+}
+
 function uniqueById<T extends { id: string }>(rows: T[]) {
   return [...new Map(rows.map((row) => [row.id, row])).values()];
+}
+
+function uniqueIds(ids: Array<string | null | undefined>) {
+  return [...new Set(ids.filter((item): item is string => Boolean(item)))];
 }
 
 function firstNonEmpty(values: Array<string | null | undefined>) {
@@ -3667,4 +5826,29 @@ function numberValue(value: unknown, fallback = 0) {
     return parsed;
   }
   return Number(fallback) || 0;
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+) {
+  if (items.length === 0) {
+    return [] as R[];
+  }
+
+  const safeConcurrency = Math.max(1, Math.min(concurrency, items.length));
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const runners = Array.from({ length: safeConcurrency }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
 }

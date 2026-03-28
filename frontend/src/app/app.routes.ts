@@ -11,6 +11,7 @@ import { PlanningChangeLogPageComponent } from './pages/planning-change-log/plan
 import { PlanningOfferSectionsPageComponent } from './pages/planning-offer-sections/planning-offer-sections.page';
 import { PlanningImportMappingsPageComponent } from './pages/planning-import-mappings/planning-import-mappings.page';
 import { PlanningImportsPageComponent } from './pages/planning-imports/planning-imports.page';
+import { PlanningWorkspacePageComponent } from './pages/planning-workspace/planning-workspace.page';
 import { PlanningVcMatchPageComponent } from './pages/planning-vc-match/planning-vc-match.page';
 import { SecurityPageComponent } from './pages/security/security.page';
 import { SettingsPageComponent } from './pages/settings/settings.page';
@@ -23,6 +24,12 @@ export const routes: Routes = [
   {
     path: 'planning',
     component: PlanningPageComponent,
+    canActivate: [windowGuard],
+    data: { requiredWindow: 'window.planning' },
+  },
+  {
+    path: 'planning/workspace',
+    component: PlanningWorkspacePageComponent,
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.planning' },
   },

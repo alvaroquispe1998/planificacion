@@ -4,7 +4,7 @@
       <p class="eyebrow">Carga masiva</p>
       <h1>Revision previa de la carga</h1>
       <p class="subtle">
-        Sube el Excel y revisa, antes de insertar nada, que filas se guardaran, cuales no y cuales entraran con datos incompletos.
+        Trabaja primero con Akademic y usa Excel solo como contingencia. Antes de insertar nada, revisa que filas se guardaran, cuales no y cuales entraran con datos incompletos.
       </p>
     </div>
     <div class="hero-actions">
@@ -17,15 +17,76 @@
     </div>
   </header>
 
+  <section class="panel" *ngIf="!akademicOnlyView">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Fuente principal</p>
+        <h2>Desde donde quieres generar el preview</h2>
+      </div>
+    </div>
+
+    <div class="chips-row">
+      <button
+        type="button"
+        class="chip-btn"
+        [class.is-active]="sourceMode === 'AKADEMIC'"
+        (click)="setSourceMode('AKADEMIC')">
+        Akademic
+      </button>
+      <button
+        type="button"
+        class="chip-btn"
+        [class.is-active]="sourceMode === 'EXCEL'"
+        (click)="setSourceMode('EXCEL')">
+        Excel
+      </button>
+    </div>
+  </section>
+
+  <section class="panel" *ngIf="isAkademicSourceSelected">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Scope Akademic</p>
+        <h2>Selecciona el semestre a sincronizar</h2>
+      </div>
+    </div>
+
+    <div class="summary-grid">
+      <label class="field">
+        <span>Semestre Akademic</span>
+        <select *ngIf="hasSemesterOptions" [(ngModel)]="akademicForm.semester_id" [disabled]="isPreviewProcessing">
+          <option value="">
+            Selecciona un semestre
+          </option>
+          <option *ngFor="let item of importCatalog.semesters || []" [value]="item.id">
+            {{ item.name }}
+          </option>
+        </select>
+        <div *ngIf="!hasSemesterOptions" class="field-loading">
+          {{ semesterOptionsLoading && !semesterOptionsLoaded ? 'Cargando semestres...' : 'No hay semestres disponibles todavia.' }}
+        </div>
+      </label>
+    </div>
+    <p class="subtle">
+      La sincronizacion desde Akademic se ejecuta por semestre. El resto del alcance se resolvera automaticamente desde la data descargada.
+    </p>
+  </section>
+
   <section class="panel upload-panel">
     <div class="upload-copy">
-      <strong>Archivo fuente</strong>
-      <span>{{ selectedFile?.name || batch?.file_name || 'Selecciona un Excel para generar la revision previa' }}</span>
+      <strong>{{ isAkademicSourceSelected ? 'Fuente de datos' : 'Archivo fuente' }}</strong>
+      <span>
+        {{
+          isAkademicSourceSelected
+            ? akademicSourceDisplay
+            : (selectedFile?.name || batch?.file_name || 'Selecciona un Excel para generar la revision previa')
+        }}
+      </span>
     </div>
     <div class="upload-actions">
-      <input type="file" accept=".xlsx,.xls" (change)="onFileChange($event)" />
+      <input *ngIf="!isAkademicSourceSelected" type="file" accept=".xlsx,.xls" (change)="onFileChange($event)" />
       <button class="btn btn-primary btn-sm" type="button" (click)="uploadPreview()" [disabled]="isPreviewProcessing">
-        {{ isPreviewProcessing ? 'Procesando...' : 'Generar revision previa' }}
+        {{ isPreviewProcessing ? 'Procesando...' : ('Generar revision previa desde ' + sourceModeLabel) }}
       </button>
     </div>
   </section>
@@ -44,8 +105,17 @@
     </div>
 
     <p class="subtle progress-copy">
-      El sistema esta leyendo el Excel, validando filas y revisando si ya existe informacion en los grupos detectados.
+      {{
+        isAkademicSourceSelected
+          ? 'El sistema esta consultando Akademic, armando la estructura equivalente y revisando si ya existe informacion en los scopes detectados.'
+          : 'El sistema esta leyendo el Excel, validando filas y revisando si ya existe informacion en los grupos detectados.'
+      }}
     </p>
+
+    <div class="progress-meta" *ngIf="previewDurationLabel">
+      <span>Tiempo transcurrido</span>
+      <strong>{{ previewDurationLabel }}</strong>
+    </div>
   </section>
 
   <p *ngIf="message" class="flash success">{{ message }}</p>
@@ -72,6 +142,17 @@
         <span>Filas con campos vacios</span>
         <strong>{{ current.summary?.optional_null_row_count || 0 }}</strong>
         <small>La estructura si se guardara</small>
+      </article>
+      <article class="stat-card" *ngIf="previewDurationLabel">
+        <span>Tiempo de revision</span>
+        <strong>{{ previewDurationLabel }}</strong>
+        <small>
+          {{
+            current.status === 'PREVIEW_FAILED'
+              ? 'Tiempo total hasta que el preview fallo.'
+              : 'Tiempo total que tomo generar esta revision.'
+          }}
+        </small>
       </article>
     </section>
 
@@ -131,6 +212,9 @@
       <p class="subtle execute-help">
         {{ executeHelperText }}
       </p>
+      <p class="subtle execution-timing-help" *ngIf="current.report && executionTimingHelperText">
+        {{ executionTimingHelperText }}
+      </p>
 
       <div class="summary-grid">
         <article class="summary-card">
@@ -141,7 +225,12 @@
           <span>Segun las decisiones actuales</span>
           <strong>{{ countsLabel(current.summary?.effective_create_counts) }}</strong>
         </article>
-        <article class="summary-card success-tone" *ngIf="current.report">
+        <article class="summary-card" *ngIf="current.report && executionDurationLabel">
+          <span>{{ current.status === 'EXECUTING' ? 'Tiempo transcurrido' : 'Tiempo de ejecucion' }}</span>
+          <strong>{{ executionDurationLabel }}</strong>
+          <small>{{ executionTimingHelperText }}</small>
+        </article>
+        <article class="summary-card success-tone" *ngIf="current.report && current.status === 'EXECUTED'">
           <span>Ultima ejecucion</span>
           <strong>{{ executionReportSummary }}</strong>
           <small>Esta revision ya fue aplicada en la plataforma.</small>
@@ -213,6 +302,7 @@
             <tr>
               <th>Dato por resolver</th>
               <th>Valor que viene en el Excel</th>
+              <th>Concatenado</th>
               <th>Impacto</th>
               <th></th>
             </tr>
@@ -220,7 +310,20 @@
           <tbody>
             <tr *ngFor="let item of current.unresolved_mappings">
               <td>{{ namespaceLabel(item.namespace) }}</td>
-              <td>{{ mappingSourceLabel(item) }}</td>
+              <td>
+                <div>{{ mappingSourceLabel(item) }}</div>
+                <div *ngIf="mappingAffectedRowsLabel(item)" class="muted mapping-examples">
+                  {{ mappingAffectedRowsLabel(item) }}
+                </div>
+              </td>
+              <td>
+                <div *ngIf="rowPreviewContextLabel(item) || mappingAffectedContextLabel(item); else emptyPendingContext" class="muted mapping-examples">
+                  {{ mappingAffectedContextLabel(item) || rowPreviewContextLabel(item) }}
+                </div>
+                <ng-template #emptyPendingContext>
+                  <span class="muted">Sin contexto</span>
+                </ng-template>
+              </td>
               <td>
                 <ng-container *ngIf="item.requires_confirmation; else missingMappingImpact">
                   {{ item.row_count || 0 }} filas | el sistema encontro un posible destino y necesitas confirmarlo antes de cargar
@@ -273,7 +376,8 @@
             <tr>
               <th>Fila</th>
               <th>Curso</th>
-              <th>Seccion</th>
+              <th>Seccion / Grupo</th>
+              <th>Concatenado</th>
               <th>Observaciones</th>
             </tr>
           </thead>
@@ -284,7 +388,8 @@
                 <strong>{{ item.course_code || 'Sin codigo' }}</strong>
                 <div class="muted">{{ item.course_name || 'Sin nombre' }}</div>
               </td>
-              <td>{{ item.section || 'Sin seccion' }} -> {{ item.import_subsection_code || 'Sin subseccion' }}</td>
+              <td>{{ item.section || 'Sin seccion' }} -> {{ item.import_subsection_code || 'Sin grupo' }}</td>
+              <td>{{ rowPreviewContextLabel(item) || 'Sin contexto' }}</td>
               <td>
                 <div class="issue-list">
                   <span *ngFor="let issue of item.issues" class="issue-line">
@@ -298,6 +403,52 @@
       </div>
     </section>
   </ng-container>
+
+  <section class="modal-backdrop execution-backdrop" *ngIf="showExecutionProgressModal">
+    <article class="modal-card execution-modal-card">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Ejecutando carga</p>
+          <h2>{{ executionProgressMessage }}</h2>
+        </div>
+        <strong class="progress-value">{{ executionProgressPercent }}%</strong>
+      </div>
+
+      <div class="progress-track" aria-hidden="true">
+        <div class="progress-fill" [style.width.%]="executionProgressPercent"></div>
+      </div>
+
+      <p class="subtle progress-copy">
+        {{
+          executionCurrentScopeLabel
+            ? ('Grupo actual: ' + executionCurrentScopeLabel)
+            : 'El sistema esta aplicando en la plataforma todo lo aprobado en esta revision.'
+        }}
+      </p>
+
+      <div class="summary-grid execution-modal-grid">
+        <article class="summary-card">
+          <span>Tiempo transcurrido</span>
+          <strong>{{ executionDurationLabel || '0 s' }}</strong>
+          <small>
+            {{ executionTimingHelperText || 'La pantalla se actualiza automaticamente hasta que la carga termine.' }}
+          </small>
+        </article>
+
+        <article class="summary-card">
+          <span>Grupos procesados</span>
+          <strong>{{ executionProcessedScopeSummary }}</strong>
+          <small>{{ executionScopeOutcomeSummary }}</small>
+        </article>
+
+        <article class="summary-card">
+          <span>Estructura creada hasta ahora</span>
+          <strong>{{ executionCreatedCountsSummary }}</strong>
+          <small>El porcentaje avanza conforme se completa cada grupo detectado.</small>
+        </article>
+      </div>
+    </article>
+  </section>
 
   <section class="modal-backdrop" *ngIf="aliasModalOpen">
     <article class="modal-card">
@@ -330,6 +481,9 @@
             [ngModel]="aliasSourceValueDisplay"
             (ngModelChange)="aliasForm.source_value = $event"
             [disabled]="aliasSourceValueLocked" />
+          <small *ngIf="aliasSourceHelperText" class="field-helper">
+            {{ aliasSourceHelperText }}
+          </small>
         </label>
 
         <label class="field modal-span-2">

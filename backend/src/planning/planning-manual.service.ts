@@ -67,6 +67,8 @@ type ConflictSeverity = (typeof ConflictSeverityValues)[number];
 type DayOfWeek = (typeof DayOfWeekValues)[number];
 type PlanningVcLocationCode = (typeof PlanningVcLocationCodeValues)[number];
 
+const PLANNING_SHIFT_OPTIONS = ['DIURNO', 'MANANA', 'TARDE', 'NOCHE', 'NOCTURNO', 'TARDE/NOCHE'] as const;
+
 type CourseCandidateFilters = {
   semester_id?: string;
   vc_period_id?: string;
@@ -266,6 +268,7 @@ export class PlanningManualService {
       plan_rules: rules,
       study_types: studyTypes,
       course_modalities: modalities,
+      shift_options: PLANNING_SHIFT_OPTIONS.map((value) => ({ id: value, label: value })),
       vc_periods: vcPeriods,
       vc_faculties: vcFaculties,
       vc_academic_programs: vcAcademicPrograms,
@@ -1054,6 +1057,53 @@ export class PlanningManualService {
     return this.enrichOffers(offers);
   }
 
+  async listExpandedOffers(
+    semesterId?: string,
+    vcPeriodId?: string,
+    campusId?: string,
+    facultyId?: string,
+    academicProgramId?: string,
+    cycle?: number,
+    studyPlanId?: string,
+  ) {
+    const offers = await this.offersRepo.find({
+      where: {
+        ...(semesterId ? { semester_id: semesterId } : {}),
+        ...(vcPeriodId ? { vc_period_id: vcPeriodId } : {}),
+        ...(campusId ? { campus_id: campusId } : {}),
+        ...(facultyId ? { faculty_id: facultyId } : {}),
+        ...(academicProgramId ? { academic_program_id: academicProgramId } : {}),
+        ...(cycle ? { cycle } : {}),
+        ...(studyPlanId ? { study_plan_id: studyPlanId } : {}),
+      },
+      order: { updated_at: 'DESC', course_name: 'ASC' },
+    });
+    if (offers.length === 0) {
+      return [];
+    }
+
+    const context = await this.buildContext(offers.map((item) => item.id));
+    const [semesters, campuses, programs, studyPlans] = await Promise.all([
+      this.findManyByIds(this.semestersRepo, uniqueIds(offers.map((item) => item.semester_id))),
+      this.findManyByIds(this.campusesRepo, uniqueIds(offers.map((item) => item.campus_id))),
+      this.findManyByIds(this.programsRepo, uniqueIds(offers.map((item) => item.academic_program_id))),
+      this.findManyByIds(this.studyPlansRepo, uniqueIds(offers.map((item) => item.study_plan_id))),
+    ]);
+    const semesterMap = mapById(semesters);
+    const campusMap = mapById(campuses);
+    const programMap = mapById(programs);
+    const studyPlanMap = mapById(studyPlans);
+
+    return offers.map((offer) => ({
+      ...this.buildOfferDetail(offer, context),
+      semester: semesterMap.get(offer.semester_id) ?? null,
+      campus: campusMap.get(offer.campus_id) ?? null,
+      academic_program: programMap.get(offer.academic_program_id ?? '') ?? null,
+      study_plan: studyPlanMap.get(offer.study_plan_id) ?? null,
+      change_log: [],
+    }));
+  }
+
   async getOffer(id: string) {
     const offer = await this.requireEntity(this.offersRepo, id, 'planning_offer');
     const context = await this.buildContext([offer.id]);
@@ -1129,6 +1179,9 @@ export class PlanningManualService {
         id: dto.id ?? newId(),
         planning_offer_id: offerId,
         code: sectionCode,
+        external_code: emptyToNull(dto.external_code) ?? null,
+        source_section_id: null,
+        source_payload_json: null,
         teacher_id: teacherId,
         course_modality_id: modalityId,
         projected_vacancies: projectedVacancies,
@@ -1146,7 +1199,7 @@ export class PlanningManualService {
       const savedSection = await manager.save(PlanningSectionEntity, section);
 
       const subsections = Array.from({ length: subsectionCount }, (_, index) => {
-        const subsectionCode = `${sectionCode}${index}`;
+        const subsectionCode = index === 0 ? sectionCode : `${sectionCode}${index}`;
         const kind = resolveGeneratedSubsectionKind(offer.course_type, subsectionCount, index);
         const assigned = resolveAssignedHours(kind, offer);
         return manager.create(PlanningSubsectionEntity, {
@@ -1233,14 +1286,30 @@ export class PlanningManualService {
     const [teachers, modalities, buildings, classrooms, vcSections, campusVcLocations] = await Promise.all([
       this.findManyByIds(
         this.teachersRepo,
-        uniqueIds([section.teacher_id, ...subsections.map((item) => item.responsible_teacher_id)]),
+        uniqueIds([
+          section.teacher_id,
+          ...subsections.map((item) => item.responsible_teacher_id),
+          ...schedules.map((item) => item.teacher_id),
+        ]),
       ),
       this.findManyByIds(
         this.courseModalitiesRepo,
         uniqueIds([section.course_modality_id, ...subsections.map((item) => item.course_modality_id)]),
       ),
-      this.findManyByIds(this.buildingsRepo, uniqueIds(subsections.map((item) => item.building_id))),
-      this.findManyByIds(this.classroomsRepo, uniqueIds(subsections.map((item) => item.classroom_id))),
+      this.findManyByIds(
+        this.buildingsRepo,
+        uniqueIds([
+          ...subsections.map((item) => item.building_id),
+          ...schedules.map((item) => item.building_id),
+        ]),
+      ),
+      this.findManyByIds(
+        this.classroomsRepo,
+        uniqueIds([
+          ...subsections.map((item) => item.classroom_id),
+          ...schedules.map((item) => item.classroom_id),
+        ]),
+      ),
       this.findManyByIds(this.vcSectionsRepo, uniqueIds(subsections.map((item) => item.vc_section_id))),
       this.findManyByField(this.campusVcLocationMappingsRepo, 'campus_id', [offer.campus_id]),
     ]);
@@ -1297,6 +1366,8 @@ export class PlanningManualService {
       ...current,
       ...dto,
       code: nextCode,
+      external_code:
+        dto.external_code !== undefined ? emptyToNull(dto.external_code) : current.external_code,
       teacher_id:
         dto.teacher_id !== undefined ? emptyToNull(dto.teacher_id) : current.teacher_id,
       projected_vacancies:
@@ -1531,8 +1602,7 @@ export class PlanningManualService {
       'planning_section',
     );
     const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
-    const [schedules, conflicts, teachers, modalities, buildings, classrooms, vcSections, campusVcLocations] =
-      await Promise.all([
+    const [schedules, conflicts] = await Promise.all([
       this.schedulesRepo.find({
         where: { planning_subsection_id: id },
         order: { day_of_week: 'ASC', start_time: 'ASC' },
@@ -1541,10 +1611,17 @@ export class PlanningManualService {
         where: { planning_subsection_id: id },
         order: { detected_at: 'DESC' },
       }),
-      this.findManyByIds(this.teachersRepo, uniqueIds([subsection.responsible_teacher_id, section.teacher_id])),
+    ]);
+    const [teachers, modalities, buildings, classrooms, vcSections, campusVcLocations] =
+      await Promise.all([
+      this.findManyByIds(this.teachersRepo, uniqueIds([
+        subsection.responsible_teacher_id,
+        section.teacher_id,
+        ...schedules.map((item) => item.teacher_id),
+      ])),
       this.findManyByIds(this.courseModalitiesRepo, uniqueIds([subsection.course_modality_id])),
-      this.findManyByIds(this.buildingsRepo, uniqueIds([subsection.building_id])),
-      this.findManyByIds(this.classroomsRepo, uniqueIds([subsection.classroom_id])),
+      this.findManyByIds(this.buildingsRepo, uniqueIds([subsection.building_id, ...schedules.map((item) => item.building_id)])),
+      this.findManyByIds(this.classroomsRepo, uniqueIds([subsection.classroom_id, ...schedules.map((item) => item.classroom_id)])),
       this.findManyByIds(this.vcSectionsRepo, uniqueIds([subsection.vc_section_id])),
       this.findManyByField(this.campusVcLocationMappingsRepo, 'campus_id', [offer.campus_id]),
     ]);
@@ -1682,12 +1759,16 @@ export class PlanningManualService {
     );
     const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
     await this.assertOfferPlanEditable(offer);
-    const existingSchedules = await this.schedulesRepo.count({
-      where: { planning_subsection_id: subsectionId },
-    });
-    if (existingSchedules > 0) {
-      throw new BadRequestException('Solo se permite un horario por subseccion.');
-    }
+    const classroomId = emptyToNull(dto.classroom_id);
+    const buildingId = emptyToNull(dto.building_id);
+    const classroom = classroomId
+      ? await this.classroomsRepo.findOne({ where: { id: classroomId } })
+      : null;
+    await this.validateSubsectionLocationForOffer(
+      offer,
+      classroom?.building_id ?? buildingId ?? subsection.building_id ?? null,
+      classroomId,
+    );
     const now = new Date();
     const minutes = computeMinutesFromTimes(dto.start_time, dto.end_time);
     const schedule = this.schedulesRepo.create({
@@ -1696,8 +1777,16 @@ export class PlanningManualService {
       day_of_week: dto.day_of_week,
       start_time: dto.start_time,
       end_time: dto.end_time,
+      session_type: dto.session_type ?? 'OTHER',
+      source_session_type_code: emptyToNull(dto.source_session_type_code),
+      teacher_id: emptyToNull(dto.teacher_id),
+      building_id: buildingId ?? classroom?.building_id ?? null,
+      classroom_id: classroomId,
+      source_schedule_id: null,
+      source_payload_json: null,
       duration_minutes: minutes,
-      academic_hours: roundToTwo(minutes / 50),
+      academic_hours:
+        dto.academic_hours !== undefined ? roundToTwo(dto.academic_hours) : roundToTwo(minutes / 50),
       created_at: now,
       updated_at: now,
     });
@@ -1728,13 +1817,6 @@ export class PlanningManualService {
     const start = dto.start_time ?? current.start_time;
     const end = dto.end_time ?? current.end_time;
     const minutes = computeMinutesFromTimes(start, end);
-    const next = this.schedulesRepo.create({
-      ...current,
-      ...dto,
-      duration_minutes: minutes,
-      academic_hours: roundToTwo(minutes / 50),
-      updated_at: new Date(),
-    });
     const subsection = await this.requireEntity(
       this.subsectionsRepo,
       current.planning_subsection_id,
@@ -1747,6 +1829,36 @@ export class PlanningManualService {
     );
     const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
     await this.assertOfferPlanEditable(offer);
+    const classroomId =
+      dto.classroom_id !== undefined ? emptyToNull(dto.classroom_id) : current.classroom_id;
+    const classroom = classroomId
+      ? await this.classroomsRepo.findOne({ where: { id: classroomId } })
+      : null;
+    const buildingId =
+      dto.building_id !== undefined
+        ? emptyToNull(dto.building_id)
+        : classroom?.building_id ?? current.building_id;
+    await this.validateSubsectionLocationForOffer(
+      offer,
+      classroom?.building_id ?? buildingId ?? subsection.building_id ?? null,
+      classroomId,
+    );
+    const next = this.schedulesRepo.create({
+      ...current,
+      ...dto,
+      classroom_id: classroomId,
+      building_id: classroom?.building_id ?? buildingId ?? null,
+      teacher_id:
+        dto.teacher_id !== undefined ? emptyToNull(dto.teacher_id) : current.teacher_id,
+      source_session_type_code:
+        dto.source_session_type_code !== undefined
+          ? emptyToNull(dto.source_session_type_code)
+          : current.source_session_type_code,
+      duration_minutes: minutes,
+      academic_hours:
+        dto.academic_hours !== undefined ? roundToTwo(dto.academic_hours) : roundToTwo(minutes / 50),
+      updated_at: new Date(),
+    });
     await this.schedulesRepo.save(next);
     const saved = await this.requireEntity(this.schedulesRepo, id, 'planning_subsection_schedule');
     await this.logChange(
@@ -2699,6 +2811,7 @@ export class PlanningManualService {
         uniqueIds([
           ...sections.map((item) => item.teacher_id),
           ...subsections.map((item) => item.responsible_teacher_id),
+          ...schedules.map((item) => item.teacher_id),
         ]),
       ),
       this.findManyByIds(
@@ -2707,11 +2820,17 @@ export class PlanningManualService {
       ),
       this.findManyByIds(
         this.buildingsRepo,
-        uniqueIds(subsections.map((item) => item.building_id)),
+        uniqueIds([
+          ...subsections.map((item) => item.building_id),
+          ...schedules.map((item) => item.building_id),
+        ]),
       ),
       this.findManyByIds(
         this.classroomsRepo,
-        uniqueIds(subsections.map((item) => item.classroom_id)),
+        uniqueIds([
+          ...subsections.map((item) => item.classroom_id),
+          ...schedules.map((item) => item.classroom_id),
+        ]),
       ),
       this.findManyByIds(this.vcPeriodsRepo, uniqueIds(offers.map((item) => item.vc_period_id))),
       this.findManyByIds(this.vcFacultiesRepo, uniqueIds(offers.map((item) => item.vc_faculty_id))),
@@ -2881,10 +3000,11 @@ export class PlanningManualService {
       }
       subsectionCount += sectionSubsections.length;
       for (const subsection of sectionSubsections) {
+        const subsectionSchedules = schedulesBySubsectionId.get(subsection.id) ?? [];
         if (
           this.subsectionHasRequiredConfiguration(
             subsection,
-            (schedulesBySubsectionId.get(subsection.id) ?? []).length,
+            subsectionSchedules,
           )
         ) {
           readySubsectionCount += 1;
@@ -2902,13 +3022,17 @@ export class PlanningManualService {
 
   private subsectionHasRequiredConfiguration(
     subsection: PlanningSubsectionEntity,
-    scheduleCount: number,
+    schedules: PlanningSubsectionScheduleEntity[],
   ) {
+    const effectiveTeacherIds = uniqueIds([
+      subsection.responsible_teacher_id,
+      ...schedules.map((item) => item.teacher_id),
+    ]);
     return Boolean(
-      subsection.responsible_teacher_id &&
+      effectiveTeacherIds.length > 0 &&
         subsection.shift &&
         subsection.course_modality_id &&
-        scheduleCount > 0,
+        schedules.length > 0,
     );
   }
 
@@ -2967,18 +3091,35 @@ export class PlanningManualService {
     const buildingMap = mapById(input.buildings);
     const classroomMap = mapById(input.classrooms);
     const ownSchedules = input.schedules.filter((item) => item.planning_subsection_id === subsection.id);
+    const scheduleTeacherIds = uniqueIds(ownSchedules.map((item) => item.teacher_id));
+    const scheduleBuildingIds = uniqueIds(ownSchedules.map((item) => item.building_id));
+    const scheduleClassroomIds = uniqueIds(ownSchedules.map((item) => item.classroom_id));
+    const effectiveTeacherId =
+      scheduleTeacherIds.length === 1 ? scheduleTeacherIds[0] : subsection.responsible_teacher_id;
+    const effectiveBuildingId =
+      scheduleBuildingIds.length === 1 ? scheduleBuildingIds[0] : subsection.building_id;
+    const effectiveClassroomId =
+      scheduleClassroomIds.length === 1 ? scheduleClassroomIds[0] : subsection.classroom_id;
     return {
       ...subsection,
       section: input.section ?? null,
       offer: input.offer ?? null,
-      responsible_teacher: teacherMap.get(subsection.responsible_teacher_id ?? '') ?? null,
+      responsible_teacher_id: effectiveTeacherId ?? null,
+      building_id: effectiveBuildingId ?? null,
+      classroom_id: effectiveClassroomId ?? null,
+      responsible_teacher: teacherMap.get(effectiveTeacherId ?? '') ?? null,
       modality: modalityMap.get(subsection.course_modality_id ?? '') ?? null,
-      building: buildingMap.get(subsection.building_id ?? '') ?? null,
-      classroom: classroomMap.get(subsection.classroom_id ?? '') ?? null,
+      building: buildingMap.get(effectiveBuildingId ?? '') ?? null,
+      classroom: classroomMap.get(effectiveClassroomId ?? '') ?? null,
       vc_section: input.vcSection ?? null,
       expected_vc_section_name: input.expectedVcSectionName ?? null,
       vc_match_status: resolveVcMatchStatus(subsection.vc_section_id, input.expectedVcSectionName, input.vcSection),
-      schedules: ownSchedules,
+      schedules: ownSchedules.map((schedule) => ({
+        ...schedule,
+        teacher: teacherMap.get(schedule.teacher_id ?? '') ?? null,
+        building: buildingMap.get(schedule.building_id ?? '') ?? null,
+        classroom: classroomMap.get(schedule.classroom_id ?? '') ?? null,
+      })),
       conflicts: input.conflicts.filter((item) => item.planning_subsection_id === subsection.id),
     };
   }
@@ -3348,7 +3489,7 @@ export class PlanningManualService {
     });
     const existing = new Set(subsections.map((item) => item.code));
     let counter = 0;
-    let candidate = `${sectionCode}${counter}`;
+    let candidate = sectionCode;
     while (existing.has(candidate)) {
       counter += 1;
       candidate = `${sectionCode}${counter}`;
@@ -3483,10 +3624,9 @@ export class PlanningManualService {
           );
         }
 
-        if (
-          subsectionA.responsible_teacher_id &&
-          subsectionA.responsible_teacher_id === subsectionB.responsible_teacher_id
-        ) {
+        const teacherA = a.teacher_id ?? subsectionA.responsible_teacher_id;
+        const teacherB = b.teacher_id ?? subsectionB.responsible_teacher_id;
+        if (teacherA && teacherA === teacherB) {
           conflicts.push(
             this.newConflict(
               'TEACHER_OVERLAP',
@@ -3498,7 +3638,7 @@ export class PlanningManualService {
               b.id,
               overlapMinutes,
               now,
-              subsectionA.responsible_teacher_id,
+              teacherA,
               undefined,
               {
                 other_offer_id: offerB.id,
@@ -3516,7 +3656,7 @@ export class PlanningManualService {
               b.id,
               overlapMinutes,
               now,
-              subsectionB.responsible_teacher_id,
+              teacherB,
               undefined,
               {
                 other_offer_id: offerA.id,
@@ -3527,7 +3667,9 @@ export class PlanningManualService {
           );
         }
 
-        if (subsectionA.classroom_id && subsectionA.classroom_id === subsectionB.classroom_id) {
+        const classroomA = a.classroom_id ?? subsectionA.classroom_id;
+        const classroomB = b.classroom_id ?? subsectionB.classroom_id;
+        if (classroomA && classroomA === classroomB) {
           conflicts.push(
             this.newConflict(
               'CLASSROOM_OVERLAP',
@@ -3540,7 +3682,7 @@ export class PlanningManualService {
               overlapMinutes,
               now,
               undefined,
-              subsectionA.classroom_id,
+              classroomA,
               {
                 other_offer_id: offerB.id,
                 other_section_id: sectionB.id,
@@ -3558,7 +3700,7 @@ export class PlanningManualService {
               overlapMinutes,
               now,
               undefined,
-              subsectionB.classroom_id,
+              classroomB,
               {
                 other_offer_id: offerA.id,
                 other_section_id: sectionA.id,
@@ -3877,6 +4019,10 @@ export class PlanningManualService {
       day_of_week: schedule.day_of_week,
       start_time: schedule.start_time,
       end_time: schedule.end_time,
+      session_type: schedule.session_type,
+      teacher_id: schedule.teacher_id ?? null,
+      building_id: schedule.building_id ?? null,
+      classroom_id: schedule.classroom_id ?? null,
     };
   }
 

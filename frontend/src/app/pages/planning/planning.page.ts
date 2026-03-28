@@ -175,6 +175,12 @@ export class PlanningPageComponent implements OnInit {
     });
   }
 
+  openWorkspace() {
+    this.router.navigate(['/planning/workspace'], {
+      queryParams: this.summaryQueryParams(),
+    });
+  }
+
   openCycleDetail(row: any) {
     this.router.navigate(['/planning/cycle-editor'], {
       queryParams: {
