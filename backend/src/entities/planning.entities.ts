@@ -51,6 +51,7 @@ export const PlanningImportBatchStatusValues = [
   'PREVIEW_PROCESSING',
   'PREVIEW_READY',
   'PREVIEW_FAILED',
+  'EXECUTING',
   'EXECUTED',
   'FAILED',
 ] as const;
@@ -60,6 +61,9 @@ export const PlanningImportScopeDecisionValues = [
   'REPLACE_SCOPE',
   'SKIP_SCOPE',
 ] as const;
+export const PlanningImportSourceKindValues = ['EXCEL', 'AKADEMIC'] as const;
+export const PlanningSourceSystemValues = ['MANUAL', 'EXCEL', 'AKADEMIC'] as const;
+export const PlanningSessionTypeValues = ['THEORY', 'PRACTICE', 'LAB', 'OTHER'] as const;
 
 @Entity({ name: 'class_offerings' })
 export class ClassOfferingEntity {
@@ -451,6 +455,21 @@ export class PlanningOfferEntity {
   @Column({ type: 'varchar', length: 30 })
   course_type!: string;
 
+  @Column({ type: 'enum', enum: PlanningSourceSystemValues, default: 'MANUAL' })
+  source_system!: (typeof PlanningSourceSystemValues)[number];
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  source_course_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  source_term_id!: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  last_synced_at!: Date | null;
+
+  @Column({ type: 'json', nullable: true })
+  source_payload_json!: Record<string, unknown> | null;
+
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   theoretical_hours!: number;
 
@@ -472,6 +491,7 @@ export class PlanningOfferEntity {
 
 @Entity({ name: 'planning_sections' })
 @Index(['planning_offer_id', 'code'], { unique: true })
+@Index(['source_section_id'])
 export class PlanningSectionEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;
@@ -481,6 +501,15 @@ export class PlanningSectionEntity {
 
   @Column({ type: 'varchar', length: 20 })
   code!: string;
+
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  external_code!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  source_section_id!: string | null;
+
+  @Column({ type: 'json', nullable: true })
+  source_payload_json!: Record<string, unknown> | null;
 
   @Column({ type: 'varchar', length: 36, nullable: true })
   teacher_id!: string | null;
@@ -594,6 +623,7 @@ export class PlanningSubsectionEntity {
 
 @Entity({ name: 'planning_subsection_schedules' })
 @Index(['planning_subsection_id', 'day_of_week'])
+@Index(['source_schedule_id'])
 export class PlanningSubsectionScheduleEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;
@@ -609,6 +639,27 @@ export class PlanningSubsectionScheduleEntity {
 
   @Column({ type: 'time' })
   end_time!: string;
+
+  @Column({ type: 'enum', enum: PlanningSessionTypeValues, default: 'OTHER' })
+  session_type!: (typeof PlanningSessionTypeValues)[number];
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  source_session_type_code!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  teacher_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  building_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  classroom_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  source_schedule_id!: string | null;
+
+  @Column({ type: 'json', nullable: true })
+  source_payload_json!: Record<string, unknown> | null;
 
   @Column({ type: 'int' })
   duration_minutes!: number;
@@ -739,6 +790,9 @@ export class PlanningImportBatchEntity {
   @Column({ type: 'varchar', length: 255 })
   file_name!: string;
 
+  @Column({ type: 'enum', enum: PlanningImportSourceKindValues, default: 'EXCEL' })
+  source_kind!: (typeof PlanningImportSourceKindValues)[number];
+
   @Column({ type: 'varchar', length: 120, nullable: true })
   sheet_name!: string | null;
 
@@ -768,6 +822,9 @@ export class PlanningImportBatchEntity {
 
   @Column({ type: 'json', nullable: true })
   execution_summary_json!: Record<string, unknown> | null;
+
+  @Column({ type: 'json', nullable: true })
+  source_scope_json!: Record<string, unknown> | null;
 
   @Column({ type: 'varchar', length: 300, nullable: true })
   error_message!: string | null;

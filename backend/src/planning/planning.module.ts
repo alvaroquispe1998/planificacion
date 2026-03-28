@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { SettingsModule } from '../settings/settings.module';
 import {
   AcademicProgramEntity,
   BuildingEntity,
@@ -54,6 +55,7 @@ import { PlanningService } from './planning.service';
 @Module({
   imports: [
     AuthModule,
+    SettingsModule,
     TypeOrmModule.forFeature([
       ClassOfferingEntity,
       ClassGroupEntity,

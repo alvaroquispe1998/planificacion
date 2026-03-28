@@ -1,40 +1,54 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ZoomUserEntity } from '../entities/audit.entities';
+import {
+    AcademicProgramEntity,
+    CampusEntity,
+    ExternalSourceEntity,
+    FacultyEntity,
+    TeacherEntity,
+} from '../entities/catalog-sync.entities';
+import {
+    CourseModalityEntity,
+    PlanningOfferEntity,
+    PlanningSectionEntity,
+    PlanningSubsectionEntity,
+    PlanningSubsectionScheduleEntity,
+} from '../entities/planning.entities';
+import { SettingsModule } from '../settings/settings.module';
 import { VideoconferenceController } from './videoconference.controller';
 import { VideoconferenceService } from './videoconference.service';
 import {
-    VideoconferenceEntity,
-    VcPeriodEntity,
-    VcFacultyEntity,
-    VcAcademicProgramEntity,
-    VcCourseEntity,
     VcSectionEntity,
+    VideoconferenceZoomPoolUserEntity,
+    PlanningSubsectionVideoconferenceEntity,
+    ZoomConfigEntity,
 } from './videoconference.entity';
-import {
-    ClassMeetingEntity,
-    ClassGroupEntity,
-    ClassOfferingEntity,
-} from '../entities/planning.entities';
-import {
-    ClassroomSectionScheduleEntity,
-} from '../entities/catalog-sync.entities';
+import { ZoomSettingsController } from './zoom-settings.controller';
+import { ZoomAccountService } from './zoom-account.service';
 
 @Module({
     imports: [
+        SettingsModule,
         TypeOrmModule.forFeature([
-            VideoconferenceEntity,
-            VcPeriodEntity,
-            VcFacultyEntity,
-            VcAcademicProgramEntity,
-            VcCourseEntity,
             VcSectionEntity,
-            ClassroomSectionScheduleEntity,
-            ClassMeetingEntity,
-            ClassGroupEntity,
-            ClassOfferingEntity,
+            ZoomConfigEntity,
+            VideoconferenceZoomPoolUserEntity,
+            PlanningSubsectionVideoconferenceEntity,
+            ZoomUserEntity,
+            ExternalSourceEntity,
+            CampusEntity,
+            FacultyEntity,
+            AcademicProgramEntity,
+            TeacherEntity,
+            CourseModalityEntity,
+            PlanningOfferEntity,
+            PlanningSectionEntity,
+            PlanningSubsectionEntity,
+            PlanningSubsectionScheduleEntity,
         ]),
     ],
-    controllers: [VideoconferenceController],
-    providers: [VideoconferenceService],
+    controllers: [VideoconferenceController, ZoomSettingsController],
+    providers: [VideoconferenceService, ZoomAccountService],
 })
 export class VideoconferenceModule { }

@@ -100,6 +100,10 @@ export class ApiService {
     return this.http.post<any>(`${this.baseUrl}/planning/imports/excel/preview`, formData);
   }
 
+  previewPlanningAkademicImport(payload: Record<string, unknown>) {
+    return this.http.post<any>(`${this.baseUrl}/planning/imports/akademic/preview`, payload);
+  }
+
   getPlanningImportBatch(batchId: string) {
     return this.http.get<any>(`${this.baseUrl}/planning/imports/${batchId}`);
   }
@@ -216,6 +220,16 @@ export class ApiService {
       }
     });
     return this.http.get<any[]>(`${this.baseUrl}/planning/offers`, { params });
+  }
+
+  listPlanningExpandedOffers(filters: Record<string, string>) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) {
+        params = params.set(key, value);
+      }
+    });
+    return this.http.get<any[]>(`${this.baseUrl}/planning/offers-expanded`, { params });
   }
 
   createPlanningOffer(payload: any) {

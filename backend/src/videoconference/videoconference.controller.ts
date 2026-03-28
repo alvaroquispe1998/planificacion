@@ -9,6 +9,11 @@ import { FilterOptionsDto, GenerateVideoconferenceDto } from './videoconference.
 export class VideoconferenceController {
     constructor(private readonly service: VideoconferenceService) { }
 
+    @Get('campuses')
+    async getCampuses() {
+        return this.service.getCampuses();
+    }
+
     @Get('faculties')
     async getFaculties() {
         return this.service.getFaculties();
@@ -27,10 +32,9 @@ export class VideoconferenceController {
         return this.service.getCourses(ids);
     }
 
-    @Get('sections')
-    async getSections(@Query('courseIds') courseIds?: string | string[]) {
-        const ids = Array.isArray(courseIds) ? courseIds : (courseIds ? [courseIds] : []);
-        return this.service.getSections(ids);
+    @Post('filter-options')
+    async getFilterOptions(@Body() filters: FilterOptionsDto) {
+        return this.service.getFilterOptions(filters);
     }
 
     @Post('preview')
@@ -40,7 +44,6 @@ export class VideoconferenceController {
 
     @Post('generate')
     async generate(@Body() payload: GenerateVideoconferenceDto) {
-        // Stub for generation logic
-        return { success: true, message: 'Videoconferencias generadas (Stub)', count: payload.meetings.length };
+        return this.service.generate(payload);
     }
 }

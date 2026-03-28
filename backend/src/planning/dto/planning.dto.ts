@@ -21,8 +21,10 @@ import {
   ConflictTypeValues,
   CourseFormatValues,
   PlanningChangeActionValues,
+  PlanningImportSourceKindValues,
   PlanningImportScopeDecisionValues,
   PlanningOfferStatusValues,
+  PlanningSessionTypeValues,
   PlanningSubsectionKindValues,
   PlanningVcLocationCodeValues,
   DayOfWeekValues,
@@ -726,6 +728,10 @@ export class CreatePlanningSectionDto {
 
   @IsOptional()
   @IsString()
+  external_code?: string;
+
+  @IsOptional()
+  @IsString()
   teacher_id?: string;
 
   @IsOptional()
@@ -752,6 +758,10 @@ export class UpdatePlanningSectionDto {
   @IsOptional()
   @IsString()
   code?: string;
+
+  @IsOptional()
+  @IsString()
+  external_code?: string;
 
   @IsOptional()
   @IsString()
@@ -969,6 +979,32 @@ export class CreatePlanningSubsectionScheduleDto {
 
   @IsString()
   end_time!: string;
+
+  @IsOptional()
+  @IsEnum(PlanningSessionTypeValues)
+  session_type?: (typeof PlanningSessionTypeValues)[number];
+
+  @IsOptional()
+  @IsString()
+  source_session_type_code?: string;
+
+  @IsOptional()
+  @IsString()
+  teacher_id?: string;
+
+  @IsOptional()
+  @IsString()
+  building_id?: string;
+
+  @IsOptional()
+  @IsString()
+  classroom_id?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  academic_hours?: number;
 }
 
 export class UpdatePlanningSubsectionScheduleDto {
@@ -983,6 +1019,71 @@ export class UpdatePlanningSubsectionScheduleDto {
   @IsOptional()
   @IsString()
   end_time?: string;
+
+  @IsOptional()
+  @IsEnum(PlanningSessionTypeValues)
+  session_type?: (typeof PlanningSessionTypeValues)[number];
+
+  @IsOptional()
+  @IsString()
+  source_session_type_code?: string;
+
+  @IsOptional()
+  @IsString()
+  teacher_id?: string;
+
+  @IsOptional()
+  @IsString()
+  building_id?: string;
+
+  @IsOptional()
+  @IsString()
+  classroom_id?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  academic_hours?: number;
+}
+
+export class PreviewPlanningAkademicImportDto {
+  @IsString()
+  semester_id!: string;
+
+  @IsOptional()
+  @IsString()
+  vc_period_id?: string;
+
+  @IsOptional()
+  @IsString()
+  campus_id?: string;
+
+  @IsOptional()
+  @IsString()
+  faculty_id?: string;
+
+  @IsOptional()
+  @IsString()
+  academic_program_id?: string;
+
+  @IsOptional()
+  @IsString()
+  study_plan_id?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  cycle?: number;
+
+  @IsOptional()
+  @IsString()
+  study_plan_course_id?: string;
+
+  @IsOptional()
+  @IsString()
+  course_code?: string;
 }
 
 export class PlanningImportScopeDecisionInputDto {

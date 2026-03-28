@@ -76,11 +76,14 @@ import {
 
 import {
   VideoconferenceEntity,
+  PlanningSubsectionVideoconferenceEntity,
   VcPeriodEntity,
   VcFacultyEntity,
   VcAcademicProgramEntity,
   VcCourseEntity,
   VcSectionEntity,
+  VideoconferenceZoomPoolUserEntity,
+  ZoomConfigEntity,
 } from '../videoconference/videoconference.entity';
 
 export const appEntities = [
@@ -91,6 +94,9 @@ export const appEntities = [
   AuthUserRoleAssignmentEntity,
   AuthRefreshTokenEntity,
   VideoconferenceEntity,
+  ZoomConfigEntity,
+  VideoconferenceZoomPoolUserEntity,
+  PlanningSubsectionVideoconferenceEntity,
   VcPeriodEntity,
   VcFacultyEntity,
   VcAcademicProgramEntity,
