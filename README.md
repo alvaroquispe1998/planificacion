@@ -275,3 +275,5 @@ No se agregaron tablas nuevas ni logica con IA pagada.
 
 docker compose up -d --build mysql
 docker compose up -d mysql
+
+cambio para el git
