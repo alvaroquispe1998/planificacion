@@ -624,6 +624,8 @@ export class PlanningSubsectionEntity {
 @Entity({ name: 'planning_subsection_schedules' })
 @Index(['planning_subsection_id', 'day_of_week'])
 @Index(['source_schedule_id'])
+@Index(['planning_subsection_id', 'source_schedule_id'])
+@Index(['planning_subsection_id', 'day_of_week', 'start_time', 'end_time'])
 export class PlanningSubsectionScheduleEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;

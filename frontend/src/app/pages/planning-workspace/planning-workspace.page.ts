@@ -8,7 +8,6 @@ import { AuthService } from '../../core/auth.service';
 import { DialogService } from '../../core/dialog.service';
 
 type PlanningWorkspaceFilters = {
-  vc_period_id: string;
   semester_id: string;
   campus_id: string;
   faculty_id: string;
@@ -40,14 +39,19 @@ type PlanningWorkspaceRow = {
   row_id: string;
   row_kind: 'GROUP' | 'MEETING';
   offering_id: string;
+  offer_source_system: string | null;
   section_id: string;
+  section_source_section_id: string | null;
   group_id: string;
   meeting_id: string | null;
   semester_id: string;
   semester_name: string | null;
   campus_id: string;
   campus_name: string | null;
+  faculty_id: string;
+  faculty_name: string | null;
   academic_program_id: string;
+  academic_program_code: string | null;
   academic_program_name: string | null;
   study_plan_id: string;
   study_plan_name: string | null;
@@ -146,7 +150,6 @@ type WorkspaceDrawerForm = {
 };
 
 type WorkspaceCatalog = {
-  vc_periods: any[];
   semesters: any[];
   campuses: any[];
   faculties: any[];
@@ -209,21 +212,40 @@ export class PlanningWorkspacePageComponent implements OnInit {
     'NO_SCHEDULE',
     'COMPLETE',
   ];
+  readonly pageSizeOptions = [20, 50, 100];
 
   loading = true;
   saving = false;
   error = '';
   message = '';
   quickFilter: WorkspaceQuickFilter = 'ALL';
+  currentPage = 1;
+  pageSize = 20;
 
   filters: PlanningWorkspaceFilters = this.emptyFilters();
+  searchDraft = '';
   catalog: WorkspaceCatalog = this.emptyCatalog();
   workspace: PlanningWorkspaceResponse = this.emptyWorkspace();
+  offerFilterUniverse: any[] = [];
   offerDetails: any[] = [];
   teachers: any[] = [];
   buildings: any[] = [];
   classrooms: any[] = [];
   selectedRowIds: string[] = [];
+  private offerFilterUniverseSemesterId = '';
+  private rowSearchIndex = new Map<string, string>();
+  private serverScopedRowsCache: PlanningWorkspaceRow[] = [];
+  private baseRowsCache: PlanningWorkspaceRow[] = [];
+  private visibleRowsCache: PlanningWorkspaceRow[] = [];
+  private modalityOptionsCache: any[] = [];
+  private shiftOptionsCache: Array<{ id: string; label: string }> = [];
+  private visibleTotalsCache: PlanningWorkspaceTotals = {
+    offerings: 0,
+    rows: 0,
+    alerts: 0,
+    blocking_alerts: 0,
+  };
+  private visibleGroupCountCache = 0;
 
   drawer = {
     open: false,
@@ -259,71 +281,160 @@ export class PlanningWorkspacePageComponent implements OnInit {
 
   ngOnInit(): void {
     this.restoreFilters();
+    this.searchDraft = this.filters.search;
     this.loadBootstrap();
   }
 
   get periodOptions() {
-    return Array.isArray(this.catalog.vc_periods) ? this.catalog.vc_periods : [];
+    return this.availableSemesters;
   }
 
-  get filteredPrograms() {
-    const items = Array.isArray(this.catalog.academic_programs) ? this.catalog.academic_programs : [];
-    if (!this.filters.faculty_id) {
-      return items;
-    }
-    return items.filter((item: any) => item.faculty_id === this.filters.faculty_id);
-  }
-
-  get filteredStudyPlans() {
-    const items = Array.isArray(this.catalog.study_plans) ? this.catalog.study_plans : [];
-    return items.filter((item: any) => {
-      if (this.filters.faculty_id && item.faculty_id !== this.filters.faculty_id) {
-        return false;
-      }
-      if (this.filters.academic_program_id && item.academic_program_id !== this.filters.academic_program_id) {
-        return false;
-      }
-      return true;
-    });
-  }
-
-  get modalityOptions() {
-    return Array.isArray(this.catalog.course_modalities) ? this.catalog.course_modalities : [];
-  }
-
-  get shiftOptions() {
-    const options = Array.isArray(this.catalog.shift_options) ? this.catalog.shift_options : [];
-    return options.length > 0 ? options : this.fallbackShiftOptions;
-  }
-
-  get baseRows() {
-    return this.workspace.rows.filter(
-      (row) =>
-        this.matchesFacultyFilter(row) &&
-        this.matchesModalityFilter(row) &&
-        this.matchesShiftFilter(row) &&
-        this.matchesSearchFilter(row),
+  get availableSemesters() {
+    return [...(Array.isArray(this.catalog.semesters) ? this.catalog.semesters : [])].sort((left, right) =>
+      `${right?.name ?? ''}`.localeCompare(`${left?.name ?? ''}`),
     );
   }
 
+  get availableCampuses() {
+    const map = new Map<string, any>();
+    this.filteredOfferUniverseBySemester.forEach((offer: any) => {
+      if (!offer?.campus_id) {
+        return;
+      }
+      map.set(offer.campus_id, {
+        id: offer.campus_id,
+        name: offer?.campus?.name ?? offer?.campus_name ?? offer.campus_id,
+      });
+    });
+    return [...map.values()].sort((left, right) => `${left.name ?? ''}`.localeCompare(`${right.name ?? ''}`));
+  }
+
+  get availableFaculties() {
+    const map = new Map<string, any>();
+    this.filteredOfferUniverseByCampus.forEach((offer: any) => {
+      if (!offer?.faculty_id) {
+        return;
+      }
+      map.set(offer.faculty_id, {
+        id: offer.faculty_id,
+        name: offer?.faculty?.name ?? offer?.faculty_name ?? offer.faculty_id,
+      });
+    });
+    return [...map.values()].sort((left, right) => `${left.name ?? ''}`.localeCompare(`${right.name ?? ''}`));
+  }
+
+  get filteredPrograms() {
+    const map = new Map<string, any>();
+    this.filteredOfferUniverseByFaculty.forEach((offer: any) => {
+      if (!offer?.academic_program_id) {
+        return;
+      }
+      map.set(offer.academic_program_id, {
+        id: offer.academic_program_id,
+        name:
+          offer?.academic_program?.name ??
+          offer?.academic_program_name ??
+          offer.academic_program_id,
+        faculty_id: offer?.faculty_id ?? null,
+      });
+    });
+    return [...map.values()].sort((left, right) => `${left.name ?? ''}`.localeCompare(`${right.name ?? ''}`));
+  }
+
+  get filteredStudyPlans() {
+    const map = new Map<string, any>();
+    this.filteredOfferUniverseByProgram.forEach((offer: any) => {
+      if (!offer?.study_plan_id) {
+        return;
+      }
+      map.set(offer.study_plan_id, {
+        id: offer.study_plan_id,
+        name: offer?.study_plan?.name ?? offer?.study_plan_name ?? offer.study_plan_id,
+        faculty_id: offer?.faculty_id ?? null,
+        academic_program_id: offer?.academic_program_id ?? null,
+      });
+    });
+    return [...map.values()].sort((left, right) => `${left.name ?? ''}`.localeCompare(`${right.name ?? ''}`));
+  }
+
+  get modalityOptions() {
+    return this.modalityOptionsCache;
+  }
+
+  get shiftOptions() {
+    return this.shiftOptionsCache;
+  }
+
+  get filteredOfferUniverseBySemester() {
+    return (Array.isArray(this.offerFilterUniverse) ? this.offerFilterUniverse : []).filter((offer: any) =>
+      !this.filters.semester_id || offer?.semester_id === this.filters.semester_id,
+    );
+  }
+
+  get filteredOfferUniverseByCampus() {
+    return this.filteredOfferUniverseBySemester.filter((offer: any) =>
+      !this.filters.campus_id || offer?.campus_id === this.filters.campus_id,
+    );
+  }
+
+  get filteredOfferUniverseByFaculty() {
+    return this.filteredOfferUniverseByCampus.filter((offer: any) =>
+      !this.filters.faculty_id || offer?.faculty_id === this.filters.faculty_id,
+    );
+  }
+
+  get filteredOfferUniverseByProgram() {
+    return this.filteredOfferUniverseByFaculty.filter((offer: any) =>
+      !this.filters.academic_program_id || offer?.academic_program_id === this.filters.academic_program_id,
+    );
+  }
+
+  get serverScopedRows() {
+    return this.serverScopedRowsCache;
+  }
+
+  get baseRows() {
+    return this.baseRowsCache;
+  }
+
   get visibleRows() {
-    return [...this.baseRows]
-      .filter((row) => this.matchesQuickFilter(row))
-      .sort((left, right) => this.compareRows(left, right));
+    return this.visibleRowsCache;
+  }
+
+  get totalVisibleRows() {
+    return this.visibleRows.length;
+  }
+
+  get totalPages() {
+    return Math.max(1, Math.ceil(this.totalVisibleRows / this.pageSize));
+  }
+
+  get paginatedRows() {
+    const page = Math.min(this.currentPage, this.totalPages);
+    const start = (page - 1) * this.pageSize;
+    return this.visibleRows.slice(start, start + this.pageSize);
+  }
+
+  get currentPageStart() {
+    if (this.totalVisibleRows === 0) {
+      return 0;
+    }
+    return (Math.min(this.currentPage, this.totalPages) - 1) * this.pageSize + 1;
+  }
+
+  get currentPageEnd() {
+    if (this.totalVisibleRows === 0) {
+      return 0;
+    }
+    return Math.min(this.currentPageStart + this.paginatedRows.length - 1, this.totalVisibleRows);
   }
 
   get visibleTotals() {
-    const rows = this.visibleRows;
-    return {
-      offerings: new Set(rows.map((row) => row.offering_id)).size,
-      rows: rows.length,
-      alerts: rows.reduce((sum, row) => sum + row.alert_count, 0),
-      blocking_alerts: rows.reduce((sum, row) => sum + row.blocking_alert_count, 0),
-    };
+    return this.visibleTotalsCache;
   }
 
   get visibleGroupCount() {
-    return new Set(this.visibleRows.map((row) => row.group_id)).size;
+    return this.visibleGroupCountCache;
   }
 
   get selectedRows() {
@@ -332,7 +443,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
   }
 
   get allVisibleSelected() {
-    return this.visibleRows.length > 0 && this.visibleRows.every((row) => this.selectedRowIds.includes(row.row_id));
+    return this.paginatedRows.length > 0 && this.paginatedRows.every((row) => this.selectedRowIds.includes(row.row_id));
   }
 
   get activeDrawerRow() {
@@ -416,8 +527,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
         this.classrooms = Array.isArray(classrooms) ? classrooms : [];
         this.syncCatalogSelections();
         this.persistFilters();
-        this.cdr.detectChanges();
-        this.loadWorkspace();
+        this.loadWorkspace(undefined, true);
       },
       error: () => {
         this.loading = false;
@@ -427,33 +537,55 @@ export class PlanningWorkspacePageComponent implements OnInit {
     });
   }
 
-  loadWorkspace(focusRowId?: string) {
+  loadWorkspace(focusRowId?: string, refreshUniverse = this.shouldRefreshOfferUniverse()) {
     this.loading = true;
     this.error = '';
-    this.persistFilters();
     this.cdr.detectChanges();
-    this.api.listPlanningExpandedOffers(this.manualOfferFilters()).subscribe({
-      next: (offers) => {
-        this.offerDetails = Array.isArray(offers) ? offers : [];
-        if (this.offerDetails.length === 0) {
-          this.offerDetails = [];
-          this.workspace = this.emptyWorkspace();
+
+    const loadExpandedOffers = () => {
+      this.persistFilters();
+      this.api.listPlanningExpandedOffers(this.manualOfferFilters()).subscribe({
+        next: (offers) => {
+          this.offerDetails = Array.isArray(offers) ? offers : [];
+          if (this.offerDetails.length === 0) {
+            this.workspace = this.emptyWorkspace();
+            this.rebuildRowSearchIndex();
+            this.refreshWorkspaceView();
+            this.resetPagination();
+            this.loading = false;
+            this.syncSelectedRows();
+            this.syncDrawerAfterReload(focusRowId);
+            this.cdr.detectChanges();
+            return;
+          }
+          this.workspace = this.buildManualWorkspace(this.offerDetails);
+          this.rebuildRowSearchIndex();
+          this.refreshWorkspaceView();
+          this.resetPagination();
           this.loading = false;
           this.syncSelectedRows();
           this.syncDrawerAfterReload(focusRowId);
           this.cdr.detectChanges();
-          return;
-        }
-        this.workspace = this.buildManualWorkspace(this.offerDetails);
-        this.loading = false;
-        this.syncSelectedRows();
-        this.syncDrawerAfterReload(focusRowId);
-        this.cdr.detectChanges();
-      },
-      error: (err: any) => {
-        this.loading = false;
-        this.error = err?.error?.message ?? 'No se pudo cargar el panel operativo.';
-        this.cdr.detectChanges();
+        },
+        error: (err: any) => {
+          this.loading = false;
+          this.error = err?.error?.message ?? 'No se pudo cargar el panel operativo.';
+          this.cdr.detectChanges();
+        },
+      });
+    };
+
+    if (!refreshUniverse) {
+      loadExpandedOffers();
+      return;
+    }
+
+    this.api.listPlanningOffers(this.offerUniverseFilters()).pipe(catchError(() => of([]))).subscribe({
+      next: (offers) => {
+        this.offerFilterUniverse = Array.isArray(offers) ? offers : [];
+        this.offerFilterUniverseSemesterId = this.filters.semester_id ?? '';
+        this.syncCatalogSelections();
+        loadExpandedOffers();
       },
     });
   }
@@ -467,27 +599,30 @@ export class PlanningWorkspacePageComponent implements OnInit {
   reload() {
     this.clearSelection();
     this.closeDrawer();
-    this.loadWorkspace();
+    this.loadBootstrap();
   }
 
   onFacultyChange() {
+    this.resetPagination();
     this.syncProgramSelection();
     this.syncStudyPlanSelection();
     this.quickFilter = 'ALL';
     this.clearSelection();
     this.closeDrawer();
     this.persistFilters();
+    this.refreshWorkspaceView();
   }
 
-  onVcPeriodChange() {
-    this.syncPeriodFiltersFromCatalog();
+  onSemesterChange() {
+    this.resetPagination();
     this.quickFilter = 'ALL';
     this.clearSelection();
     this.closeDrawer();
-    this.loadWorkspace();
+    this.loadWorkspace(undefined, true);
   }
 
   onProgramChange() {
+    this.resetPagination();
     this.syncStudyPlanSelection();
     this.quickFilter = 'ALL';
     this.clearSelection();
@@ -496,34 +631,57 @@ export class PlanningWorkspacePageComponent implements OnInit {
   }
 
   onServerFilterChange() {
+    this.resetPagination();
+    this.syncCatalogSelections();
     this.quickFilter = 'ALL';
     this.clearSelection();
     this.closeDrawer();
+    this.persistFilters();
     this.loadWorkspace();
+  }
+
+  onLocalFilterChange() {
+    this.resetPagination();
+    this.quickFilter = 'ALL';
+    this.clearSelection();
+    this.closeDrawer();
+    this.persistFilters();
+    this.refreshWorkspaceView();
   }
 
   applySearch() {
+    this.filters.search = this.searchDraft.trim();
+    this.resetPagination();
     this.quickFilter = 'ALL';
     this.clearSelection();
     this.closeDrawer();
-    this.loadWorkspace();
+    this.persistFilters();
+    this.refreshWorkspaceView();
+  }
+
+  onSearchChange() {
+    this.searchDraft = this.searchDraft ?? '';
   }
 
   clearFilters() {
+    this.resetPagination();
     this.filters = this.emptyFilters();
-    this.syncPeriodFiltersFromCatalog();
+    this.searchDraft = '';
+    this.syncCatalogSelections();
     this.quickFilter = 'ALL';
     this.message = '';
     this.error = '';
     this.clearSelection();
     this.closeDrawer();
-    this.loadWorkspace();
+    this.loadWorkspace(undefined, true);
   }
 
   setQuickFilter(filter: WorkspaceQuickFilter) {
+    this.resetPagination();
     this.quickFilter = filter;
     this.clearSelection();
     this.closeDrawer();
+    this.refreshWorkspaceView();
   }
 
   quickFilterLabel(filter: WorkspaceQuickFilter) {
@@ -550,12 +708,41 @@ export class PlanningWorkspacePageComponent implements OnInit {
   toggleSelectAllVisible(checked: boolean) {
     if (checked) {
       const selected = new Set(this.selectedRowIds);
-      this.visibleRows.forEach((row) => selected.add(row.row_id));
+      this.paginatedRows.forEach((row) => selected.add(row.row_id));
       this.selectedRowIds = [...selected];
       return;
     }
-    const visibleIds = new Set(this.visibleRows.map((row) => row.row_id));
+    const visibleIds = new Set(this.paginatedRows.map((row) => row.row_id));
     this.selectedRowIds = this.selectedRowIds.filter((id) => !visibleIds.has(id));
+  }
+
+  onPageSizeChange(value: string | number) {
+    const parsed = Number(value);
+    if (!this.pageSizeOptions.includes(parsed)) {
+      return;
+    }
+    this.pageSize = parsed;
+    this.currentPage = 1;
+  }
+
+  goToFirstPage() {
+    this.currentPage = 1;
+  }
+
+  goToPreviousPage() {
+    this.currentPage = Math.max(1, this.currentPage - 1);
+  }
+
+  goToNextPage() {
+    this.currentPage = Math.min(this.totalPages, this.currentPage + 1);
+  }
+
+  goToLastPage() {
+    this.currentPage = this.totalPages;
+  }
+
+  private resetPagination() {
+    this.currentPage = 1;
   }
 
   toggleRowSelection(rowId: string, checked: boolean) {
@@ -656,7 +843,11 @@ export class PlanningWorkspacePageComponent implements OnInit {
     const nextDay = this.drawer.form.day_of_week.trim();
     const nextStart = this.drawer.form.start_time.trim();
     const nextEnd = this.drawer.form.end_time.trim();
-    const nextSessionType = this.drawer.form.session_type.trim() || 'OTHER';
+    const nextSessionType = this.normalizeSessionTypeForRow(
+      row,
+      this.drawer.form.session_type.trim() || this.defaultSessionTypeForGroupType(row.group_type),
+    );
+    this.drawer.form.session_type = nextSessionType;
     const scheduleTouched =
       nextDay !== (row.day_of_week ?? '') ||
       nextStart !== (row.start_time ?? '') ||
@@ -725,7 +916,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
     }
 
     if (requests.length === 0) {
-      this.message = 'No hay cambios pendientes en la fila seleccionada.';
+      this.message = 'No hay cambios pendientes en el grupo u horario seleccionado.';
       this.error = '';
       this.cdr.detectChanges();
       return;
@@ -735,7 +926,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
     this.error = '';
     forkJoin(requests).subscribe({
       next: () => {
-        this.message = 'Fila operativa actualizada.';
+        this.message = 'Grupo u horario actualizado.';
         this.clearSelection();
         this.saving = false;
         this.loadWorkspace(row.row_id);
@@ -935,12 +1126,19 @@ export class PlanningWorkspacePageComponent implements OnInit {
     });
   }
 
-  async duplicateGroup(event: Event, row: PlanningWorkspaceRow) {
+  canSyncSectionFromAkademic(row: PlanningWorkspaceRow) {
+    return row.offer_source_system === 'AKADEMIC' && Boolean(row.section_source_section_id);
+  }
+
+  async syncSectionFromAkademic(event: Event, row: PlanningWorkspaceRow) {
     event.stopPropagation();
+    if (!this.canSyncSectionFromAkademic(row)) {
+      return;
+    }
     const accepted = await this.dialog.confirm({
-      title: 'Duplicar grupo',
-      message: `Se duplicara el grupo ${row.group_code} junto con sus docentes y horarios actuales.`,
-      confirmLabel: 'Duplicar',
+      title: 'Sincronizar con Akademic',
+      message: `Se reemplazaran grupos, docentes y horarios de la seccion ${row.external_section_code || row.internal_section_code || row.group_code} del curso ${this.courseLabel(row)} con lo que venga hoy desde Akademic.`,
+      confirmLabel: 'Sincronizar',
     });
     if (!accepted) {
       return;
@@ -948,72 +1146,23 @@ export class PlanningWorkspacePageComponent implements OnInit {
 
     this.saving = true;
     this.error = '';
-    const sourceSubsection = this.findSubsectionById(row.group_id);
-    if (!sourceSubsection) {
-      this.saving = false;
-      this.error = 'No se encontro el grupo origen para duplicar.';
-      this.cdr.detectChanges();
-      return;
-    }
-
-    this.api
-      .createPlanningSubsection(row.section_id, {
-        kind: row.group_type,
-        responsible_teacher_id: this.primaryTeacher(row)?.teacher_id || undefined,
-        course_modality_id: row.delivery_modality_id || undefined,
-        building_id: row.building_id || undefined,
-        classroom_id: row.classroom_id || undefined,
-        capacity_snapshot: row.group_capacity ?? undefined,
-        shift: row.shift_id || undefined,
-        projected_vacancies: row.projected_vacancies ?? undefined,
-        denomination: row.group_note || undefined,
-      })
-      .subscribe({
-        next: (createdSubsection) => {
-          const schedules = Array.isArray(sourceSubsection.schedules) ? sourceSubsection.schedules : [];
-          if (schedules.length === 0) {
-            this.message = `Grupo ${row.group_code} duplicado correctamente.`;
-            this.clearSelection();
-            this.closeDrawer();
-            this.saving = false;
-            this.loadWorkspace();
-            return;
-          }
-
-          forkJoin(
-            schedules.map((schedule: any) =>
-              this.api.createPlanningSubsectionSchedule(createdSubsection.id, {
-                day_of_week: schedule.day_of_week,
-                start_time: schedule.start_time,
-                end_time: schedule.end_time,
-                academic_hours: schedule.academic_hours ?? undefined,
-                teacher_id: schedule.teacher_id ?? undefined,
-                building_id: schedule.building_id ?? undefined,
-                classroom_id: schedule.classroom_id ?? undefined,
-                session_type: schedule.session_type ?? undefined,
-              }),
-            ),
-          ).subscribe({
-            next: () => {
-              this.message = `Grupo ${row.group_code} duplicado correctamente.`;
-              this.clearSelection();
-              this.closeDrawer();
-              this.saving = false;
-              this.loadWorkspace();
-            },
-            error: (err: any) => {
-              this.saving = false;
-              this.error = err?.error?.message ?? 'No se pudieron copiar los horarios del grupo duplicado.';
-              this.cdr.detectChanges();
-            },
-          });
-        },
-        error: (err: any) => {
-          this.saving = false;
-          this.error = err?.error?.message ?? 'No se pudo duplicar el grupo.';
-          this.cdr.detectChanges();
-        },
-      });
+    this.api.syncPlanningSectionFromAkademic(row.section_id).subscribe({
+      next: (result: any) => {
+        const summary = result?.summary ?? {};
+        this.message = result?.section_deleted
+          ? `La seccion ${row.external_section_code || row.internal_section_code || row.group_code} ya no existe en Akademic y fue retirada localmente.`
+          : `Seccion sincronizada. Grupos +${summary.subsections_created ?? 0} / ~${summary.subsections_updated ?? 0} / -${summary.subsections_deleted ?? 0}. Horarios +${summary.schedules_created ?? 0} / ~${summary.schedules_updated ?? 0} / -${summary.schedules_deleted ?? 0}.`;
+        this.clearSelection();
+        this.closeDrawer();
+        this.saving = false;
+        this.loadWorkspace();
+      },
+      error: (err: any) => {
+        this.saving = false;
+        this.error = err?.error?.message ?? 'No se pudo sincronizar la seccion con Akademic.';
+        this.cdr.detectChanges();
+      },
+    });
   }
 
   rowState(row: PlanningWorkspaceRow) {
@@ -1055,6 +1204,10 @@ export class PlanningWorkspacePageComponent implements OnInit {
     }
   }
 
+  trackRow(_: number, row: PlanningWorkspaceRow) {
+    return row.row_id;
+  }
+
   alertPills(row: PlanningWorkspaceRow) {
     return (row.alerts ?? []).slice(0, 2);
   }
@@ -1077,7 +1230,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
   groupMetaLabel(row: PlanningWorkspaceRow) {
     const subsection = row.group_code ? `Grupo ${row.group_code}` : null;
     const internal = row.internal_section_code ? `Interna ${row.internal_section_code}` : null;
-    return [subsection, internal, this.groupTypeLabel(row.group_type)].filter(Boolean).join(' · ');
+    return [subsection, internal, this.groupTypeLabel(row.group_type)].filter(Boolean).join(' | ');
   }
 
   groupTypeLabel(value: string | null | undefined) {
@@ -1137,6 +1290,21 @@ export class PlanningWorkspacePageComponent implements OnInit {
       default:
         return value || 'Sin tipo';
     }
+  }
+
+  sessionTypeOptionsForRow(row: PlanningWorkspaceRow | null | undefined) {
+    switch (row?.group_type) {
+      case 'THEORY':
+        return this.sessionTypeOptions.filter((item) => item.value === 'THEORY');
+      case 'PRACTICE':
+        return this.sessionTypeOptions.filter((item) => item.value === 'PRACTICE' || item.value === 'LAB');
+      default:
+        return this.sessionTypeOptions;
+    }
+  }
+
+  canEditSessionTypeForRow(row: PlanningWorkspaceRow | null | undefined) {
+    return this.sessionTypeOptionsForRow(row).length > 1;
   }
 
   capacityLabel(row: PlanningWorkspaceRow) {
@@ -1210,7 +1378,6 @@ export class PlanningWorkspacePageComponent implements OnInit {
 
   private emptyFilters(): PlanningWorkspaceFilters {
     return {
-      vc_period_id: '',
       semester_id: '',
       campus_id: '',
       faculty_id: '',
@@ -1224,7 +1391,6 @@ export class PlanningWorkspacePageComponent implements OnInit {
 
   private emptyCatalog(): WorkspaceCatalog {
     return {
-      vc_periods: [],
       semesters: [],
       campuses: [],
       faculties: [],
@@ -1254,7 +1420,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
       teacher_id: '',
       building_id: '',
       classroom_id: '',
-      session_type: 'OTHER',
+      session_type: 'THEORY',
       day_of_week: '',
       start_time: '',
       end_time: '',
@@ -1268,11 +1434,15 @@ export class PlanningWorkspacePageComponent implements OnInit {
 
   private buildDrawerForm(row: PlanningWorkspaceRow): WorkspaceDrawerForm {
     const classroom = this.classrooms.find((item: any) => item.id === row.classroom_id) ?? null;
+    const sessionType = this.normalizeSessionTypeForRow(
+      row,
+      row.session_type ?? this.defaultSessionTypeForGroupType(row.group_type),
+    );
     return {
       teacher_id: this.primaryTeacher(row)?.teacher_id ?? '',
       building_id: row.building_id ?? classroom?.building_id ?? '',
       classroom_id: row.classroom_id ?? '',
-      session_type: row.session_type ?? 'OTHER',
+      session_type: sessionType,
       day_of_week: row.day_of_week ?? '',
       start_time: row.start_time ?? '',
       end_time: row.end_time ?? '',
@@ -1287,9 +1457,29 @@ export class PlanningWorkspacePageComponent implements OnInit {
     };
   }
 
+  private defaultSessionTypeForGroupType(groupType: string | null | undefined) {
+    if (groupType === 'THEORY') {
+      return 'THEORY';
+    }
+    if (groupType === 'PRACTICE') {
+      return 'PRACTICE';
+    }
+    return 'THEORY';
+  }
+
+  private normalizeSessionTypeForRow(
+    row: PlanningWorkspaceRow | null | undefined,
+    value: string | null | undefined,
+  ) {
+    const allowed = this.sessionTypeOptionsForRow(row);
+    const candidate = (value ?? '').trim() || this.defaultSessionTypeForGroupType(row?.group_type);
+    return allowed.some((item) => item.value === candidate)
+      ? candidate
+      : (allowed[0]?.value ?? 'OTHER');
+  }
+
   private normalizeCatalog(catalog: any): WorkspaceCatalog {
     return {
-      vc_periods: Array.isArray(catalog?.vc_periods) ? catalog.vc_periods : [],
       semesters: Array.isArray(catalog?.semesters) ? catalog.semesters : [],
       campuses: Array.isArray(catalog?.campuses) ? catalog.campuses : [],
       faculties: Array.isArray(catalog?.faculties) ? catalog.faculties : [],
@@ -1314,10 +1504,110 @@ export class PlanningWorkspacePageComponent implements OnInit {
     };
   }
 
+  private rebuildRowSearchIndex() {
+    this.rowSearchIndex = new Map(
+      this.workspace.rows.map((row) => [
+        row.row_id,
+        this.normalizeSearchValue(
+          [
+            row.course_code,
+            row.course_name,
+            row.academic_program_code,
+            row.academic_program_name,
+            row.course_section_name,
+            row.external_section_code,
+            row.internal_section_code,
+            row.group_code,
+            row.primary_teacher_name,
+            row.classroom_code,
+            row.classroom_name,
+          ]
+            .filter(Boolean)
+            .join(' '),
+        ),
+      ] as const),
+    );
+  }
+
+  private refreshWorkspaceView() {
+    this.serverScopedRowsCache = this.workspace.rows.filter(
+      (row) => this.matchesFacultyFilter(row) && this.matchesStudyPlanFilter(row),
+    );
+    this.modalityOptionsCache = this.buildModalityOptions(this.serverScopedRowsCache);
+    this.shiftOptionsCache = this.buildShiftOptions(this.serverScopedRowsCache);
+    this.baseRowsCache = this.serverScopedRowsCache.filter(
+      (row) =>
+        this.matchesModalityFilter(row) &&
+        this.matchesShiftFilter(row) &&
+        this.matchesSearchFilter(row),
+    );
+    this.visibleRowsCache = [...this.baseRowsCache]
+      .filter((row) => this.matchesQuickFilter(row))
+      .sort((left, right) => this.compareRows(left, right));
+    this.visibleTotalsCache = {
+      offerings: new Set(this.visibleRowsCache.map((row) => row.offering_id)).size,
+      rows: this.visibleRowsCache.length,
+      alerts: this.visibleRowsCache.reduce((sum, row) => sum + row.alert_count, 0),
+      blocking_alerts: this.visibleRowsCache.reduce((sum, row) => sum + row.blocking_alert_count, 0),
+    };
+    this.visibleGroupCountCache = new Set(this.visibleRowsCache.map((row) => row.group_id)).size;
+  }
+
+  private buildModalityOptions(rows: PlanningWorkspaceRow[]) {
+    const map = new Map<string, any>();
+    const preferredCodes = new Set([
+      'HIBRIDO_VIRTUAL',
+      'HIBRIDO_PRESENCIAL',
+      'VIRTUAL',
+      'PRESENCIAL',
+    ]);
+    const catalogModalities = Array.isArray(this.catalog.course_modalities) ? this.catalog.course_modalities : [];
+    
+    catalogModalities.forEach((item: any) => {
+      if (preferredCodes.has(item.code)) {
+        map.set(item.id, {
+          id: item.id,
+          name: item.name,
+        });
+      }
+    });
+
+    rows.forEach((row) => {
+      if (!row.delivery_modality_id) {
+        return;
+      }
+      if (map.has(row.delivery_modality_id)) {
+        return;
+      }
+      const match = catalogModalities.find((item: any) => item.id === row.delivery_modality_id) ?? null;
+      map.set(row.delivery_modality_id, {
+        id: row.delivery_modality_id,
+        name: match?.name ?? row.delivery_modality_id,
+      });
+    });
+    return [...map.values()].sort((left, right) => `${left.name ?? ''}`.localeCompare(`${right.name ?? ''}`));
+  }
+
+  private buildShiftOptions(rows: PlanningWorkspaceRow[]) {
+    const map = new Map<string, { id: string; label: string }>();
+    rows.forEach((row) => {
+      if (!row.shift_id) {
+        return;
+      }
+      const known =
+        (Array.isArray(this.catalog.shift_options) ? this.catalog.shift_options : []).find(
+          (item: any) => item.id === row.shift_id,
+        ) ??
+        this.fallbackShiftOptions.find((item) => item.id === row.shift_id) ??
+        { id: row.shift_id, label: row.shift_id };
+      map.set(row.shift_id, known);
+    });
+    return [...map.values()];
+  }
+
   private restoreFilters() {
     const query = this.route.snapshot.queryParamMap;
     const queryFilters: PlanningWorkspaceFilters = {
-      vc_period_id: query.get('vc_period_id') ?? '',
       semester_id: query.get('semester_id') ?? '',
       campus_id: query.get('campus_id') ?? '',
       faculty_id: query.get('faculty_id') ?? '',
@@ -1340,7 +1630,6 @@ export class PlanningWorkspacePageComponent implements OnInit {
       }
       const stored = JSON.parse(raw) as Partial<PlanningWorkspaceFilters>;
       this.filters = {
-        vc_period_id: stored.vc_period_id ?? '',
         semester_id: stored.semester_id ?? '',
         campus_id: stored.campus_id ?? '',
         faculty_id: stored.faculty_id ?? '',
@@ -1360,15 +1649,20 @@ export class PlanningWorkspacePageComponent implements OnInit {
   }
 
   private syncCatalogSelections() {
-    if (this.filters.campus_id && !this.catalog.campuses.some((item: any) => item.id === this.filters.campus_id)) {
+    if (this.filters.semester_id && !this.availableSemesters.some((item: any) => item.id === this.filters.semester_id)) {
+      this.filters.semester_id = '';
+    }
+    if (!this.filters.semester_id && this.availableSemesters.length > 0) {
+      this.filters.semester_id = this.availableSemesters[0].id;
+    }
+    if (this.filters.campus_id && !this.availableCampuses.some((item: any) => item.id === this.filters.campus_id)) {
       this.filters.campus_id = '';
     }
-    if (this.filters.faculty_id && !this.catalog.faculties.some((item: any) => item.id === this.filters.faculty_id)) {
+    if (this.filters.faculty_id && !this.availableFaculties.some((item: any) => item.id === this.filters.faculty_id)) {
       this.filters.faculty_id = '';
     }
     this.syncProgramSelection();
     this.syncStudyPlanSelection();
-    this.syncPeriodFiltersFromCatalog();
     if (
       this.filters.delivery_modality_id &&
       !this.modalityOptions.some((item: any) => item.id === this.filters.delivery_modality_id)
@@ -1392,53 +1686,6 @@ export class PlanningWorkspacePageComponent implements OnInit {
     }
   }
 
-  private syncPeriodFiltersFromCatalog() {
-    if (this.filters.vc_period_id && !this.periodOptions.some((item: any) => item.id === this.filters.vc_period_id)) {
-      this.filters.vc_period_id = '';
-    }
-    if (this.filters.semester_id && !this.catalog.semesters.some((item: any) => item.id === this.filters.semester_id)) {
-      this.filters.semester_id = '';
-    }
-
-    if (!this.filters.vc_period_id && this.filters.semester_id) {
-      const vcPeriod = this.findVcPeriodBySemesterId(this.filters.semester_id);
-      this.filters.vc_period_id = vcPeriod?.id ?? '';
-    }
-
-    if (!this.filters.vc_period_id && this.periodOptions.length > 0) {
-      this.filters.vc_period_id = this.periodOptions.find((item: any) => item.selected)?.id ?? this.periodOptions[0].id;
-    }
-
-    this.filters.semester_id = this.resolveSemesterIdFromVcPeriodId(this.filters.vc_period_id) ?? '';
-  }
-
-  private resolveSemesterIdFromVcPeriodId(vcPeriodId: string) {
-    const period = this.periodOptions.find((item: any) => item.id === vcPeriodId);
-    const token = this.normalizePeriodToken(period?.text);
-    if (!token) {
-      return '';
-    }
-    return this.catalog.semesters.find((item: any) => this.normalizePeriodToken(item.name) === token)?.id ?? '';
-  }
-
-  private findVcPeriodBySemesterId(semesterId: string) {
-    const semester = this.catalog.semesters.find((item: any) => item.id === semesterId);
-    const token = this.normalizePeriodToken(semester?.name);
-    if (!token) {
-      return null;
-    }
-    return this.periodOptions.find((item: any) => this.normalizePeriodToken(item.text) === token) ?? null;
-  }
-
-  private normalizePeriodToken(value: string | null | undefined) {
-    const normalized = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
-    if (!normalized) {
-      return '';
-    }
-    const match = normalized.match(/\d{4}-\d/);
-    return match ? match[0] : normalized;
-  }
-
   private apiFilters() {
     return {
       semester_id: this.filters.semester_id,
@@ -1453,7 +1700,6 @@ export class PlanningWorkspacePageComponent implements OnInit {
 
   private summaryQueryParams() {
     return {
-      vc_period_id: this.filters.vc_period_id || null,
       semester_id: this.filters.semester_id || null,
       campus_id: this.filters.campus_id || null,
       faculty_id: this.filters.faculty_id || null,
@@ -1464,7 +1710,6 @@ export class PlanningWorkspacePageComponent implements OnInit {
   private manualOfferFilters() {
     return {
       semester_id: this.filters.semester_id,
-      vc_period_id: this.filters.vc_period_id,
       campus_id: this.filters.campus_id,
       faculty_id: this.filters.faculty_id,
       academic_program_id: this.filters.academic_program_id,
@@ -1472,9 +1717,25 @@ export class PlanningWorkspacePageComponent implements OnInit {
     };
   }
 
+  private offerUniverseFilters() {
+    return {
+      semester_id: this.filters.semester_id,
+    };
+  }
+
+  private shouldRefreshOfferUniverse() {
+    return (this.filters.semester_id ?? '') !== this.offerFilterUniverseSemesterId || this.offerFilterUniverse.length === 0;
+  }
+
   private buildManualWorkspace(offers: any[]): PlanningWorkspaceResponse {
     const rows = offers.flatMap((offer) => this.buildRowsFromOffer(offer));
-    const summaries = offers.map((offer) => this.buildSummaryFromOffer(offer, rows.filter((row) => row.offering_id === offer.id)));
+    const rowsByOffer = new Map<string, PlanningWorkspaceRow[]>();
+    rows.forEach((row) => {
+      const bucket = rowsByOffer.get(row.offering_id) ?? [];
+      bucket.push(row);
+      rowsByOffer.set(row.offering_id, bucket);
+    });
+    const summaries = offers.map((offer) => this.buildSummaryFromOffer(offer, rowsByOffer.get(offer.id) ?? []));
     return {
       filters: this.apiFilters(),
       summaries,
@@ -1523,14 +1784,19 @@ export class PlanningWorkspacePageComponent implements OnInit {
       row_id: schedule?.id ?? `subsection:${subsection.id}`,
       row_kind: schedule ? 'MEETING' : 'GROUP',
       offering_id: offer.id,
+      offer_source_system: offer.source_system ?? null,
       section_id: section.id,
+      section_source_section_id: section.source_section_id ?? null,
       group_id: subsection.id,
       meeting_id: schedule?.id ?? null,
       semester_id: offer.semester_id,
       semester_name: offer.semester?.name ?? this.catalog.semesters.find((item: any) => item.id === offer.semester_id)?.name ?? null,
       campus_id: offer.campus_id,
       campus_name: offer.campus?.name ?? this.catalog.campuses.find((item: any) => item.id === offer.campus_id)?.name ?? null,
+      faculty_id: offer.faculty_id,
+      faculty_name: offer.faculty?.name ?? this.availableFaculties.find((item: any) => item.id === offer.faculty_id)?.name ?? null,
       academic_program_id: offer.academic_program_id,
+      academic_program_code: offer.academic_program?.code ?? offer.academic_program_code ?? null,
       academic_program_name:
         offer.academic_program?.name ??
         this.catalog.academic_programs.find((item: any) => item.id === offer.academic_program_id)?.name ??
@@ -1746,8 +2012,14 @@ export class PlanningWorkspacePageComponent implements OnInit {
     if (!this.filters.faculty_id) {
       return true;
     }
-    const program = this.catalog.academic_programs.find((item: any) => item.id === row.academic_program_id);
-    return program?.faculty_id === this.filters.faculty_id;
+    return row.faculty_id === this.filters.faculty_id;
+  }
+
+  private matchesStudyPlanFilter(row: PlanningWorkspaceRow) {
+    if (!this.filters.study_plan_id) {
+      return true;
+    }
+    return row.study_plan_id === this.filters.study_plan_id;
   }
 
   private matchesModalityFilter(row: PlanningWorkspaceRow) {
@@ -1769,19 +2041,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
     if (!query) {
       return true;
     }
-    return this.normalizeSearchValue(
-      [
-        row.course_code,
-        row.course_name,
-        row.course_section_name,
-        row.group_code,
-        row.primary_teacher_name,
-        row.classroom_code,
-        row.classroom_name,
-      ]
-        .filter(Boolean)
-        .join(' '),
-    ).includes(query);
+    return (this.rowSearchIndex.get(row.row_id) ?? '').includes(query);
   }
 
   private matchesQuickFilter(row: PlanningWorkspaceRow, filter: WorkspaceQuickFilter = this.quickFilter) {

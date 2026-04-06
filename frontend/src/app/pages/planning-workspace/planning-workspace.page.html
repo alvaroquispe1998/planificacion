@@ -4,7 +4,7 @@
       <p class="eyebrow">Planning workspace</p>
       <h1>Panel operativo</h1>
       <p class="subtle">
-        Opera horarios, docentes y aulas desde una vista densa, sin mover la pagina resumen.
+        Opera secciones, grupos y horarios desde una vista densa, sin salir del panel operativo.
       </p>
     </div>
 
@@ -26,7 +26,7 @@
       <small>{{ workspace.totals.offerings }} cargadas desde el workspace</small>
     </article>
     <article class="kpi-card">
-      <span>Horarios visibles</span>
+      <span>Filas visibles</span>
       <strong>{{ visibleTotals.rows }}</strong>
       <small>{{ visibleGroupCount }} grupos en vista</small>
     </article>
@@ -44,10 +44,11 @@
 
   <section class="filters-card">
     <label class="field">
-      <span>Periodo VC</span>
-      <select [(ngModel)]="filters.vc_period_id" (ngModelChange)="onVcPeriodChange()">
+      <span>Semestre</span>
+      <select [(ngModel)]="filters.semester_id" (ngModelChange)="onSemesterChange()">
+        <option value="">Todos los semestres</option>
         <option *ngFor="let period of periodOptions" [value]="period.id">
-          {{ period.text || period.label || period.id }}
+          {{ period.name || period.label || period.id }}
         </option>
       </select>
     </label>
@@ -56,7 +57,7 @@
       <span>Sede</span>
       <select [(ngModel)]="filters.campus_id" (ngModelChange)="onServerFilterChange()">
         <option value="">Todas las sedes</option>
-        <option *ngFor="let campus of catalog.campuses" [value]="campus.id">
+        <option *ngFor="let campus of availableCampuses" [value]="campus.id">
           {{ campus.name }}
         </option>
       </select>
@@ -66,7 +67,7 @@
       <span>Facultad</span>
       <select [(ngModel)]="filters.faculty_id" (ngModelChange)="onFacultyChange()">
         <option value="">Todas las facultades</option>
-        <option *ngFor="let faculty of catalog.faculties" [value]="faculty.id">
+        <option *ngFor="let faculty of availableFaculties" [value]="faculty.id">
           {{ faculty.name }}
         </option>
       </select>
@@ -94,7 +95,7 @@
 
     <label class="field">
       <span>Modalidad</span>
-      <select [(ngModel)]="filters.delivery_modality_id" (ngModelChange)="onServerFilterChange()">
+      <select [(ngModel)]="filters.delivery_modality_id" (ngModelChange)="onLocalFilterChange()">
         <option value="">Todas</option>
         <option *ngFor="let modality of modalityOptions" [value]="modality.id">
           {{ modality.name }}
@@ -104,7 +105,7 @@
 
     <label class="field">
       <span>Turno</span>
-      <select [(ngModel)]="filters.shift_id" (ngModelChange)="onServerFilterChange()">
+      <select [(ngModel)]="filters.shift_id" (ngModelChange)="onLocalFilterChange()">
         <option value="">Todos los turnos</option>
         <option *ngFor="let shift of shiftOptions" [value]="shift.id">
           {{ shift.label }}
@@ -116,8 +117,9 @@
       <span>Busqueda</span>
       <input
         type="search"
-        [(ngModel)]="filters.search"
-        placeholder="Curso, docente, grupo o aula"
+        [(ngModel)]="searchDraft"
+        (ngModelChange)="onSearchChange()"
+        placeholder="Codigo de curso, codigo de programa, seccion, grupo o aula"
         (keyup.enter)="applySearch()" />
     </label>
 
@@ -146,7 +148,7 @@
   <section class="toolbar" [class.is-empty]="selectedRowIds.length === 0">
     <div class="toolbar-copy">
       <strong>{{ selectedRowIds.length }}</strong>
-      <span>horarios seleccionados</span>
+      <span>filas seleccionadas</span>
     </div>
 
     <div class="toolbar-actions">
@@ -177,7 +179,7 @@
     <div class="section-head">
       <div>
         <p class="eyebrow">Operacion diaria</p>
-        <h2>Horarios por grupo</h2>
+        <h2>Horarios por seccion y grupo</h2>
       </div>
       <span class="count">{{ visibleRows.length }} visibles</span>
     </div>
@@ -195,7 +197,7 @@
             </th>
             <th>Estado</th>
             <th>Curso</th>
-            <th>Grupo</th>
+            <th>Seccion / grupo</th>
             <th>Docente</th>
             <th>Horario</th>
             <th>Aula</th>
@@ -207,7 +209,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let row of visibleRows" [ngClass]="rowClasses(row)" (click)="openDrawer(row)">
+          <tr *ngFor="let row of paginatedRows; trackBy: trackRow" [ngClass]="rowClasses(row)" (click)="openDrawer(row)">
             <td class="checkbox-col">
               <input
                 type="checkbox"
@@ -240,7 +242,7 @@
             <td>
               <div class="cell-stack">
                 <strong>{{ scheduleLabel(row) }}</strong>
-                <span>{{ sessionTypeLabel(row.session_type) }}<ng-container *ngIf="row.minutes"> · {{ row.minutes }} min</ng-container></span>
+                <span>{{ sessionTypeLabel(row.session_type) }}<ng-container *ngIf="row.minutes"> | {{ row.minutes }} min</ng-container></span>
               </div>
             </td>
             <td>
@@ -269,14 +271,42 @@
               <button
                 type="button"
                 class="btn-link"
-                (click)="duplicateGroup($event, row)"
-                [disabled]="saving || loading">
-                Duplicar grupo
+                (click)="syncSectionFromAkademic($event, row)"
+                [disabled]="saving || loading || !canSyncSectionFromAkademic(row)">
+                Sincronizar Akademic
               </button>
             </td>
           </tr>
         </tbody>
       </table>
+
+      <div class="pagination-bar" *ngIf="totalVisibleRows > 0">
+        <div class="pagination-size">
+          <span>Items por pagina:</span>
+          <select [ngModel]="pageSize" (ngModelChange)="onPageSizeChange($event)">
+            <option *ngFor="let size of pageSizeOptions" [ngValue]="size">{{ size }}</option>
+          </select>
+        </div>
+
+        <div class="pagination-status">
+          {{ currentPageStart }} - {{ currentPageEnd }} de {{ totalVisibleRows }}
+        </div>
+
+        <div class="pagination-actions">
+          <button type="button" class="page-btn" (click)="goToFirstPage()" [disabled]="currentPage <= 1">
+            |<
+          </button>
+          <button type="button" class="page-btn" (click)="goToPreviousPage()" [disabled]="currentPage <= 1">
+            <
+          </button>
+          <button type="button" class="page-btn" (click)="goToNextPage()" [disabled]="currentPage >= totalPages">
+            >
+          </button>
+          <button type="button" class="page-btn" (click)="goToLastPage()" [disabled]="currentPage >= totalPages">
+            >|
+          </button>
+        </div>
+      </div>
     </div>
 
     <ng-template #workspaceEmpty>
@@ -299,9 +329,9 @@
   <div class="drawer-scroll" *ngIf="activeDrawerRow as row">
     <div class="drawer-head">
       <div>
-        <p class="eyebrow">Fila operativa</p>
+        <p class="eyebrow">Grupo / horario</p>
         <h3>{{ courseLabel(row) }}</h3>
-        <p>{{ groupLabel(row) }} · {{ groupMetaLabel(row) }} · {{ row.campus_name || 'Sin sede' }}</p>
+        <p>{{ groupLabel(row) }} | {{ groupMetaLabel(row) }} | {{ row.campus_name || 'Sin sede' }}</p>
       </div>
       <button type="button" class="btn btn-secondary btn-sm" (click)="closeDrawer()">Cerrar</button>
     </div>
@@ -354,14 +384,14 @@
     <section class="drawer-section">
       <div class="section-minihead">
         <h4>Horario</h4>
-        <small *ngIf="!row.meeting_id">Si completas dia y horas se creara el primer horario.</small>
+        <small *ngIf="!row.meeting_id">Si completas dia y horas se creara el primer horario del grupo.</small>
       </div>
 
       <div class="grid-two">
         <label class="field">
           <span>Tipo de sesion</span>
-          <select [(ngModel)]="drawer.form.session_type">
-            <option *ngFor="let option of sessionTypeOptions" [value]="option.value">
+          <select [(ngModel)]="drawer.form.session_type" [disabled]="!canEditSessionTypeForRow(row)">
+            <option *ngFor="let option of sessionTypeOptionsForRow(row)" [value]="option.value">
               {{ option.label }}
             </option>
           </select>
@@ -538,7 +568,7 @@
       <span>Fila origen</span>
       <select [(ngModel)]="replicateModal.source_row_id">
         <option *ngFor="let row of replicateSourceOptions()" [value]="row.row_id">
-          {{ courseLabel(row) }} · Grupo {{ row.group_code }} · {{ scheduleLabel(row) }}
+          {{ courseLabel(row) }} | Grupo {{ row.group_code }} | {{ scheduleLabel(row) }}
         </option>
       </select>
     </label>
@@ -546,7 +576,7 @@
     <div class="target-list">
       <p class="alert-title">Grupos destino</p>
       <article *ngFor="let row of replicateTargetRows()" class="target-row">
-        <strong>{{ groupLabel(row) }} · Grupo {{ row.group_code }}</strong>
+        <strong>{{ groupLabel(row) }} | Grupo {{ row.group_code }}</strong>
         <span>{{ row.primary_teacher_name || 'Sin docente' }}</span>
       </article>
     </div>

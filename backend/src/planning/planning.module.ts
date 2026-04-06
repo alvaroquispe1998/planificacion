@@ -41,6 +41,8 @@ import {
   StudyTypeEntity,
 } from '../entities/planning.entities';
 import {
+  PlanningSubsectionVideoconferenceEntity,
+  PlanningSubsectionVideoconferenceOverrideEntity,
   VcAcademicProgramEntity,
   VcCourseEntity,
   VcFacultyEntity,
@@ -96,6 +98,8 @@ import { PlanningService } from './planning.service';
       VcAcademicProgramEntity,
       VcCourseEntity,
       VcSectionEntity,
+      PlanningSubsectionVideoconferenceEntity,
+      PlanningSubsectionVideoconferenceOverrideEntity,
     ]),
   ],
   controllers: [PlanningController],

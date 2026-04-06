@@ -23,6 +23,19 @@ type ZoomMeetingsResponse = {
     next_page_token?: string;
 };
 
+type ZoomPastMeetingInstancesResponse = {
+    meetings?: unknown[];
+};
+
+type ZoomPastMeetingParticipantsResponse = {
+    participants?: unknown[];
+    next_page_token?: string;
+};
+
+type ZoomMeetingRecordingsResponse = {
+    recording_files?: unknown[];
+};
+
 export type ZoomMeetingSummary = {
     id: string;
     topic: string | null;
@@ -32,6 +45,52 @@ export type ZoomMeetingSummary = {
     join_url: string | null;
     start_url: string | null;
     host_email: string | null;
+};
+
+export type ZoomPastMeetingInstanceSummary = {
+    uuid: string;
+    id: string | null;
+    topic: string | null;
+    start_time: string | null;
+    duration_minutes: number | null;
+    raw: Record<string, unknown>;
+};
+
+export type ZoomPastMeetingDetail = {
+    uuid: string;
+    id: string | null;
+    topic: string | null;
+    start_time: string | null;
+    end_time: string | null;
+    duration_minutes: number | null;
+    status: string | null;
+    host_email: string | null;
+    raw: Record<string, unknown>;
+};
+
+export type ZoomPastMeetingParticipant = {
+    zoom_participant_id: string | null;
+    zoom_user_id: string | null;
+    display_name: string;
+    email: string | null;
+    role: string | null;
+    join_time: string | null;
+    leave_time: string | null;
+    duration_minutes: number | null;
+    raw: Record<string, unknown>;
+};
+
+export type ZoomMeetingRecordingFile = {
+    zoom_recording_id: string | null;
+    recording_type: string | null;
+    file_extension: string | null;
+    file_size_bytes: string | null;
+    download_url: string | null;
+    play_url: string | null;
+    start_time: string | null;
+    end_time: string | null;
+    status: string | null;
+    raw: Record<string, unknown>;
 };
 
 @Injectable()
@@ -165,6 +224,69 @@ export class ZoomAccountService {
         return groups.flat();
     }
 
+    async listPastMeetingInstances(meetingId: string) {
+        const response = await this.fetchZoomJsonOrNull<ZoomPastMeetingInstancesResponse>(
+            `/past_meetings/${this.encodeZoomIdPathSegment(meetingId)}/instances`,
+        );
+        const rows = Array.isArray(response?.meetings) ? response.meetings : [];
+        return rows
+            .map((row) => this.mapPastMeetingInstance(row))
+            .filter((item): item is ZoomPastMeetingInstanceSummary => Boolean(item));
+    }
+
+    async getPastMeetingDetail(meetingUuid: string) {
+        const response = await this.fetchZoomJsonOrNull<Record<string, unknown>>(
+            `/past_meetings/${this.encodeZoomIdPathSegment(meetingUuid)}`,
+        );
+        if (!response) {
+            return null;
+        }
+        return this.mapPastMeetingDetail(response);
+    }
+
+    async listPastMeetingParticipants(meetingUuid: string) {
+        const config = await this.requireConfiguredConfig();
+        const pageSize = Math.max(1, Math.min(300, config.pageSize || 20));
+        const items: ZoomPastMeetingParticipant[] = [];
+        let nextPageToken = '';
+
+        do {
+            const query = new URLSearchParams({
+                page_size: String(pageSize),
+            });
+            if (nextPageToken) {
+                query.set('next_page_token', nextPageToken);
+            }
+            const response = await this.fetchZoomJsonOrNull<ZoomPastMeetingParticipantsResponse>(
+                `/past_meetings/${this.encodeZoomIdPathSegment(meetingUuid)}/participants?${query.toString()}`,
+            );
+            if (!response) {
+                return [];
+            }
+            const rows = Array.isArray(response.participants) ? response.participants : [];
+            for (const row of rows) {
+                const participant = this.mapPastMeetingParticipant(row);
+                if (participant) {
+                    items.push(participant);
+                }
+            }
+            nextPageToken =
+                typeof response.next_page_token === 'string' ? response.next_page_token : '';
+        } while (nextPageToken);
+
+        return items;
+    }
+
+    async listMeetingRecordings(meetingIdOrUuid: string) {
+        const response = await this.fetchZoomJsonOrNull<ZoomMeetingRecordingsResponse>(
+            `/meetings/${this.encodeZoomIdPathSegment(meetingIdOrUuid)}/recordings`,
+        );
+        const rows = Array.isArray(response?.recording_files) ? response.recording_files : [];
+        return rows
+            .map((row) => this.mapMeetingRecording(row))
+            .filter((item): item is ZoomMeetingRecordingFile => Boolean(item));
+    }
+
     private async findConfigEntity() {
         const rows = await this.zoomConfigRepo.find({
             order: { created_at: 'ASC' },
@@ -240,6 +362,18 @@ export class ZoomAccountService {
         return this.parseJson<T>(bodyText) ?? ({} as T);
     }
 
+    private async fetchZoomJsonOrNull<T>(path: string) {
+        try {
+            return await this.fetchZoomJson<T>(path);
+        } catch (error) {
+            const message = this.toErrorMessage(error);
+            if (message.includes('Zoom API devolvio 404') || message.includes('"code":3301')) {
+                return null;
+            }
+            throw error;
+        }
+    }
+
     private mapMeetingSummary(value: unknown): ZoomMeetingSummary | null {
         if (!value || typeof value !== 'object') {
             return null;
@@ -266,6 +400,116 @@ export class ZoomAccountService {
             start_url: typeof record.start_url === 'string' ? record.start_url : null,
             host_email: typeof record.host_email === 'string' ? record.host_email : null,
         };
+    }
+
+    private mapPastMeetingInstance(value: unknown): ZoomPastMeetingInstanceSummary | null {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+        const record = value as Record<string, unknown>;
+        const uuid = record.uuid !== undefined && record.uuid !== null ? String(record.uuid) : '';
+        if (!uuid) {
+            return null;
+        }
+        return {
+            uuid,
+            id: record.id !== undefined && record.id !== null ? String(record.id) : null,
+            topic: typeof record.topic === 'string' ? record.topic : null,
+            start_time: typeof record.start_time === 'string' ? record.start_time : null,
+            duration_minutes:
+                typeof record.duration === 'number'
+                    ? record.duration
+                    : Number.isFinite(Number(record.duration))
+                        ? Number(record.duration)
+                        : null,
+            raw: record,
+        };
+    }
+
+    private mapPastMeetingDetail(value: unknown): ZoomPastMeetingDetail | null {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+        const record = value as Record<string, unknown>;
+        const uuid = record.uuid !== undefined && record.uuid !== null ? String(record.uuid) : '';
+        if (!uuid) {
+            return null;
+        }
+        return {
+            uuid,
+            id: record.id !== undefined && record.id !== null ? String(record.id) : null,
+            topic: typeof record.topic === 'string' ? record.topic : null,
+            start_time: typeof record.start_time === 'string' ? record.start_time : null,
+            end_time: typeof record.end_time === 'string' ? record.end_time : null,
+            duration_minutes:
+                typeof record.duration === 'number'
+                    ? record.duration
+                    : Number.isFinite(Number(record.duration))
+                        ? Number(record.duration)
+                        : null,
+            status: typeof record.status === 'string' ? record.status : null,
+            host_email: typeof record.host_email === 'string' ? record.host_email : null,
+            raw: record,
+        };
+    }
+
+    private mapPastMeetingParticipant(value: unknown): ZoomPastMeetingParticipant | null {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+        const record = value as Record<string, unknown>;
+        const displayName =
+            typeof record.name === 'string'
+                ? record.name.trim()
+                : typeof record.user_name === 'string'
+                    ? record.user_name.trim()
+                    : '';
+        if (!displayName) {
+            return null;
+        }
+        return {
+            zoom_participant_id:
+                record.id !== undefined && record.id !== null ? String(record.id) : null,
+            zoom_user_id:
+                record.user_id !== undefined && record.user_id !== null ? String(record.user_id) : null,
+            display_name: displayName,
+            email: typeof record.user_email === 'string' ? record.user_email : typeof record.email === 'string' ? record.email : null,
+            role: typeof record.role === 'string' ? record.role : null,
+            join_time: typeof record.join_time === 'string' ? record.join_time : null,
+            leave_time: typeof record.leave_time === 'string' ? record.leave_time : null,
+            duration_minutes:
+                typeof record.duration === 'number'
+                    ? record.duration
+                    : Number.isFinite(Number(record.duration))
+                        ? Number(record.duration)
+                        : null,
+            raw: record,
+        };
+    }
+
+    private mapMeetingRecording(value: unknown): ZoomMeetingRecordingFile | null {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+        const record = value as Record<string, unknown>;
+        return {
+            zoom_recording_id:
+                record.id !== undefined && record.id !== null ? String(record.id) : null,
+            recording_type: typeof record.recording_type === 'string' ? record.recording_type : null,
+            file_extension: typeof record.file_extension === 'string' ? record.file_extension : null,
+            file_size_bytes:
+                record.file_size !== undefined && record.file_size !== null ? String(record.file_size) : null,
+            download_url: typeof record.download_url === 'string' ? record.download_url : null,
+            play_url: typeof record.play_url === 'string' ? record.play_url : null,
+            start_time: typeof record.recording_start === 'string' ? record.recording_start : typeof record.start_time === 'string' ? record.start_time : null,
+            end_time: typeof record.recording_end === 'string' ? record.recording_end : typeof record.end_time === 'string' ? record.end_time : null,
+            status: typeof record.status === 'string' ? record.status : null,
+            raw: record,
+        };
+    }
+
+    private encodeZoomIdPathSegment(value: string) {
+        return encodeURIComponent(encodeURIComponent(value));
     }
 
     private parseJson<T>(value: string): T | null {

@@ -49,6 +49,7 @@ frontend/.env
 !backend/.env.dev.example
 !backend/.env.prod.example
 !frontend/.env.example
+frontend/public/runtime-config.js
 
 # -----------------------------
 # IDE / editor

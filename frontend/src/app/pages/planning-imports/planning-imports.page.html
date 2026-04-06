@@ -2,9 +2,13 @@
   <header class="hero">
     <div>
       <p class="eyebrow">Carga masiva</p>
-      <h1>Revision previa de la carga</h1>
+      <h1>{{ isAkademicSourceSelected ? 'Sincronizacion Akademic' : 'Revision previa de la carga' }}</h1>
       <p class="subtle">
-        Trabaja primero con Akademic y usa Excel solo como contingencia. Antes de insertar nada, revisa que filas se guardaran, cuales no y cuales entraran con datos incompletos.
+        {{
+          isAkademicSourceSelected
+            ? 'Primero genera el preview desde Akademic, revisa que entrara y luego inserta en tablas solo cuando tu lo decidas.'
+            : 'Trabaja primero con Akademic y usa Excel solo como contingencia. Antes de insertar nada, revisa que filas se guardaran, cuales no y cuales entraran con datos incompletos.'
+        }}
       </p>
     </div>
     <div class="hero-actions">
@@ -68,7 +72,7 @@
       </label>
     </div>
     <p class="subtle">
-      La sincronizacion desde Akademic se ejecuta por semestre. El resto del alcance se resolvera automaticamente desde la data descargada.
+      El preview desde Akademic se genera por semestre. Nada se inserta hasta que confirmes con el boton de carga.
     </p>
   </section>
 
@@ -85,8 +89,12 @@
     </div>
     <div class="upload-actions">
       <input *ngIf="!isAkademicSourceSelected" type="file" accept=".xlsx,.xls" (change)="onFileChange($event)" />
-      <button class="btn btn-primary btn-sm" type="button" (click)="uploadPreview()" [disabled]="isPreviewProcessing">
-        {{ isPreviewProcessing ? 'Procesando...' : ('Generar revision previa desde ' + sourceModeLabel) }}
+      <button
+        class="btn btn-primary btn-sm"
+        type="button"
+        (click)="uploadPreview()"
+        [disabled]="isPreviewProcessing || executing || isExecutionProcessing">
+        {{ primaryAkademicActionLabel }}
       </button>
     </div>
   </section>
@@ -107,7 +115,7 @@
     <p class="subtle progress-copy">
       {{
         isAkademicSourceSelected
-          ? 'El sistema esta consultando Akademic, armando la estructura equivalente y revisando si ya existe informacion en los scopes detectados.'
+          ? 'El sistema esta consultando Akademic, armando la estructura equivalente y detectando que informacion anterior debe reemplazar.'
           : 'El sistema esta leyendo el Excel, validando filas y revisando si ya existe informacion en los grupos detectados.'
       }}
     </p>
@@ -126,7 +134,7 @@
       <article class="stat-card">
         <span>Filas leidas</span>
         <strong>{{ current.summary?.total_row_count || 0 }}</strong>
-        <small>Total revisado en el Excel</small>
+        <small>{{ isAkademicSourceSelected ? 'Total revisado en la sincronizacion' : 'Total revisado en el Excel' }}</small>
       </article>
       <article class="stat-card">
         <span>Filas que si entran</span>
@@ -144,13 +152,13 @@
         <small>La estructura si se guardara</small>
       </article>
       <article class="stat-card" *ngIf="previewDurationLabel">
-        <span>Tiempo de revision</span>
+        <span>{{ isAkademicSourceSelected ? 'Tiempo de analisis' : 'Tiempo de revision' }}</span>
         <strong>{{ previewDurationLabel }}</strong>
         <small>
           {{
             current.status === 'PREVIEW_FAILED'
-              ? 'Tiempo total hasta que el preview fallo.'
-              : 'Tiempo total que tomo generar esta revision.'
+              ? (isAkademicSourceSelected ? 'Tiempo total hasta que la sincronizacion fallo durante el analisis.' : 'Tiempo total hasta que el preview fallo.')
+              : (isAkademicSourceSelected ? 'Tiempo total que tomo analizar y preparar esta sincronizacion.' : 'Tiempo total que tomo generar esta revision.')
           }}
         </small>
       </article>
@@ -160,7 +168,7 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">Resumen claro</p>
-          <h2>Como se tratara este archivo</h2>
+          <h2>{{ isAkademicSourceSelected ? 'Como se tratara esta sincronizacion' : 'Como se tratara este archivo' }}</h2>
         </div>
       </div>
 
@@ -175,7 +183,7 @@
           <span>No se guardara</span>
           <strong>{{ current.summary?.blocked_row_count || 0 }} filas quedaran fuera por ahora</strong>
           <small *ngIf="topBlockingReasons().length === 0">
-            No hay motivos bloqueantes detectados en este preview.
+            {{ isAkademicSourceSelected ? 'No hay motivos bloqueantes detectados en esta sincronizacion.' : 'No hay motivos bloqueantes detectados en este preview.' }}
           </small>
           <div *ngIf="topBlockingReasons().length" class="outcome-reasons">
             <span *ngFor="let item of topBlockingReasons()">
@@ -198,7 +206,7 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">Estructura</p>
-          <h2>Lo que se creara en la plataforma</h2>
+          <h2>{{ isAkademicSourceSelected ? 'Resultado de la sincronizacion' : 'Lo que se creara en la plataforma' }}</h2>
         </div>
         <button
           class="btn btn-primary btn-sm"
@@ -218,11 +226,11 @@
 
       <div class="summary-grid">
         <article class="summary-card">
-          <span>Si tomaras todo el preview</span>
+          <span>{{ isAkademicSourceSelected ? 'Si tomaras toda la sincronizacion' : 'Si tomaras todo el preview' }}</span>
           <strong>{{ countsLabel(current.summary?.create_counts) }}</strong>
         </article>
         <article class="summary-card">
-          <span>Segun las decisiones actuales</span>
+          <span>{{ isAkademicSourceSelected ? 'Resultado que se aplicara' : 'Segun las decisiones actuales' }}</span>
           <strong>{{ countsLabel(current.summary?.effective_create_counts) }}</strong>
         </article>
         <article class="summary-card" *ngIf="current.report && executionDurationLabel">
@@ -233,12 +241,109 @@
         <article class="summary-card success-tone" *ngIf="current.report && current.status === 'EXECUTED'">
           <span>Ultima ejecucion</span>
           <strong>{{ executionReportSummary }}</strong>
-          <small>Esta revision ya fue aplicada en la plataforma.</small>
+          <small>{{ isAkademicSourceSelected ? 'Esta sincronizacion ya fue aplicada en la plataforma.' : 'Esta revision ya fue aplicada en la plataforma.' }}</small>
         </article>
       </div>
     </section>
 
-    <section class="panel" *ngIf="existingScopeDecisions.length">
+    <section class="panel" *ngIf="isAkademicSourceSelected && syncChangeMapCards.length">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Diff de la corrida</p>
+          <h2>Que cambiara contra lo que ya existe</h2>
+        </div>
+        <button class="btn btn-secondary btn-sm" type="button" (click)="toggleSyncDiffDetail()">
+          {{ showSyncDiffDetail ? 'Ocultar detalle' : 'Ver detalle' }}
+        </button>
+      </div>
+
+      <p class="subtle scope-help">
+        Este diff compara lo ya guardado en el alcance detectado contra lo que acaba de traer Akademic en esta corrida.
+      </p>
+
+      <div class="summary-grid">
+        <article class="summary-card" *ngFor="let item of syncChangeMapCards">
+          <span>{{ item.title }}</span>
+          <strong>{{ item.value }}</strong>
+        </article>
+        <article class="summary-card">
+          <span>Resumen</span>
+          <strong>{{ syncDiffSummaryText }}</strong>
+        </article>
+      </div>
+
+      <div class="table-wrap" *ngIf="showSyncDiffDetail && syncScopesWithChanges.length">
+        <table class="data-table compact">
+          <thead>
+            <tr>
+              <th>Grupo detectado</th>
+              <th>Ofertas</th>
+              <th>Secciones</th>
+              <th>Grupos</th>
+              <th>Horarios</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let item of syncScopesWithChanges">
+              <td>
+                <strong>{{ scopeLabelDisplay(item) }}</strong>
+                <div class="muted">{{ existingSummaryLabelDisplay(item) }}</div>
+              </td>
+              <td>
+                <div>{{ scopeChangeLabel(item, 'offers') }}</div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'offers').created">
+                  Entran: {{ scopeChangeExamples(item, 'offers').created }}
+                </div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'offers').updated">
+                  Siguen: {{ scopeChangeExamples(item, 'offers').updated }}
+                </div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'offers').deleted">
+                  Salen: {{ scopeChangeExamples(item, 'offers').deleted }}
+                </div>
+              </td>
+              <td>
+                <div>{{ scopeChangeLabel(item, 'sections') }}</div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'sections').created">
+                  Entran: {{ scopeChangeExamples(item, 'sections').created }}
+                </div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'sections').updated">
+                  Siguen: {{ scopeChangeExamples(item, 'sections').updated }}
+                </div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'sections').deleted">
+                  Salen: {{ scopeChangeExamples(item, 'sections').deleted }}
+                </div>
+              </td>
+              <td>
+                <div>{{ scopeChangeLabel(item, 'groups') }}</div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'groups').created">
+                  Entran: {{ scopeChangeExamples(item, 'groups').created }}
+                </div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'groups').updated">
+                  Siguen: {{ scopeChangeExamples(item, 'groups').updated }}
+                </div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'groups').deleted">
+                  Salen: {{ scopeChangeExamples(item, 'groups').deleted }}
+                </div>
+              </td>
+              <td>
+                <div>{{ scopeChangeLabel(item, 'schedules') }}</div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'schedules').created">
+                  Entran: {{ scopeChangeExamples(item, 'schedules').created }}
+                </div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'schedules').updated">
+                  Siguen: {{ scopeChangeExamples(item, 'schedules').updated }}
+                </div>
+                <div class="muted" *ngIf="scopeChangeExamples(item, 'schedules').deleted">
+                  Salen: {{ scopeChangeExamples(item, 'schedules').deleted }}
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" *ngIf="!isAkademicSourceSelected && existingScopeDecisions.length">
       <div class="section-head">
         <div>
           <p class="eyebrow">Grupos detectados</p>
@@ -288,7 +393,7 @@
       </div>
     </section>
 
-    <section class="panel" *ngIf="current.unresolved_mappings?.length">
+    <section class="panel" *ngIf="!isAkademicSourceSelected && current.unresolved_mappings?.length">
       <div class="section-head">
         <div>
           <p class="eyebrow">Pendientes</p>
@@ -387,6 +492,9 @@
               <td>
                 <strong>{{ item.course_code || 'Sin codigo' }}</strong>
                 <div class="muted">{{ item.course_name || 'Sin nombre' }}</div>
+                <div class="muted" *ngIf="item.teacher_name || item.teacher_dni">
+                  Docente: {{ item.teacher_name || 'Sin nombre' }}<span *ngIf="item.teacher_dni"> | DNI {{ item.teacher_dni }}</span>
+                </div>
               </td>
               <td>{{ item.section || 'Sin seccion' }} -> {{ item.import_subsection_code || 'Sin grupo' }}</td>
               <td>{{ rowPreviewContextLabel(item) || 'Sin contexto' }}</td>

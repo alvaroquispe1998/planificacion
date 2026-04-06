@@ -4,7 +4,7 @@
       <p class="eyebrow">Configuracion por oferta</p>
       <h1>Secciones y grupos</h1>
       <p class="subtle">
-        Administra las secciones creadas para el curso y configura sus grupos base con uno o varios horarios.
+        Administra las secciones creadas para el curso y configura sus grupos y horarios con una sola estructura operativa.
       </p>
     </div>
     <div class="hero-actions">
@@ -206,7 +206,7 @@
             <table class="subsections-table">
               <thead>
                 <tr>
-                  <th>Codigo</th>
+                  <th>Grupo</th>
                   <th>Responsable</th>
                   <th>Turno</th>
                   <th>Modalidad</th>
@@ -258,9 +258,9 @@
     <div class="drawer-head">
       <div>
         <p class="eyebrow">Grupo</p>
-        <h3>{{ activeSubsection.code }}</h3>
+        <h3>Grupo {{ activeSubsection.code }}</h3>
         <p class="drawer-subtitle">
-          {{ sectionPrimaryCode(activeSection) || 'Seccion' }} - {{ subsectionStatusLabel(activeSubsection) }}
+          {{ sectionPrimaryCode(activeSection) || 'Seccion' }} | {{ sectionSecondaryCode(activeSection) || 'Interna base' }} | {{ subsectionStatusLabel(activeSubsection) }}
         </p>
       </div>
       <button class="btn btn-ghost" (click)="closeSubsectionDrawer()">Cerrar</button>
@@ -285,7 +285,7 @@
         </div>
         <div class="drawer-grid drawer-grid-two">
           <label class="field field-emphasis">
-            <span>Jefe de practica</span>
+            <span>Responsable del grupo</span>
             <div class="search-select">
               <input
                 type="text"
@@ -433,7 +433,7 @@
             <div class="schedule-item-main">
               <strong>{{ dayLabel(schedule.day_of_week) }}</strong>
               <span>{{ timeLabel(schedule.start_time) }} - {{ timeLabel(schedule.end_time) }}</span>
-              <span>{{ scheduleSessionTypeLabel(schedule) }} · {{ scheduleLocationLabel(schedule, activeSubsection) }}</span>
+              <span>{{ scheduleSessionTypeLabel(schedule) }} | {{ scheduleLocationLabel(schedule, activeSubsection) }}</span>
               <span>{{ scheduleTeacherLabel(schedule, activeSubsection) }}</span>
             </div>
             <div class="schedule-item-side">
@@ -467,6 +467,17 @@
               {{ subsectionCurrentHoursLabel(activeSubsection) }}
             </span>
           </div>
+
+          <label class="field">
+            <span>Tipo de sesion</span>
+            <select
+              [(ngModel)]="scheduleDraftsBySubsectionId[activeSubsection.id].session_type"
+              [disabled]="saving || isWorkflowReadOnly || !canEditScheduleSessionType(activeSubsection)">
+              <option *ngFor="let option of scheduleSessionTypeOptions(activeSubsection)" [value]="option.value">
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
 
           <label class="field">
             <span>Dia</span>
@@ -531,28 +542,30 @@
     <div class="modal-head">
       <div>
         <p class="eyebrow">Nueva seccion</p>
-        <h3>Crear seccion para la oferta</h3>
+        <h3>Crear seccion y grupos para la oferta</h3>
       </div>
       <button class="btn btn-ghost" (click)="closeCreateSectionModal()">Cerrar</button>
     </div>
 
     <div class="modal-body">
-      <label class="field">
+      <label class="field" *ngIf="!courseUsesBaseGroupOnly">
         <span>Tipo de creacion</span>
         <select [(ngModel)]="createSectionForm.mode" (ngModelChange)="onCreateSectionModeChange()">
-          <option value="SINGLE">Seccion unica</option>
-          <option value="MULTIPLE">Con grupos</option>
+          <option value="SINGLE">{{ createSectionSingleModeLabel }}</option>
+          <option value="MULTIPLE">{{ createSectionMultipleModeLabel }}</option>
         </select>
       </label>
+      <p class="drawer-helper">{{ createSectionModeHelper }}</p>
 
-      <label class="field" *ngIf="createSectionForm.mode === 'MULTIPLE'">
-        <span>Cantidad de grupos</span>
+      <label class="field" *ngIf="!courseUsesBaseGroupOnly && createSectionForm.mode === 'MULTIPLE'">
+        <span>{{ createSectionGroupCountLabel }}</span>
         <input
           type="number"
           min="2"
           [ngModel]="createSectionForm.subsection_count"
           (ngModelChange)="onCreateSubsectionCountChange($event)" />
       </label>
+      <p *ngIf="createSectionGroupCountHelper" class="drawer-helper">{{ createSectionGroupCountHelper }}</p>
 
       <div class="field">
         <span>Codigo de seccion</span>

@@ -28,6 +28,7 @@ import {
   PlanningCyclePlanRuleEntity,
   PlanningOfferEntity,
   PlanningOfferStatusValues,
+  PlanningSessionTypeValues,
   PlanningScheduleConflictV2Entity,
   PlanningSectionEntity,
   PlanningSubsectionEntity,
@@ -61,6 +62,7 @@ import {
 } from './dto/planning.dto';
 
 type PlanningOfferStatus = (typeof PlanningOfferStatusValues)[number];
+type PlanningSessionType = (typeof PlanningSessionTypeValues)[number];
 type PlanningSubsectionKind = (typeof PlanningSubsectionKindValues)[number];
 type PlanningConflictType = (typeof PlanningV2ConflictTypeValues)[number];
 type ConflictSeverity = (typeof ConflictSeverityValues)[number];
@@ -1065,7 +1067,9 @@ export class PlanningManualService {
     academicProgramId?: string,
     cycle?: number,
     studyPlanId?: string,
+    search?: string,
   ) {
+    const requestedSearch = normalizeSearchValue(search);
     const offers = await this.offersRepo.find({
       where: {
         ...(semesterId ? { semester_id: semesterId } : {}),
@@ -1082,42 +1086,152 @@ export class PlanningManualService {
       return [];
     }
 
-    const context = await this.buildContext(offers.map((item) => item.id));
-    const [semesters, campuses, programs, studyPlans] = await Promise.all([
-      this.findManyByIds(this.semestersRepo, uniqueIds(offers.map((item) => item.semester_id))),
-      this.findManyByIds(this.campusesRepo, uniqueIds(offers.map((item) => item.campus_id))),
-      this.findManyByIds(this.programsRepo, uniqueIds(offers.map((item) => item.academic_program_id))),
-      this.findManyByIds(this.studyPlansRepo, uniqueIds(offers.map((item) => item.study_plan_id))),
+    const candidateOffers =
+      requestedSearch && looksLikeWorkspaceCodeSearch(requestedSearch)
+        ? offers.filter((offer) =>
+            [offer.course_code, offer.course_name]
+              .map((value) => normalizeSearchValue(value))
+              .some((value) => value.includes(requestedSearch)),
+          )
+        : offers;
+    const offersToExpand = candidateOffers.length > 0 ? candidateOffers : offers;
+
+    const context = await this.buildContext(offersToExpand.map((item) => item.id), {
+      skipChangeLogs: true,
+      skipConflicts: true,
+      preloadedOffers: offersToExpand,
+    });
+    const [semesters, campuses, faculties, programs, studyPlans] = await Promise.all([
+      this.findManyByIds(this.semestersRepo, uniqueIds(offersToExpand.map((item) => item.semester_id))),
+      this.findManyByIds(this.campusesRepo, uniqueIds(offersToExpand.map((item) => item.campus_id))),
+      this.findManyByIds(this.facultiesRepo, uniqueIds(offersToExpand.map((item) => item.faculty_id))),
+      this.findManyByIds(this.programsRepo, uniqueIds(offersToExpand.map((item) => item.academic_program_id))),
+      this.findManyByIds(this.studyPlansRepo, uniqueIds(offersToExpand.map((item) => item.study_plan_id))),
     ]);
     const semesterMap = mapById(semesters);
     const campusMap = mapById(campuses);
+    const facultyMap = mapById(faculties);
     const programMap = mapById(programs);
     const studyPlanMap = mapById(studyPlans);
 
-    return offers.map((offer) => ({
+    const expanded = offersToExpand.map((offer) => ({
       ...this.buildOfferDetail(offer, context),
       semester: semesterMap.get(offer.semester_id) ?? null,
       campus: campusMap.get(offer.campus_id) ?? null,
+      faculty: facultyMap.get(offer.faculty_id ?? '') ?? null,
       academic_program: programMap.get(offer.academic_program_id ?? '') ?? null,
       study_plan: studyPlanMap.get(offer.study_plan_id) ?? null,
       change_log: [],
     }));
+
+    if (!requestedSearch) {
+      return expanded;
+    }
+
+    return expanded.filter((offer) => this.matchesExpandedOfferSearch(offer, requestedSearch));
   }
 
   async getOffer(id: string) {
     const offer = await this.requireEntity(this.offersRepo, id, 'planning_offer');
-    const context = await this.buildContext([offer.id]);
-    const planRule = await this.findPlanRuleForOfferContext({
-      semester_id: offer.semester_id,
-      vc_period_id: offer.vc_period_id ?? null,
-      campus_id: offer.campus_id,
-      academic_program_id: offer.academic_program_id ?? null,
-      study_plan_id: offer.study_plan_id,
-      cycle: offer.cycle,
-    });
+    return this.buildEditorOfferDetail(offer);
+  }
+
+  private async buildEditorOfferDetail(offer: PlanningOfferEntity) {
+    const [sections, conflicts, planRule] = await Promise.all([
+      this.sectionsRepo.find({
+        where: { planning_offer_id: offer.id },
+        order: { code: 'ASC' },
+      }),
+      this.conflictsRepo.find({
+        where: { planning_offer_id: offer.id },
+        order: { detected_at: 'DESC' },
+      }),
+      this.findPlanRuleForOfferContext({
+        semester_id: offer.semester_id,
+        vc_period_id: offer.vc_period_id ?? null,
+        campus_id: offer.campus_id,
+        academic_program_id: offer.academic_program_id ?? null,
+        study_plan_id: offer.study_plan_id,
+        cycle: offer.cycle,
+      }),
+    ]);
+
+    const sectionIds = sections.map((item) => item.id);
+    const subsections = sectionIds.length
+      ? await this.subsectionsRepo.find({
+          where: { planning_section_id: In(sectionIds) },
+          order: { code: 'ASC' },
+        })
+      : [];
+    const subsectionIds = subsections.map((item) => item.id);
+    const schedules = subsectionIds.length
+      ? await this.schedulesRepo.find({
+          where: { planning_subsection_id: In(subsectionIds) },
+          order: { day_of_week: 'ASC', start_time: 'ASC' },
+        })
+      : [];
+
+    const [teachers, modalities, buildings, classrooms] = await Promise.all([
+      this.findManyByIds(
+        this.teachersRepo,
+        uniqueIds([
+          ...sections.map((item) => item.teacher_id),
+          ...subsections.map((item) => item.responsible_teacher_id),
+          ...schedules.map((item) => item.teacher_id),
+        ]),
+      ),
+      this.findManyByIds(
+        this.courseModalitiesRepo,
+        uniqueIds(subsections.map((item) => item.course_modality_id)),
+      ),
+      this.findManyByIds(
+        this.buildingsRepo,
+        uniqueIds([
+          ...subsections.map((item) => item.building_id),
+          ...schedules.map((item) => item.building_id),
+        ]),
+      ),
+      this.findManyByIds(
+        this.classroomsRepo,
+        uniqueIds([
+          ...subsections.map((item) => item.classroom_id),
+          ...schedules.map((item) => item.classroom_id),
+        ]),
+      ),
+    ]);
+
+    const teacherMap = mapById(teachers);
+    const subsectionMap = groupBy(subsections, (item) => item.planning_section_id);
+    const scheduleMap = groupBy(schedules, (item) => item.planning_subsection_id);
+    const sectionConflicts = groupBy(conflicts, (item) => item.planning_section_id ?? '__null__');
+    const subsectionConflicts = groupBy(
+      conflicts,
+      (item) => item.planning_subsection_id ?? '__null__',
+    );
+
     return {
-      ...this.buildOfferDetail(offer, context),
-      plan_rule: planRule ? await this.enrichPlanRule(planRule) : null,
+      ...offer,
+      section_count: sections.length,
+      subsection_count: subsections.length,
+      schedule_count: schedules.length,
+      conflict_count: conflicts.length,
+      sections: sections.map((section) => ({
+        ...section,
+        teacher: teacherMap.get(section.teacher_id ?? '') ?? null,
+        subsections: (subsectionMap.get(section.id) ?? []).map((subsection) =>
+          this.buildSubsectionDetail(subsection, {
+            schedules: scheduleMap.get(subsection.id) ?? [],
+            conflicts: subsectionConflicts.get(subsection.id) ?? [],
+            teachers,
+            modalities,
+            buildings,
+            classrooms,
+          }),
+        ),
+        conflicts: sectionConflicts.get(section.id) ?? [],
+      })),
+      conflicts,
+      plan_rule: planRule ?? null,
     };
   }
 
@@ -1153,6 +1267,10 @@ export class PlanningManualService {
     const now = new Date();
     const subsectionCount = Math.max(1, Math.trunc(dto.subsection_count));
     const modalityId = dto.course_modality_id ?? (await this.defaultCourseModalityId());
+    const [sectionModality, campusVcLocation] = await Promise.all([
+      modalityId ? this.courseModalitiesRepo.findOne({ where: { id: modalityId } }) : Promise.resolve(null),
+      this.campusVcLocationMappingsRepo.findOne({ where: { campus_id: offer.campus_id } }),
+    ]);
     const teacherId = emptyToNull(dto.teacher_id);
     const projectedVacancies =
       dto.projected_vacancies !== undefined ? Math.max(0, Math.trunc(dto.projected_vacancies)) : null;
@@ -1175,11 +1293,16 @@ export class PlanningManualService {
       if (duplicateSection) {
         throw new BadRequestException(`La seccion ${sectionCode} ya existe para esta oferta.`);
       }
+      const generatedExternalCode = buildPlanningSectionExternalCode(
+        sectionCode,
+        sectionModality?.code ?? null,
+        campusVcLocation?.vc_location_code ?? null,
+      );
       const section = manager.create(PlanningSectionEntity, {
         id: dto.id ?? newId(),
         planning_offer_id: offerId,
         code: sectionCode,
-        external_code: emptyToNull(dto.external_code) ?? null,
+        external_code: emptyToNull(dto.external_code) ?? generatedExternalCode ?? null,
         source_section_id: null,
         source_payload_json: null,
         teacher_id: teacherId,
@@ -1198,9 +1321,12 @@ export class PlanningManualService {
       });
       const savedSection = await manager.save(PlanningSectionEntity, section);
 
+      const subsectionKinds = Array.from({ length: subsectionCount }, (_, index) =>
+        resolveGeneratedSubsectionKind(offer.course_type, subsectionCount, index),
+      );
       const subsections = Array.from({ length: subsectionCount }, (_, index) => {
         const subsectionCode = index === 0 ? sectionCode : `${sectionCode}${index}`;
-        const kind = resolveGeneratedSubsectionKind(offer.course_type, subsectionCount, index);
+        const kind = subsectionKinds[index];
         const assigned = resolveAssignedHours(kind, offer);
         return manager.create(PlanningSubsectionEntity, {
           id: newId(),
@@ -1213,7 +1339,11 @@ export class PlanningManualService {
           classroom_id: null,
           capacity_snapshot: null,
           shift: null,
-          projected_vacancies: resolveSubsectionProjectedVacancies(projectedVacancies, subsectionCount, index),
+          projected_vacancies: resolveSubsectionProjectedVacancies(
+            projectedVacancies,
+            subsectionKinds,
+            index,
+          ),
           course_type: offer.course_type,
           assigned_theoretical_hours: assigned.theoretical_hours,
           assigned_practical_hours: assigned.practical_hours,
@@ -1385,12 +1515,13 @@ export class PlanningManualService {
         order: { code: 'ASC' },
       });
       const subsectionBeforeMap = new Map(sectionSubsections.map((subsection) => [subsection.id, { ...subsection }]));
+      const updatedSubsectionKinds = sectionSubsections.map((subsection) => subsection.kind);
       const updatedSubsections = sectionSubsections.map((subsection, index) =>
         this.subsectionsRepo.create({
           ...subsection,
           projected_vacancies: resolveSubsectionProjectedVacancies(
             next.projected_vacancies,
-            sectionSubsections.length,
+            updatedSubsectionKinds,
             index,
           ),
           updated_at: new Date(),
@@ -1526,7 +1657,7 @@ export class PlanningManualService {
       where: { planning_section_id: sectionId, code },
     });
     if (existing) {
-      throw new BadRequestException(`La subseccion ${code} ya existe.`);
+        throw new BadRequestException(`El grupo ${code} ya existe.`);
     }
     const classroomId = emptyToNull(dto.classroom_id);
     const buildingId = emptyToNull(dto.building_id);
@@ -1658,7 +1789,7 @@ export class PlanningManualService {
         where: { planning_section_id: current.planning_section_id, code: nextCode },
       });
       if (duplicate && duplicate.id !== id) {
-        throw new BadRequestException(`La subseccion ${nextCode} ya existe.`);
+        throw new BadRequestException(`El grupo ${nextCode} ya existe.`);
       }
     }
     const classroomId =
@@ -1777,7 +1908,7 @@ export class PlanningManualService {
       day_of_week: dto.day_of_week,
       start_time: dto.start_time,
       end_time: dto.end_time,
-      session_type: dto.session_type ?? 'OTHER',
+      session_type: dto.session_type ?? resolveDefaultSessionTypeForGroup(subsection.kind),
       source_session_type_code: emptyToNull(dto.source_session_type_code),
       teacher_id: emptyToNull(dto.teacher_id),
       building_id: buildingId ?? classroom?.building_id ?? null,
@@ -2152,7 +2283,8 @@ export class PlanningManualService {
     const programMap = mapById(programs);
     const classroomMap = mapById(classrooms);
 
-    return conflicts.map((conflict) => {
+    return conflicts
+      .map((conflict) => {
       const offer = offerMap.get(conflict.planning_offer_id ?? '') ?? null;
       const section = sectionMap.get(conflict.planning_section_id ?? '') ?? null;
       const subsection = subsectionMap.get(conflict.planning_subsection_id ?? '') ?? null;
@@ -2197,7 +2329,8 @@ export class PlanningManualService {
           classroomMap,
         ),
       };
-    });
+    })
+      .filter((conflict) => Boolean(conflict.meeting_a && conflict.meeting_b));
   }
 
   async listChangeLog(filters: ChangeLogFilters = {}) {
@@ -2241,7 +2374,12 @@ export class PlanningManualService {
       }));
   }
 
+  private defaultCatalogsEnsured = false;
+
   private async ensureDefaultCatalogs() {
+    if (this.defaultCatalogsEnsured) {
+      return;
+    }
     const now = new Date();
     const defaults = [
       {
@@ -2287,6 +2425,7 @@ export class PlanningManualService {
         );
       }
     }
+    this.defaultCatalogsEnsured = true;
   }
 
   private buildStudyPlanCatalog(
@@ -2736,11 +2875,14 @@ export class PlanningManualService {
   }
 
   private async enrichOffers(offers: PlanningOfferEntity[]) {
-    const context = await this.buildContext(offers.map((item) => item.id));
+    const context = await this.buildContext(offers.map((item) => item.id), { skipChangeLogs: true });
     return offers.map((offer) => this.buildOfferSummary(offer, context));
   }
 
-  private async buildContext(offerIds: string[]): Promise<PlanningContext> {
+  private async buildContext(
+    offerIds: string[],
+    options?: { skipChangeLogs?: boolean; skipConflicts?: boolean; preloadedOffers?: PlanningOfferEntity[] },
+  ): Promise<PlanningContext> {
     if (offerIds.length === 0) {
       return {
         offers: [],
@@ -2761,11 +2903,25 @@ export class PlanningManualService {
         campusVcLocations: [],
       };
     }
-    const offers = await this.offersRepo.find({ where: { id: In(offerIds) } });
-    const sections = await this.sectionsRepo.find({
-      where: { planning_offer_id: In(offerIds) },
-      order: { code: 'ASC' },
-    });
+
+    // --- Phase 1: Fetch offers + sections + conflicts in parallel ---
+    const [offers, sections, conflicts] = await Promise.all([
+      options?.preloadedOffers
+        ? Promise.resolve(options.preloadedOffers)
+        : this.offersRepo.find({ where: { id: In(offerIds) } }),
+      this.sectionsRepo.find({
+        where: { planning_offer_id: In(offerIds) },
+        order: { code: 'ASC' },
+      }),
+      options?.skipConflicts
+        ? Promise.resolve([] as PlanningScheduleConflictV2Entity[])
+        : this.conflictsRepo.find({
+            where: { planning_offer_id: In(offerIds) },
+            order: { detected_at: 'DESC' },
+          }),
+    ]);
+
+    // --- Phase 2: Fetch subsections (needs section IDs) ---
     const sectionIds = sections.map((item) => item.id);
     const subsections = sectionIds.length
       ? await this.subsectionsRepo.find({
@@ -2773,28 +2929,12 @@ export class PlanningManualService {
           order: { code: 'ASC' },
         })
       : [];
+
+    // --- Phase 3: Fetch schedules + all lookups in parallel ---
     const subsectionIds = subsections.map((item) => item.id);
-    const schedules = subsectionIds.length
-      ? await this.schedulesRepo.find({
-          where: { planning_subsection_id: In(subsectionIds) },
-          order: { day_of_week: 'ASC', start_time: 'ASC' },
-        })
-      : [];
-    const conflicts = await this.conflictsRepo.find({
-      where: { planning_offer_id: In(offerIds) },
-      order: { detected_at: 'DESC' },
-    });
-    const entityIds = uniqueIds([
-      ...offerIds,
-      ...sectionIds,
-      ...subsectionIds,
-      ...schedules.map((item) => item.id),
-    ]);
-    const changeLogs = await this.changeLogsRepo.find({
-      where: { entity_id: In(entityIds) },
-      order: { changed_at: 'DESC' },
-    });
+
     const [
+      schedules,
       teachers,
       modalities,
       buildings,
@@ -2806,12 +2946,17 @@ export class PlanningManualService {
       vcSections,
       campusVcLocations,
     ] = await Promise.all([
+      subsectionIds.length
+        ? this.schedulesRepo.find({
+            where: { planning_subsection_id: In(subsectionIds) },
+            order: { day_of_week: 'ASC', start_time: 'ASC' },
+          })
+        : Promise.resolve([] as PlanningSubsectionScheduleEntity[]),
       this.findManyByIds(
         this.teachersRepo,
         uniqueIds([
           ...sections.map((item) => item.teacher_id),
           ...subsections.map((item) => item.responsible_teacher_id),
-          ...schedules.map((item) => item.teacher_id),
         ]),
       ),
       this.findManyByIds(
@@ -2820,17 +2965,11 @@ export class PlanningManualService {
       ),
       this.findManyByIds(
         this.buildingsRepo,
-        uniqueIds([
-          ...subsections.map((item) => item.building_id),
-          ...schedules.map((item) => item.building_id),
-        ]),
+        uniqueIds(subsections.map((item) => item.building_id)),
       ),
       this.findManyByIds(
         this.classroomsRepo,
-        uniqueIds([
-          ...subsections.map((item) => item.classroom_id),
-          ...schedules.map((item) => item.classroom_id),
-        ]),
+        uniqueIds(subsections.map((item) => item.classroom_id)),
       ),
       this.findManyByIds(this.vcPeriodsRepo, uniqueIds(offers.map((item) => item.vc_period_id))),
       this.findManyByIds(this.vcFacultiesRepo, uniqueIds(offers.map((item) => item.vc_faculty_id))),
@@ -2846,15 +2985,53 @@ export class PlanningManualService {
         uniqueIds(offers.map((item) => item.campus_id)),
       ),
     ]);
+
+    // Supplement with schedule-specific teacher/building/classroom IDs
+    const existingTeacherIds = new Set(teachers.map((t) => t.id));
+    const existingBuildingIds = new Set(buildings.map((b) => b.id));
+    const existingClassroomIds = new Set(classrooms.map((c) => c.id));
+    const extraTeacherIds = uniqueIds(schedules.map((item) => item.teacher_id)).filter((id) => !existingTeacherIds.has(id));
+    const extraBuildingIds = uniqueIds(schedules.map((item) => item.building_id)).filter((id) => !existingBuildingIds.has(id));
+    const extraClassroomIds = uniqueIds(schedules.map((item) => item.classroom_id)).filter((id) => !existingClassroomIds.has(id));
+
+    let allTeachers = teachers;
+    let allBuildings = buildings;
+    let allClassrooms = classrooms;
+
+    if (extraTeacherIds.length > 0 || extraBuildingIds.length > 0 || extraClassroomIds.length > 0) {
+      const [et, eb, ec] = await Promise.all([
+        extraTeacherIds.length > 0 ? this.findManyByIds(this.teachersRepo, extraTeacherIds) : Promise.resolve([]),
+        extraBuildingIds.length > 0 ? this.findManyByIds(this.buildingsRepo, extraBuildingIds) : Promise.resolve([]),
+        extraClassroomIds.length > 0 ? this.findManyByIds(this.classroomsRepo, extraClassroomIds) : Promise.resolve([]),
+      ]);
+      allTeachers = [...teachers, ...et];
+      allBuildings = [...buildings, ...eb];
+      allClassrooms = [...classrooms, ...ec];
+    }
+
+    let changeLogs: PlanningChangeLogEntity[] = [];
+    if (!options?.skipChangeLogs) {
+      const entityIds = uniqueIds([
+        ...offerIds,
+        ...sectionIds,
+        ...subsectionIds,
+        ...schedules.map((item) => item.id),
+      ]);
+      changeLogs = await this.changeLogsRepo.find({
+        where: { entity_id: In(entityIds) },
+        order: { changed_at: 'DESC' },
+      });
+    }
+
     return {
       offers,
       sections,
       subsections,
       schedules,
-      teachers,
+      teachers: allTeachers,
       modalities,
-      buildings,
-      classrooms,
+      buildings: allBuildings,
+      classrooms: allClassrooms,
       conflicts,
       changeLogs,
       vcPeriods,
@@ -2933,6 +3110,51 @@ export class PlanningManualService {
       conflicts: context.conflicts.filter((item) => item.planning_offer_id === offer.id),
       change_log: context.changeLogs,
     };
+  }
+
+  private matchesExpandedOfferSearch(offer: any, search: string) {
+    const sections = Array.isArray(offer?.sections) ? offer.sections : [];
+    const subsections = sections.flatMap((section: any) =>
+      Array.isArray(section?.subsections) ? section.subsections : [],
+    );
+    const schedules = subsections.flatMap((subsection: any) =>
+      Array.isArray(subsection?.schedules) ? subsection.schedules : [],
+    );
+    const haystack = normalizeSearchValue(
+      [
+        offer?.course_code,
+        offer?.course_name,
+        offer?.academic_program?.code,
+        offer?.academic_program?.name,
+        offer?.study_plan?.name,
+        offer?.campus?.name,
+        ...sections.flatMap((section: any) => [
+          section?.code,
+          section?.external_code,
+          section?.teacher?.full_name,
+          section?.teacher?.name,
+        ]),
+        ...subsections.flatMap((subsection: any) => [
+          subsection?.code,
+          subsection?.denomination,
+          subsection?.responsible_teacher?.full_name,
+          subsection?.responsible_teacher?.name,
+          subsection?.classroom?.code,
+          subsection?.classroom?.name,
+          subsection?.building?.name,
+        ]),
+        ...schedules.flatMap((schedule: any) => [
+          schedule?.teacher?.full_name,
+          schedule?.teacher?.name,
+          schedule?.classroom?.code,
+          schedule?.classroom?.name,
+          schedule?.building?.name,
+        ]),
+      ]
+        .filter(Boolean)
+        .join(' '),
+    );
+    return haystack.includes(search);
   }
 
   private async buildOfferConfigurationContext(offerIds: string[]) {
@@ -3067,7 +3289,7 @@ export class PlanningManualService {
     throw new BadRequestException(
       sample
         ? `El plan no puede enviarse a revision hasta que todos sus cursos esten listos. Revisa: ${sample}.`
-        : 'El plan no puede enviarse a revision hasta que todos sus cursos tengan al menos una seccion y todas sus subsecciones configuradas.',
+        : 'El plan no puede enviarse a revision hasta que todos sus cursos tengan al menos una seccion y todos sus grupos configurados.',
     );
   }
 
@@ -3465,7 +3687,7 @@ export class PlanningManualService {
     }
     if (!validateSubsectionKindDistribution(offer.course_type, [...siblingKinds, nextKind])) {
       throw new BadRequestException(
-        'En cursos teorico practico debe existir al menos una subseccion teorica y una practica.',
+        'En cursos teorico practico debe existir al menos un grupo teorico y uno practico.',
       );
     }
   }
@@ -3495,6 +3717,10 @@ export class PlanningManualService {
       candidate = `${sectionCode}${counter}`;
     }
     return candidate;
+  }
+
+  async rebuildOfferConflictsAndStatus(offerId: string, actor?: ChangeLogActor | null) {
+    await this.rebuildConflictsForSemesterByOffer(offerId, actor);
   }
 
   private async rebuildConflictsForSemesterByOffer(offerId: string, actor?: ChangeLogActor | null) {
@@ -4197,7 +4423,7 @@ export class PlanningManualService {
       return joinReferenceParts([
         offerLabel,
         sectionCode ? `Seccion ${sectionCode}` : null,
-        subsectionCode ? `Subseccion ${subsectionCode}` : null,
+        subsectionCode ? `Grupo ${subsectionCode}` : null,
         scheduleLabel ? `Horario ${scheduleLabel}` : null,
       ]);
     }
@@ -4205,7 +4431,7 @@ export class PlanningManualService {
       return joinReferenceParts([
         offerLabel,
         sectionCode ? `Seccion ${sectionCode}` : null,
-        subsectionCode ? `Subseccion ${subsectionCode}` : null,
+        subsectionCode ? `Grupo ${subsectionCode}` : null,
       ]);
     }
     if (log.entity_type === 'planning_section') {
@@ -4230,7 +4456,7 @@ export class PlanningManualService {
       joinReferenceParts([
         offerLabel,
         sectionCode ? `Seccion ${sectionCode}` : null,
-        subsectionCode ? `Subseccion ${subsectionCode}` : null,
+        subsectionCode ? `Grupo ${subsectionCode}` : null,
       ]) || 'Sin contexto adicional'
     );
   }
@@ -4247,7 +4473,7 @@ export class PlanningManualService {
     }
     if (subsectionProjectedVacancies > sectionProjectedVacancies) {
       throw new BadRequestException(
-        'La vacante de la subseccion no puede ser mayor a la vacante de la seccion.',
+        'La vacante del grupo no puede ser mayor a la vacante de la seccion.',
       );
     }
   }
@@ -4418,24 +4644,41 @@ function resolveAssignedHours(kind: PlanningSubsectionKind, offer: PlanningOffer
 
 function resolveSubsectionProjectedVacancies(
   sectionProjectedVacancies: number | null | undefined,
-  subsectionCount: number,
+  subsectionKinds: Array<PlanningSubsectionKind | null | undefined>,
   index: number,
 ) {
   if (sectionProjectedVacancies === null || sectionProjectedVacancies === undefined) {
     return null;
   }
   const total = Math.max(0, Math.trunc(sectionProjectedVacancies));
-  const count = Math.max(1, Math.trunc(subsectionCount));
+  const kinds = subsectionKinds.map((item) => item ?? null);
+  const count = Math.max(1, Math.trunc(kinds.length));
   if (count === 1) {
     return total;
   }
-  if (count === 2) {
-    return splitIntegerEvenly(total, count, index);
+
+  const theoryIndexes = kinds
+    .map((kind, position) => ({ kind, position }))
+    .filter((item) => item.kind === 'THEORY')
+    .map((item) => item.position);
+  const practiceIndexes = kinds
+    .map((kind, position) => ({ kind, position }))
+    .filter((item) => item.kind === 'PRACTICE')
+    .map((item) => item.position);
+
+  if (
+    theoryIndexes.length === 1 &&
+    practiceIndexes.length >= 1 &&
+    kinds.every((kind) => kind === 'THEORY' || kind === 'PRACTICE')
+  ) {
+    if (index === theoryIndexes[0]) {
+      return total;
+    }
+    const practicePosition = practiceIndexes.indexOf(index);
+    return splitIntegerEvenly(total, practiceIndexes.length, practicePosition);
   }
-  if (index === 0) {
-    return total;
-  }
-  return splitIntegerEvenly(total, count - 1, index - 1);
+
+  return splitIntegerEvenly(total, count, index);
 }
 
 function splitIntegerEvenly(total: number, parts: number, index: number) {
@@ -4592,15 +4835,25 @@ function buildSubsectionKindErrorMessage(
   subsectionCount: number,
 ) {
   if (courseType === 'TEORICO') {
-    return 'Este curso solo admite subsecciones teoricas.';
+    return 'Este curso solo admite grupos teoricos.';
   }
   if (courseType === 'PRACTICO') {
-    return 'Este curso solo admite subsecciones practicas.';
+    return 'Este curso solo admite grupos practicos.';
   }
   if (Math.max(1, subsectionCount) <= 1) {
-    return 'Si solo existe una subseccion en un curso teorico practico, debe ser teorico practico o practico teorico.';
+    return 'Si solo existe un grupo en un curso teorico practico, debe ser teorico practico o practico teorico.';
   }
-  return 'En cursos teorico practico solo puedes usar subsecciones teoricas o practicas.';
+  return 'En cursos teorico practico solo puedes usar grupos teoricos o practicos.';
+}
+
+function resolveDefaultSessionTypeForGroup(kind: PlanningSubsectionKind | null | undefined): PlanningSessionType {
+  if (kind === 'THEORY') {
+    return 'THEORY';
+  }
+  if (kind === 'PRACTICE') {
+    return 'PRACTICE';
+  }
+  return 'OTHER';
 }
 
 function nextSectionCodeValue(existingCodes: Array<string | null | undefined>) {
@@ -4640,6 +4893,24 @@ function normalizePlanningSectionCode(value: string | null | undefined) {
     .replace(/\s+/g, '')
     .replace(/[^A-Z0-9_-]/g, '');
   return normalized || null;
+}
+
+function buildPlanningSectionExternalCode(
+  sectionCode: string | null | undefined,
+  modalityCode: string | null | undefined,
+  vcLocationCode: string | null | undefined,
+) {
+  const sectionLetters = `${sectionCode ?? ''}`
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '');
+  const location = `${vcLocationCode ?? ''}`.trim().toUpperCase();
+  if (!sectionLetters || !location) {
+    return null;
+  }
+  const normalizedModality = `${modalityCode ?? ''}`.trim().toUpperCase();
+  const modalityPrefix = normalizedModality.includes('VIRTUAL') ? 'V' : 'P';
+  return `${sectionLetters}${modalityPrefix} - ${location}`;
 }
 
 function extractCycleFromLabel(value: string | null | undefined) {
@@ -4974,6 +5245,14 @@ function normalizeSearchValue(value: unknown) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+}
+
+function looksLikeWorkspaceCodeSearch(value: string | null | undefined) {
+  const normalized = normalizeSearchValue(value).replace(/\s+/g, '');
+  if (normalized.length < 4) {
+    return false;
+  }
+  return /[a-z]/.test(normalized) && /\d/.test(normalized);
 }
 
 function recordString(record: Record<string, unknown> | null, key: string) {

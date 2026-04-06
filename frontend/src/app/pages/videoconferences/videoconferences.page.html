@@ -1,217 +1,471 @@
 <div class="videoconferences-container">
-    <section class="page-hero">
-        <div class="hero-copy">
-            <span class="eyebrow">Gestion automatizada</span>
-            <h1>Generacion de Videoconferencias</h1>
-            <p>Busca horarios desde la planificacion real, selecciona las filas que quieras procesar y genera las
-                ocurrencias dentro del rango de fechas.</p>
+  <section class="page-hero">
+    <div class="hero-copy">
+      <span class="eyebrow">Gestion automatizada</span>
+      <h1>Generacion de videoconferencias</h1>
+      <p>
+        Carga ocurrencias reales por rango, revisa modalidad y contexto desde la seccion VC y ajusta excepciones de fecha y hora antes de generar.
+      </p>
+
+      <div class="hero-pills">
+        <span class="hero-pill">{{ totalSchedules || 0 }} ocurrencias cargadas</span>
+        <span class="hero-pill hero-pill-accent">{{ selectedCount }} seleccionadas</span>
+        <span *ngIf="hasActiveFilters" class="hero-pill">{{ activeFilterLabels.length }} filtros activos</span>
+        <span *ngIf="filterOptionsLoading" class="hero-pill">Actualizando filtros</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="card filters-card">
+    <div class="card-header filters-header">
+      <div>
+        <h2>Filtros de seleccion</h2>
+        <p>Define el alcance del lote y luego carga ocurrencias reales para revisar y generar.</p>
+      </div>
+
+      <div class="filters-aside">
+        <span class="aside-label">Vista de trabajo</span>
+        <strong>Ocurrencia efectiva por curso, grupo y fecha</strong>
+      </div>
+    </div>
+
+    <div class="filters-layout">
+      <div class="filters-grid">
+        <div class="filter-group filter-period" [class.is-disabled]="!periodOptions.length">
+          <label>Periodo</label>
+          <select
+            [(ngModel)]="selectedPeriod"
+            (ngModelChange)="onPeriodChange($event)"
+            class="form-control"
+            [disabled]="!periodOptions.length">
+            <option value="">Todos los periodos</option>
+            <option *ngFor="let option of periodOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
         </div>
+
+        <div class="filter-group filter-campus" [class.is-disabled]="!campusOptions.length">
+          <label>Local / Sede</label>
+          <app-multi-select
+            [options]="campusOptions"
+            [(selectedIds)]="selectedCampuses"
+            [disabled]="!campusOptions.length"
+            (selectionChange)="onCampusChange($event)"
+            placeholder="Todas las sedes">
+          </app-multi-select>
+        </div>
+
+        <div class="filter-group filter-faculty" [class.is-disabled]="!facultyOptions.length">
+          <label>Facultad</label>
+          <app-multi-select
+            [options]="facultyOptions"
+            [(selectedIds)]="selectedFaculties"
+            [disabled]="!facultyOptions.length"
+            (selectionChange)="onFacultyChange($event)"
+            placeholder="Todas las facultades">
+          </app-multi-select>
+        </div>
+
+        <div class="filter-group filter-program" [class.is-disabled]="!programOptions.length">
+          <label>Programa academico</label>
+          <app-multi-select
+            [options]="programOptions"
+            [(selectedIds)]="selectedPrograms"
+            [disabled]="!programOptions.length"
+            (selectionChange)="onProgramChange($event)"
+            placeholder="Todos los programas">
+          </app-multi-select>
+        </div>
+
+        <div class="filter-group filter-course" [class.is-disabled]="!courseOptions.length">
+          <label>Curso</label>
+          <app-multi-select
+            [options]="courseOptions"
+            [(selectedIds)]="selectedCourses"
+            [disabled]="!courseOptions.length"
+            (selectionChange)="onCourseChange($event)"
+            placeholder="Todos los cursos">
+          </app-multi-select>
+        </div>
+
+        <div class="filter-group filter-modality" [class.is-disabled]="!modalityOptions.length">
+          <label>Modalidad</label>
+          <select
+            [(ngModel)]="selectedModality"
+            (ngModelChange)="onModalityChange($event)"
+            class="form-control"
+            [disabled]="!modalityOptions.length">
+            <option value="">Todas</option>
+            <option *ngFor="let option of modalityOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </div>
+
+        <div class="filter-group filter-days" [class.is-disabled]="!dayOptions.length">
+          <label>Dias</label>
+          <app-multi-select
+            [options]="dayOptions"
+            [(selectedIds)]="selectedDays"
+            [disabled]="!dayOptions.length"
+            (selectionChange)="onDaysChange($event)"
+            placeholder="Todos los dias">
+          </app-multi-select>
+        </div>
+      </div>
+
+      <aside class="filters-action-card">
+        <div class="action-copy">
+          <span class="aside-label">Consulta</span>
+          <strong>Carga primero el lote base de horarios y despues define el rango operativo abajo.</strong>
+          <p>La reprogramacion solo cambia fecha y hora de una ocurrencia, sin tocar la planificacion base.</p>
+          <p class="action-status" *ngIf="filterOptionsLoading">
+            Actualizando opciones segun la combinacion actual...
+          </p>
+        </div>
+
+        <button class="btn btn-primary btn-block" (click)="onLoadBase()" [disabled]="loading || filterOptionsLoading">
+          {{ loading ? 'Buscando...' : 'Buscar horarios' }}
+        </button>
+      </aside>
+    </div>
+
+    <div class="filters-footer">
+      <div class="filters-summary" *ngIf="hasActiveFilters; else filtersEmptyState">
+        <span class="summary-label">Filtros activos</span>
+        <div class="filter-chips">
+          <span class="filter-chip" *ngFor="let label of activeFilterLabels">{{ label }}</span>
+        </div>
+      </div>
+
+      <ng-template #filtersEmptyState>
+        <p class="filters-empty">Sin filtros especificos. Se cargaran todos los horarios disponibles para armar el lote base.</p>
+      </ng-template>
+
+      <button
+        class="btn btn-secondary"
+        type="button"
+        (click)="clearFilters()"
+        [disabled]="!hasActiveFilters && !hasSearched">
+        Limpiar filtros
+      </button>
+    </div>
+
+    <p class="filters-note">
+      La modalidad se interpreta desde el codigo visible de la seccion VC o de la seccion externa: P presencial, V virtual, HP hibrido presencial y HV hibrido virtual.
+    </p>
+  </div>
+
+  <div class="card results-card" *ngIf="previewData.length > 0">
+    <div class="results-toolbar">
+      <div class="results-copy">
+        <span class="eyebrow eyebrow-soft">Lote listo para generar</span>
+        <h2>{{ usesOccurrenceRows ? 'Ocurrencias listas para crear' : 'Horarios listos para crear' }}</h2>
+        <p>{{ selectionSummaryLabel }}</p>
+      </div>
+
+      <div class="generation-panel">
+        <div class="input-group">
+          <label>Fecha inicio</label>
+          <input type="date" [(ngModel)]="startDate" class="form-control form-control-compact" />
+        </div>
+        <div class="input-group">
+          <label>Fecha fin</label>
+          <input type="date" [(ngModel)]="endDate" class="form-control form-control-compact" />
+        </div>
+        <button class="btn btn-secondary" type="button" (click)="applyOperationalRange()" [disabled]="loading || !previewData.length">
+          Ver ocurrencias
+        </button>
+        <button class="btn btn-success" (click)="generate()" [disabled]="loading || !selectedCount">
+          Generar videoconferencias
+        </button>
+      </div>
+    </div>
+
+    <div class="result-actions">
+      <label class="select-all-row">
+        <input type="checkbox" [checked]="allSelected" (change)="toggleAll()" />
+        <span>{{ usesOccurrenceRows ? 'Seleccionar todas las ocurrencias generables' : 'Seleccionar todos los horarios base' }}</span>
+      </label>
+
+      <div class="selection-chips">
+        <div class="results-chip results-chip-strong">{{ selectedCount }} seleccionadas</div>
+        <div class="results-chip">{{ totalSchedules }} encontradas</div>
+      </div>
+    </div>
+
+    <div class="actions-help" *ngIf="usesOccurrenceRows; else baseActionsHelp">
+      <span><strong>Reprogramar:</strong> cambia solo la fecha y hora de esa ocurrencia.</span>
+    </div>
+
+    <ng-template #baseActionsHelp>
+      <div class="actions-help">
+        <span><strong>Ver ocurrencias:</strong> usa el rango de abajo para convertir horarios base en clases por fecha.</span>
+        <span><strong>Reprogramar:</strong> se habilita cuando ya estas viendo ocurrencias por fecha.</span>
+      </div>
+    </ng-template>
+
+    <div class="summary-card" *ngIf="generationResult?.summary as summary">
+      <div class="summary-metric">
+        <strong>{{ summary.requestedOccurrences }}</strong>
+        <span>Ocurrencias</span>
+      </div>
+      <div class="summary-metric">
+        <strong>{{ summary.matched }}</strong>
+        <span>Conciliadas</span>
+      </div>
+      <div class="summary-metric">
+        <strong>{{ summary.createdUnmatched }}</strong>
+        <span>Sin match</span>
+      </div>
+      <div class="summary-metric">
+        <strong>{{ summary.blockedExisting }}</strong>
+        <span>Bloqueadas</span>
+      </div>
+      <div class="summary-metric">
+        <strong>{{ summary.noAvailableZoomUser }}</strong>
+        <span>Sin host</span>
+      </div>
+      <div class="summary-metric">
+        <strong>{{ summary.validationErrors }}</strong>
+        <span>Con validacion pendiente</span>
+      </div>
+      <div class="summary-metric">
+        <strong>{{ summary.errors }}</strong>
+        <span>Errores reales</span>
+      </div>
+    </div>
+
+    <section class="generation-results-board" *ngIf="generationRows.length > 0">
+      <article class="result-column" *ngIf="validationResultRows.length > 0">
+        <header class="result-column-head">
+          <div>
+            <span class="eyebrow eyebrow-soft">Validacion</span>
+            <h3>Datos pendientes</h3>
+          </div>
+          <span class="count-badge">{{ validationResultRows.length }}</span>
+        </header>
+        <div class="result-card-list">
+          <article class="result-card" *ngFor="let item of validationResultRows" [ngClass]="resultToneClass(item)">
+            <div class="result-card-head">
+              <strong>{{ resultCourseLabel(item) }}</strong>
+              <span class="result-status-pill">{{ resultStatusLabel(item) }}</span>
+            </div>
+            <span class="result-context">{{ resultContextLabel(item) }}</span>
+            <p class="result-message">{{ item.message }}</p>
+          </article>
+        </div>
+      </article>
+
+      <article class="result-column" *ngIf="unmatchedResultRows.length > 0">
+        <header class="result-column-head">
+          <div>
+            <span class="eyebrow eyebrow-soft">Conciliacion</span>
+            <h3>Creadas sin match</h3>
+          </div>
+          <span class="count-badge">{{ unmatchedResultRows.length }}</span>
+        </header>
+        <div class="result-card-list">
+          <article class="result-card" *ngFor="let item of unmatchedResultRows" [ngClass]="resultToneClass(item)">
+            <div class="result-card-head">
+              <strong>{{ resultCourseLabel(item) }}</strong>
+              <span class="result-status-pill">{{ resultStatusLabel(item) }}</span>
+            </div>
+            <span class="result-context">{{ resultContextLabel(item) }}</span>
+            <p class="result-message">{{ item.message }}</p>
+            <div class="result-actions-inline">
+              <button
+                class="btn btn-secondary btn-sm"
+                type="button"
+                (click)="retryReconcile(item)"
+                [disabled]="isRetrying(item)">
+                {{ isRetrying(item) ? 'Reintentando...' : 'Reintentar match' }}
+              </button>
+              <button
+                *ngIf="item.record_id"
+                class="btn btn-secondary btn-sm"
+                type="button"
+                (click)="openAuditDetail(item.record_id)">
+                Abrir auditoria
+              </button>
+            </div>
+          </article>
+        </div>
+      </article>
+
+      <article class="result-column" *ngIf="attentionResultRows.length > 0">
+        <header class="result-column-head">
+          <div>
+            <span class="eyebrow eyebrow-soft">Observaciones</span>
+            <h3>Casos por revisar</h3>
+          </div>
+          <span class="count-badge">{{ attentionResultRows.length }}</span>
+        </header>
+        <div class="result-card-list">
+          <article class="result-card" *ngFor="let item of attentionResultRows" [ngClass]="resultToneClass(item)">
+            <div class="result-card-head">
+              <strong>{{ resultCourseLabel(item) }}</strong>
+              <span class="result-status-pill">{{ resultStatusLabel(item) }}</span>
+            </div>
+            <span class="result-context">{{ resultContextLabel(item) }}</span>
+            <p class="result-message">{{ item.message }}</p>
+            <div class="result-actions-inline" *ngIf="item.record_id">
+              <button class="btn btn-secondary btn-sm" type="button" (click)="openAuditDetail(item.record_id)">
+                Abrir auditoria
+              </button>
+            </div>
+          </article>
+        </div>
+      </article>
+
+      <article class="result-column result-column-success" *ngIf="successfulResultRows.length > 0">
+        <header class="result-column-head">
+          <div>
+            <span class="eyebrow eyebrow-soft">OK</span>
+            <h3>Conciliadas</h3>
+          </div>
+          <span class="count-badge">{{ successfulResultRows.length }}</span>
+        </header>
+        <div class="result-card-list">
+          <article class="result-card" *ngFor="let item of successfulResultRows" [ngClass]="resultToneClass(item)">
+            <div class="result-card-head">
+              <strong>{{ resultCourseLabel(item) }}</strong>
+              <span class="result-status-pill">{{ resultStatusLabel(item) }}</span>
+            </div>
+            <span class="result-context">{{ resultContextLabel(item) }}</span>
+            <p class="result-message">{{ item.message }}</p>
+          </article>
+        </div>
+      </article>
     </section>
 
-    <div class="card filters-card">
-        <div class="card-header filters-header">
-            <div>
-                <h2>Filtros de Seleccion</h2>
-                <p>Define el alcance de la busqueda y carga directamente los cursos-horario listos para crear.</p>
+    <div class="rows-shell">
+      <div class="rows-header rows-header-actions">
+        <span></span>
+        <span>Curso / Grupo</span>
+        <span>Fecha / Horario</span>
+        <span>Docente</span>
+        <span>Contexto</span>
+        <span>Acciones</span>
+      </div>
+
+      <div class="schedule-rows">
+        <div
+          class="schedule-line schedule-line-actions"
+          [class.selected]="item.selected"
+          [class.is-disabled]="!item.selectable"
+          *ngFor="let item of previewData; trackBy: trackPreviewItem">
+          <div class="check-cell">
+            <input type="checkbox" [(ngModel)]="item.selected" [disabled]="!item.selectable" />
+          </div>
+
+          <div class="course-cell">
+            <strong>{{ item.course_label }}</strong>
+            <div class="course-meta-row">
+              <span class="course-meta-chip">{{ getSectionDisplay(item) }}</span>
+              <span class="course-meta-chip">{{ getSubsectionDisplay(item) }}</span>
             </div>
+          </div>
 
-            <div class="filters-aside">
-                <span class="aside-label">Vista de trabajo</span>
-                <strong>Filas directas por curso-horario</strong>
-            </div>
-        </div>
+          <div class="time-cell">
+          <div class="time-meta">
+            <span class="day-pill">{{ item.day_label }}</span>
+            <span class="duration-pill">{{ item.duration_minutes }} min</span>
+            <span
+              *ngIf="item.effective_conference_date"
+              class="duration-pill"
+              [ngClass]="getOccurrenceBadgeClass(item)">
+              {{ getOccurrenceBadgeLabel(item) }}
+            </span>
+          </div>
+          <strong>{{ item.effective_start_time }} - {{ item.effective_end_time }}</strong>
+          <span class="meta-inline">{{ getOccurrenceDateLabel(item) }}</span>
+          </div>
 
-        <div class="filters-layout">
-            <div class="filters-grid">
-                <div class="filter-group filter-campus" [class.is-disabled]="!campusOptions.length">
-                    <label>Local / Sede</label>
-                    <app-multi-select [options]="campusOptions" [(selectedIds)]="selectedCampuses"
-                        [disabled]="!campusOptions.length" (selectionChange)="onCampusChange($event)"
-                        placeholder="Todas las sedes">
-                    </app-multi-select>
-                    <p class="filter-hint" *ngIf="!campusOptions.length && !filterOptionsLoading">No hay sedes para la seleccion actual.</p>
-                </div>
+          <div class="teacher-cell">
+            <strong>{{ item.teacher_name || 'Sin docente' }}</strong>
+            <span class="meta-inline">{{ getTeacherMeta(item) }}</span>
+          </div>
 
-                <div class="filter-group filter-faculty" [class.is-disabled]="!facultyOptions.length">
-                    <label>Facultad</label>
-                    <app-multi-select [options]="facultyOptions" [(selectedIds)]="selectedFaculties"
-                        [disabled]="!facultyOptions.length" (selectionChange)="onFacultyChange($event)"
-                        placeholder="Todas las facultades">
-                    </app-multi-select>
-                    <p class="filter-hint" *ngIf="!facultyOptions.length && !filterOptionsLoading">No hay facultades para la seleccion actual.</p>
-                </div>
+          <div class="context-cell">
+            <strong>{{ getContextPrimary(item) }}</strong>
+            <span class="meta-inline">{{ getContextSecondary(item) }}</span>
+            <span class="meta-inline">{{ getVcContext(item) }}</span>
+          </div>
 
-                <div class="filter-group filter-program" [class.is-disabled]="!programOptions.length">
-                    <label>Programa Academico</label>
-                    <app-multi-select [options]="programOptions" [(selectedIds)]="selectedPrograms"
-                        [disabled]="!programOptions.length" (selectionChange)="onProgramChange($event)"
-                        placeholder="Todos los programas">
-                    </app-multi-select>
-                    <p class="filter-hint" *ngIf="!programOptions.length && !filterOptionsLoading">No hay programas disponibles para la seleccion actual.</p>
-                </div>
-
-                <div class="filter-group filter-course" [class.is-disabled]="!courseOptions.length">
-                    <label>Curso</label>
-                    <app-multi-select [options]="courseOptions" [(selectedIds)]="selectedCourses"
-                        [disabled]="!courseOptions.length" (selectionChange)="onCourseChange($event)"
-                        placeholder="Todos los cursos">
-                    </app-multi-select>
-                    <p class="filter-hint" *ngIf="!courseOptions.length && !filterOptionsLoading">No hay cursos disponibles para la seleccion actual.</p>
-                </div>
-
-                <div class="filter-group filter-modality" [class.is-disabled]="!modalityOptions.length">
-                    <label>Modalidad</label>
-                    <select [(ngModel)]="selectedModality" (ngModelChange)="onModalityChange($event)" class="form-control"
-                        [disabled]="!modalityOptions.length">
-                        <option value="">Todas</option>
-                        <option *ngFor="let option of modalityOptions" [value]="option.id">{{ option.label }}</option>
-                    </select>
-                    <p class="filter-hint" *ngIf="!modalityOptions.length && !filterOptionsLoading">No hay modalidades para la seleccion actual.</p>
-                </div>
-
-                <div class="filter-group filter-days" [class.is-disabled]="!dayOptions.length">
-                    <label>Dias</label>
-                    <app-multi-select [options]="dayOptions" [(selectedIds)]="selectedDays"
-                        [disabled]="!dayOptions.length" (selectionChange)="onDaysChange($event)"
-                        placeholder="Todos los dias">
-                    </app-multi-select>
-                    <p class="filter-hint" *ngIf="!dayOptions.length && !filterOptionsLoading">No hay dias para la seleccion actual.</p>
-                </div>
-            </div>
-
-            <aside class="filters-action-card">
-                <div class="action-copy">
-                    <span class="aside-label">Consulta</span>
-                    <strong>Carga el listado y selecciona solo las filas que necesites.</strong>
-                    <p>La generacion se hace despues, con fecha inicio y fecha fin.</p>
-                    <p class="action-status" *ngIf="filterOptionsLoading">Actualizando opciones segun la combinacion actual...</p>
-                </div>
-
-                <button class="btn btn-primary btn-block" (click)="onLoad()" [disabled]="loading || filterOptionsLoading">
-                    {{ loading ? 'Buscando...' : 'Buscar horario' }}
-                </button>
-            </aside>
-        </div>
-
-        <div class="filters-footer">
-            <div class="filters-summary" *ngIf="hasActiveFilters; else filtersEmptyState">
-                <span class="summary-label">Filtros activos</span>
-                <div class="filter-chips">
-                    <span class="filter-chip" *ngFor="let label of activeFilterLabels">{{ label }}</span>
-                </div>
-            </div>
-
-            <ng-template #filtersEmptyState>
-                <p class="filters-empty">Sin filtros especificos. La consulta cargara todos los horarios disponibles.</p>
-            </ng-template>
-
-            <button class="btn btn-secondary" type="button" (click)="clearFilters()" [disabled]="!hasActiveFilters && !hasSearched">
-                Limpiar filtros
+          <div class="actions-cell">
+            <button class="btn btn-secondary btn-sm" type="button" (click)="openOverrideEditor(item)" [disabled]="loading || !canManageOccurrence(item)">
+              Reprogramar
             </button>
+          </div>
         </div>
+      </div>
     </div>
+  </div>
 
-    <div class="card results-card" *ngIf="previewData.length > 0">
-        <div class="results-toolbar">
-            <div class="results-copy">
-                <h2>Horarios listos para crear</h2>
-                <p>{{ selectedCount }} de {{ totalSchedules }} filas seleccionadas.</p>
-            </div>
+  <div *ngIf="!loading && previewData.length === 0" class="empty-state">
+    <p *ngIf="!hasSearched">Define filtros si necesitas acotar y haz clic en "Buscar horarios". Si además defines rango, verás ocurrencias por fecha.</p>
+    <p *ngIf="hasSearched">{{ hasOperationalRange ? 'No se encontraron ocurrencias para los filtros seleccionados.' : 'No se encontraron horarios para los filtros seleccionados.' }}</p>
+  </div>
 
-            <div class="generation-panel">
-                <div class="input-group">
-                    <label>Fecha inicio</label>
-                    <input type="date" [(ngModel)]="startDate" class="form-control">
-                </div>
-                <div class="input-group">
-                    <label>Fecha fin</label>
-                    <input type="date" [(ngModel)]="endDate" class="form-control">
-                </div>
-                <button class="btn btn-success" (click)="generate()" [disabled]="!startDate || !endDate || loading">
-                    Generar videoconferencias
-                </button>
-            </div>
+  <section class="modal-backdrop" *ngIf="overrideEditorOpen && overrideTarget as current">
+    <article class="modal-card">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Reprogramacion</p>
+          <h2>Ajustar solo fecha y hora de la ocurrencia</h2>
         </div>
+        <button class="btn btn-secondary btn-sm" type="button" (click)="closeOverrideEditor()">Cerrar</button>
+      </div>
 
-        <div class="result-actions">
-            <label class="select-all-row">
-                <input type="checkbox" [checked]="allSelected" (change)="toggleAll()">
-                <span>Seleccionar todas las filas</span>
-            </label>
+      <p class="subtle">
+        {{ current.course_label }} | {{ getSectionDisplay(current) }} | {{ getSubsectionDisplay(current) }}
+      </p>
 
-            <div class="results-chip">
-                {{ totalSchedules }} filas encontradas
-            </div>
-        </div>
+      <div class="modal-grid">
+        <label class="field">
+          <span>Fecha base</span>
+          <input type="text" [value]="current.base_conference_date" disabled />
+        </label>
 
-        <div class="summary-card" *ngIf="generationResult?.summary as summary">
-            <div class="summary-metric">
-                <strong>{{ summary.requestedOccurrences }}</strong>
-                <span>Ocurrencias</span>
-            </div>
-            <div class="summary-metric">
-                <strong>{{ summary.matched }}</strong>
-                <span>Conciliadas</span>
-            </div>
-            <div class="summary-metric">
-                <strong>{{ summary.createdUnmatched }}</strong>
-                <span>Sin match</span>
-            </div>
-            <div class="summary-metric">
-                <strong>{{ summary.blockedExisting }}</strong>
-                <span>Bloqueadas</span>
-            </div>
-            <div class="summary-metric">
-                <strong>{{ summary.noAvailableZoomUser }}</strong>
-                <span>Sin host</span>
-            </div>
-            <div class="summary-metric">
-                <strong>{{ summary.errors + summary.validationErrors }}</strong>
-                <span>Con error</span>
-            </div>
-        </div>
+        <label class="field">
+          <span>Hora base</span>
+          <input type="text" [value]="current.start_time + ' - ' + current.end_time" disabled />
+        </label>
 
-        <div class="rows-header">
-            <span>Curso</span>
-            <span>Horario</span>
-            <span>Docente</span>
-            <span>Contexto</span>
-        </div>
+        <label class="field">
+          <span>Nueva fecha</span>
+          <input type="date" [(ngModel)]="overrideForm.overrideDate" />
+        </label>
 
-        <div class="schedule-rows">
-            <label class="schedule-line" [class.selected]="item.selected" *ngFor="let item of previewData">
-                <div class="check-cell">
-                    <input type="checkbox" [(ngModel)]="item.selected">
-                </div>
+        <label class="field">
+          <span>Nueva hora inicio</span>
+          <input type="time" [(ngModel)]="overrideForm.overrideStartTime" />
+        </label>
 
-                <div class="course-cell">
-                    <strong>{{ item.course_label }}</strong>
-                    <span class="course-meta-chip">{{ getSubsectionDisplay(item) }}</span>
-                </div>
+        <label class="field">
+          <span>Nueva hora fin</span>
+          <input type="time" [(ngModel)]="overrideForm.overrideEndTime" />
+        </label>
 
-                <div class="time-cell">
-                    <span class="day-pill">{{ item.day_label }}</span>
-                    <strong>{{ item.start_time }} - {{ item.end_time }}</strong>
-                    <span class="meta-inline">{{ item.duration_minutes }} min</span>
-                </div>
+        <label class="field">
+          <span>Motivo</span>
+          <select [(ngModel)]="overrideForm.reasonCode">
+            <option value="OTHER">Otro</option>
+            <option value="HOLIDAY">Feriado</option>
+            <option value="WEATHER">Clima</option>
+          </select>
+        </label>
 
-                <div class="teacher-cell">
-                    <strong>{{ item.teacher_name || 'Sin docente' }}</strong>
-                    <span class="meta-inline">DNI: {{ item.teacher_dni || 'Sin DNI' }} | {{ item.modality_name || 'Sin modalidad'
-                        }}</span>
-                </div>
+        <label class="field modal-span-2">
+          <span>Notas</span>
+          <textarea [(ngModel)]="overrideForm.notes" rows="3" placeholder="Comentario opcional"></textarea>
+        </label>
+      </div>
 
-                <div class="context-cell">
-                    <span class="meta-inline">{{ item.campus_name || 'Sin sede' }}</span>
-                    <span class="meta-inline">{{ item.faculty_name || 'Sin facultad' }} | {{ item.program_name || 'Sin programa'
-                        }}</span>
-                </div>
-            </label>
-        </div>
-    </div>
-
-    <div *ngIf="!loading && previewData.length === 0" class="empty-state">
-        <p *ngIf="!hasSearched">Usa los filtros y haz clic en "Buscar horario" para cargar las filas disponibles.</p>
-        <p *ngIf="hasSearched">No se encontraron horarios para los filtros seleccionados.</p>
-    </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-sm" type="button" (click)="closeOverrideEditor()">Cancelar</button>
+        <button class="btn btn-primary btn-sm" type="button" (click)="saveOverride()" [disabled]="overrideSaving">
+          {{ overrideSaving ? 'Guardando...' : 'Guardar reprogramacion' }}
+        </button>
+      </div>
+    </article>
+  </section>
 </div>

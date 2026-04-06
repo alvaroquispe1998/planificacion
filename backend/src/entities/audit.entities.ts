@@ -84,12 +84,18 @@ export class ClassZoomMeetingEntity {
 }
 
 @Entity({ name: 'meeting_instances' })
+@Index(['planning_subsection_videoconference_id'])
+@Index(['planning_subsection_videoconference_id', 'zoom_meeting_uuid'], { unique: true })
+@Index(['zoom_meeting_id'])
 export class MeetingInstanceEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;
 
-  @Column({ type: 'varchar', length: 36 })
-  video_conference_id!: string;
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  video_conference_id!: string | null;
+
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  planning_subsection_videoconference_id!: string | null;
 
   @Column({ type: 'varchar', length: 50 })
   zoom_meeting_id!: string;
@@ -126,6 +132,7 @@ export class MeetingInstanceEntity {
 }
 
 @Entity({ name: 'meeting_participants' })
+@Index(['meeting_instance_id'])
 export class MeetingParticipantEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;
@@ -156,6 +163,8 @@ export class MeetingParticipantEntity {
 }
 
 @Entity({ name: 'meeting_attendance_segments' })
+@Index(['meeting_instance_id'])
+@Index(['participant_id'])
 export class MeetingAttendanceSegmentEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;
@@ -189,6 +198,7 @@ export class MeetingAttendanceSegmentEntity {
 }
 
 @Entity({ name: 'meeting_teacher_metrics' })
+@Index(['meeting_instance_id'])
 export class MeetingTeacherMetricEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;
@@ -222,6 +232,7 @@ export class MeetingTeacherMetricEntity {
 }
 
 @Entity({ name: 'meeting_recordings' })
+@Index(['meeting_instance_id'])
 export class MeetingRecordingEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;
@@ -264,6 +275,7 @@ export class MeetingRecordingEntity {
 }
 
 @Entity({ name: 'meeting_transcripts' })
+@Index(['meeting_instance_id'])
 export class MeetingTranscriptEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;

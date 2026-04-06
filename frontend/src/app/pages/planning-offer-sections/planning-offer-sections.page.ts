@@ -13,6 +13,7 @@ type ScheduleDraft = {
   day_of_week: string;
   start_time: string;
   end_time: string;
+  session_type: string;
 };
 
 @Component({
@@ -54,7 +55,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
 
   createSectionForm = {
     mode: 'SINGLE' as CreateSectionMode,
-    subsection_count: 3,
+    subsection_count: 2,
     code: 'A',
     is_cepea: false,
     teacher_id: '',
@@ -130,6 +131,61 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     return Boolean(this.offer) && !this.saving && !this.isWorkflowReadOnly;
   }
 
+  get courseUsesBaseGroupOnly() {
+    return this.offer?.course_type === 'TEORICO';
+  }
+
+  get createSectionSingleModeLabel() {
+    switch (this.offer?.course_type) {
+      case 'PRACTICO':
+        return 'Grupo unico';
+      case 'TEORICO_PRACTICO':
+        return 'Grupo base unico';
+      default:
+        return 'Seccion unica';
+    }
+  }
+
+  get createSectionMultipleModeLabel() {
+    switch (this.offer?.course_type) {
+      case 'PRACTICO':
+        return 'Dividir en grupos practicos';
+      case 'TEORICO_PRACTICO':
+        return 'Dividir practica en grupos';
+      default:
+        return 'Con grupos';
+    }
+  }
+
+  get createSectionGroupCountLabel() {
+    return this.offer?.course_type === 'TEORICO_PRACTICO'
+      ? 'Cantidad de grupos practicos'
+      : 'Cantidad de grupos';
+  }
+
+  get createSectionModeHelper() {
+    switch (this.offer?.course_type) {
+      case 'TEORICO':
+        return 'Este curso trabaja con un solo grupo base teorico.';
+      case 'PRACTICO':
+        return 'Puedes dejar un grupo unico o dividir la seccion en varios grupos practicos con vacantes repartidas.';
+      case 'TEORICO_PRACTICO':
+        return 'Si divides la practica, la seccion conserva un grupo base para teoria y crea grupos practicos adicionales para repartir vacantes.';
+      default:
+        return 'La seccion puede trabajar con un grupo base unico o con varios grupos segun el tipo del curso.';
+    }
+  }
+
+  get createSectionGroupCountHelper() {
+    if (this.createSectionForm.mode !== 'MULTIPLE') {
+      return '';
+    }
+    if (this.offer?.course_type === 'TEORICO_PRACTICO') {
+      return `Se crearan ${this.effectiveCreateSectionGroupCount()} grupos en total: 1 grupo base y ${this.createSectionForm.subsection_count} grupos practicos.`;
+    }
+    return `Se crearan ${this.effectiveCreateSectionGroupCount()} grupos con reparto inicial automatico de vacantes.`;
+  }
+
   get planRule() {
     return this.offer?.plan_rule ?? null;
   }
@@ -201,18 +257,17 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     this.loading = true;
     this.supportDataLoading = true;
     this.error = '';
+    this.loadSupportData();
     this.api.getPlanningOffer(this.offerId).subscribe({
       next: (offer) => {
         this.offer = this.normalizeOffer(offer);
         this.syncUiStateFromOffer();
         this.loading = false;
         this.cdr.detectChanges();
-        this.loadSupportData();
       },
       error: () => {
         this.error = 'No se pudo cargar la oferta para configurar secciones.';
         this.loading = false;
-        this.supportDataLoading = false;
         this.cdr.detectChanges();
       },
     });
@@ -273,7 +328,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     }
     this.createSectionForm = {
       mode: 'SINGLE',
-      subsection_count: 3,
+      subsection_count: 2,
       code: this.nextSectionCodeSuggestion(),
       is_cepea: false,
       teacher_id: '',
@@ -318,13 +373,12 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
 
   onCreateSectionModeChange() {
     if (this.createSectionForm.mode === 'SINGLE') {
-      this.createSectionForm.subsection_count = 1;
       return;
     }
     this.createSectionForm.subsection_count =
       this.createSectionForm.subsection_count <= 1
-        ? 3
-        : Math.max(2, Math.trunc(this.createSectionForm.subsection_count || 3));
+        ? 2
+        : Math.max(2, Math.trunc(this.createSectionForm.subsection_count || 2));
   }
 
   onCreateSubsectionCountChange(value: number | string) {
@@ -371,10 +425,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       this.cdr.detectChanges();
       return;
     }
-    const subsectionCount =
-      this.createSectionForm.mode === 'SINGLE'
-        ? 1
-        : Math.max(2, Number(this.createSectionForm.subsection_count || 3));
+    const subsectionCount = this.effectiveCreateSectionGroupCount();
     const projectedVacancies = Math.max(0, Math.trunc(Number(this.createSectionForm.projected_vacancies || 0)));
 
     this.saving = true;
@@ -388,7 +439,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       })
       .subscribe({
         next: (section) => {
-        this.message = `Seccion ${this.sectionPrimaryCode(section)} creada.`;
+          this.message = `Seccion ${this.sectionPrimaryCode(section)} creada.`;
           this.error = '';
           this.showCreateModal = false;
           this.saving = false;
@@ -486,7 +537,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       })
       .subscribe({
         next: (updatedSection) => {
-          this.message = `Seccion ${updatedSection.code} actualizada.`;
+          this.message = `Seccion ${this.sectionPrimaryCode(updatedSection)} actualizada.`;
           this.error = '';
           this.saving = false;
           this.upsertSection(updatedSection);
@@ -518,7 +569,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       })
       .subscribe({
         next: (updatedSection) => {
-          this.message = `Vacantes actualizadas para la seccion ${updatedSection.code}.`;
+          this.message = `Vacantes actualizadas para la seccion ${this.sectionPrimaryCode(updatedSection)}.`;
           this.error = '';
           this.saving = false;
           this.upsertSection(updatedSection);
@@ -659,6 +710,13 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   onSubsectionKindChange(subsection: any, value: string) {
     if (!value || subsection.kind === value) {
       return;
+    }
+    const draft = this.scheduleDraftsBySubsectionId[subsection.id];
+    if (draft) {
+      const allowedTypes = this.scheduleSessionTypeOptionsForKind(value);
+      if (!allowedTypes.some((option) => option.value === draft.session_type)) {
+        draft.session_type = allowedTypes[0]?.value ?? this.defaultScheduleSessionType(value);
+      }
     }
     this.updateSubsectionField(subsection, { kind: value }, `Tipo actualizado para ${subsection.code}.`);
   }
@@ -947,12 +1005,12 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     request.subscribe({
       next: (updatedSubsection) => {
         this.message = existingSchedule
-          ? `Horario actualizado en ${subsection.code}.`
-          : `Horario agregado a ${subsection.code}.`;
+          ? `Horario actualizado en el grupo ${subsection.code}.`
+          : `Horario agregado al grupo ${subsection.code}.`;
         this.error = '';
         this.saving = false;
         this.upsertSubsection(updatedSubsection);
-        this.scheduleDraftsBySubsectionId[subsection.id] = this.defaultScheduleDraft();
+        this.scheduleDraftsBySubsectionId[subsection.id] = this.defaultScheduleDraft(updatedSubsection?.kind);
         this.cdr.detectChanges();
       },
       error: (err) => {
@@ -970,7 +1028,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     this.saving = true;
     this.api.deletePlanningSubsectionSchedule(scheduleId).subscribe({
       next: (updatedSubsection) => {
-        this.message = `Horario eliminado de ${subsection.code}.`;
+        this.message = `Horario eliminado del grupo ${subsection.code}.`;
         this.error = '';
         this.saving = false;
         this.upsertSubsection(updatedSubsection);
@@ -1046,7 +1104,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       return 'Sin horarios';
     }
     if (scheduled.length === 1) {
-      return `${scheduled[0].code}: ${this.scheduleSummary(scheduled[0])}`;
+      return `Grupo ${scheduled[0].code}: ${this.scheduleSummary(scheduled[0])}`;
     }
     return `${scheduled.length}/${subsections.length} grupos con horario`;
   }
@@ -1211,7 +1269,10 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
         nextScheduleDrafts[subsection.id] =
           (subsection?.schedules?.length ?? 0) > 0
             ? this.scheduleDraftFromSubsection(subsection)
-            : nextScheduleDrafts[subsection.id] ?? this.scheduleDraftFromSubsection(subsection);
+            : this.normalizeScheduleDraftForGroup(
+                nextScheduleDrafts[subsection.id] ?? this.scheduleDraftFromSubsection(subsection),
+                subsection,
+              );
       }
     }
 
@@ -1397,23 +1458,84 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     this.syncUiStateFromOffer();
   }
 
-  private defaultScheduleDraft(): ScheduleDraft {
+  private defaultScheduleDraft(kind: string | null | undefined = null): ScheduleDraft {
     return {
       day_of_week: 'LUNES',
       start_time: '07:40',
       end_time: '08:30',
+      session_type: this.defaultScheduleSessionType(kind),
     };
   }
 
   private scheduleDraftFromSubsection(subsection: any): ScheduleDraft {
     const schedule = subsection?.schedules?.[0] ?? null;
     if (!schedule) {
-      return this.defaultScheduleDraft();
+      return this.defaultScheduleDraft(subsection?.kind);
     }
     return {
       day_of_week: schedule.day_of_week ?? 'LUNES',
       start_time: this.normalizeScheduleTime(schedule.start_time, '07:40'),
       end_time: this.normalizeScheduleTime(schedule.end_time, '08:30'),
+      session_type: schedule.session_type ?? this.defaultScheduleSessionType(subsection?.kind),
+    };
+  }
+
+  private effectiveCreateSectionGroupCount() {
+    if (this.createSectionForm.mode === 'SINGLE' || this.courseUsesBaseGroupOnly) {
+      return 1;
+    }
+    const requested = Math.max(2, Math.trunc(Number(this.createSectionForm.subsection_count || 2)));
+    if (this.offer?.course_type === 'TEORICO_PRACTICO') {
+      return requested + 1;
+    }
+    return requested;
+  }
+
+  private scheduleSessionTypeOptionsForKind(kind: string | null | undefined) {
+    switch (kind) {
+      case 'THEORY':
+        return [{ value: 'THEORY', label: 'Teoria' }];
+      case 'PRACTICE':
+        return [
+          { value: 'PRACTICE', label: 'Practica' },
+          { value: 'LAB', label: 'Laboratorio' },
+        ];
+      default:
+        return [
+          { value: 'THEORY', label: 'Teoria' },
+          { value: 'PRACTICE', label: 'Practica' },
+          { value: 'LAB', label: 'Laboratorio' },
+          { value: 'OTHER', label: 'Otro' },
+        ];
+    }
+  }
+
+  scheduleSessionTypeOptions(subsection: any) {
+    return this.scheduleSessionTypeOptionsForKind(subsection?.kind);
+  }
+
+  canEditScheduleSessionType(subsection: any) {
+    return this.scheduleSessionTypeOptions(subsection).length > 1;
+  }
+
+  private defaultScheduleSessionType(kind: string | null | undefined) {
+    if (kind === 'THEORY') {
+      return 'THEORY';
+    }
+    if (kind === 'PRACTICE') {
+      return 'PRACTICE';
+    }
+    return 'THEORY';
+  }
+
+  private normalizeScheduleDraftForGroup(draft: ScheduleDraft, subsection: any) {
+    const allowed = this.scheduleSessionTypeOptions(subsection);
+    if (allowed.some((option) => option.value === draft.session_type)) {
+      return draft;
+    }
+    return {
+      ...draft,
+      session_type: allowed[0]?.value ?? this.defaultScheduleSessionType(subsection?.kind),
     };
   }
 

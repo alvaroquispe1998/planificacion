@@ -1904,11 +1904,11 @@ export class SettingsSyncService {
   }
 
   private getSourceRequestTimeoutMs() {
-    const raw = Number(this.configService.get<string>('SYNC_REQUEST_TIMEOUT_MS', '12000'));
+    const raw = Number(this.configService.get<string>('SYNC_REQUEST_TIMEOUT_MS', '45000'));
     if (!Number.isFinite(raw)) {
-      return 12000;
+      return 45000;
     }
-    return Math.max(3000, Math.min(60000, Math.trunc(raw)));
+    return Math.max(3000, Math.min(180000, Math.trunc(raw)));
   }
 
   private getValidateRequestTimeoutMs() {

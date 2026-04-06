@@ -437,6 +437,7 @@ export class PlanningController {
     @Query('academic_program_id') academicProgramId?: string,
     @Query('cycle') cycle?: string,
     @Query('study_plan_id') studyPlanId?: string,
+    @Query('search') search?: string,
   ) {
     if (facultyId || academicProgramId) {
       this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
@@ -449,6 +450,7 @@ export class PlanningController {
       academicProgramId,
       cycle ? Number(cycle) : undefined,
       studyPlanId,
+      search,
     ).then((rows) =>
       this.authService.filterByScope(authUser, rows, (item: any) => ({
         faculty_id: item.faculty_id ?? null,
@@ -534,6 +536,21 @@ export class PlanningController {
     );
     await this.assertApprovedPlanMutationAllowed(authUser, section.offer ?? null);
     return this.planningManualService.deleteSection(idActor(authUser), id);
+  }
+
+  @Post('sections/:id/sync-akademic')
+  async syncSectionFromAkademic(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Param('id') id: string,
+  ) {
+    const section = await this.planningManualService.getSection(id);
+    this.authService.assertScopeAccess(
+      authUser,
+      section.offer?.faculty_id ?? null,
+      section.offer?.academic_program_id ?? null,
+    );
+    await this.assertApprovedPlanMutationAllowed(authUser, section.offer ?? null);
+    return this.planningImportService.syncAkademicSection(id, idActor(authUser));
   }
 
   @Post('sections/:id/subsections')

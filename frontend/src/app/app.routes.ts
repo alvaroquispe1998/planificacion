@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { AuditDetailPageComponent } from './pages/audit-detail/audit-detail.page';
 import { loginRedirectGuard, permissionGuard, securityLandingGuard, windowGuard } from './core/auth.guard';
 import { AuditPageComponent } from './pages/audit/audit.page';
 import { ClassDetailPageComponent } from './pages/class-detail/class-detail.page';
@@ -15,6 +16,7 @@ import { PlanningWorkspacePageComponent } from './pages/planning-workspace/plann
 import { PlanningVcMatchPageComponent } from './pages/planning-vc-match/planning-vc-match.page';
 import { SecurityPageComponent } from './pages/security/security.page';
 import { SettingsPageComponent } from './pages/settings/settings.page';
+import { VideoconferenceZoomUsersPageComponent } from './pages/videoconference-zoom-users/videoconference-zoom-users.page';
 
 import { VideoconferencesPageComponent } from './pages/videoconferences/videoconferences.page';
 
@@ -89,6 +91,21 @@ export const routes: Routes = [
     component: AuditPageComponent,
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.audit' },
+  },
+  {
+    path: 'videoconferences/audit/:id',
+    component: AuditDetailPageComponent,
+    canActivate: [windowGuard],
+    data: { requiredWindow: 'window.audit' },
+  },
+  {
+    path: 'videoconferences/zoom-users',
+    component: VideoconferenceZoomUsersPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.settings',
+      requiredPermission: 'action.settings.manage',
+    },
   },
   {
     path: 'integrations/sync',

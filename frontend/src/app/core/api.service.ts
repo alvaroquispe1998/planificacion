@@ -282,6 +282,10 @@ export class ApiService {
     return this.http.delete<any>(`${this.baseUrl}/planning/sections/${id}`);
   }
 
+  syncPlanningSectionFromAkademic(id: string) {
+    return this.http.post<any>(`${this.baseUrl}/planning/sections/${id}/sync-akademic`, {});
+  }
+
   createPlanningSubsection(sectionId: string, payload: any) {
     return this.http.post<any>(`${this.baseUrl}/planning/sections/${sectionId}/subsections`, payload);
   }
@@ -430,6 +434,38 @@ export class ApiService {
       ? new HttpParams().set('video_conference_id', videoConferenceId)
       : undefined;
     return this.http.get<any[]>(`${this.baseUrl}/audit/meeting-instances`, { params });
+  }
+
+  listPlanningVideoconferenceAudits(filters: Record<string, string | number | undefined> = {}) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}` !== '') {
+        params = params.set(key, String(value));
+      }
+    });
+    return this.http.get<any>(`${this.baseUrl}/audit/planning-videoconferences`, { params });
+  }
+
+  getPlanningVideoconferenceAuditDetail(id: string) {
+    return this.http.get<any>(`${this.baseUrl}/audit/planning-videoconferences/${id}`);
+  }
+
+  syncPlanningVideoconferenceAudit(id: string) {
+    return this.http.post<any>(`${this.baseUrl}/audit/planning-videoconferences/${id}/sync`, {});
+  }
+
+  getZoomPool() {
+    return this.http.get<any>(`${this.baseUrl}/settings/zoom/pool`);
+  }
+
+  updateZoomPool(payload: {
+    items: Array<{
+      zoom_user_id: string;
+      sort_order: number;
+      is_active: boolean;
+    }>;
+  }) {
+    return this.http.put<any>(`${this.baseUrl}/settings/zoom/pool`, payload);
   }
 
   listParticipants(meetingInstanceId?: string) {

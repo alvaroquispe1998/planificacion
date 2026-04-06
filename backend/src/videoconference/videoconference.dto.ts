@@ -13,6 +13,10 @@ import {
 
 export class FilterOptionsDto {
     @IsOptional()
+    @IsString()
+    semesterId?: string;
+
+    @IsOptional()
     @IsArray()
     @IsString({ each: true })
     campusIds?: string[];
@@ -42,17 +46,65 @@ export class FilterOptionsDto {
     days?: string[];
 }
 
+export class PreviewVideoconferenceDto extends FilterOptionsDto {
+    @IsOptional()
+    @IsDateString()
+    startDate?: string;
+
+    @IsOptional()
+    @IsDateString()
+    endDate?: string;
+}
+
 export class GenerateVideoconferenceDto {
+    @IsOptional()
     @IsArray()
     @ArrayUnique()
     @IsString({ each: true })
-    scheduleIds!: string[];
+    scheduleIds?: string[];
+
+    @IsOptional()
+    @IsArray()
+    @ArrayUnique()
+    @IsString({ each: true })
+    occurrenceKeys?: string[];
 
     @IsDateString()
     startDate!: string;
 
     @IsDateString()
     endDate!: string;
+}
+
+export class UpsertVideoconferenceOverrideDto {
+    @IsString()
+    scheduleId!: string;
+
+    @IsDateString()
+    conferenceDate!: string;
+
+    @IsString()
+    action!: string;
+
+    @IsOptional()
+    @IsDateString()
+    overrideDate?: string;
+
+    @IsOptional()
+    @IsString()
+    overrideStartTime?: string;
+
+    @IsOptional()
+    @IsString()
+    overrideEndTime?: string;
+
+    @IsOptional()
+    @IsString()
+    reasonCode?: string;
+
+    @IsOptional()
+    @IsString()
+    notes?: string;
 }
 
 export class UpdateZoomConfigDto {

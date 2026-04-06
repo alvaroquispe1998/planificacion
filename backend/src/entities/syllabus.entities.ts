@@ -79,6 +79,7 @@ export class MeetingSyllabusMatchEntity {
 }
 
 @Entity({ name: 'meeting_summaries' })
+@Index(['meeting_instance_id'])
 export class MeetingSummaryEntity {
   @PrimaryColumn({ type: 'varchar', length: 36 })
   id!: string;

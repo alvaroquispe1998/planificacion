@@ -1,98 +1,241 @@
-<section class="page">
-  <h1>Auditoria de sesiones Zoom</h1>
+<section class="audit-page">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Videoconferencias creadas</p>
+      <h1>Auditoria Zoom</h1>
+      <p class="hero-copy">
+        Revisa las reuniones generadas desde planificacion, abre su detalle en otra pestaña y sincroniza
+        participantes, instancias y grabaciones solo cuando lo necesites.
+      </p>
+    </div>
+    <button type="button" class="btn btn-secondary" (click)="loadRows()" [disabled]="loading">
+      {{ loading ? 'Actualizando...' : 'Recargar lista' }}
+    </button>
+  </header>
 
-  <div class="toolbar">
-    <label>Video Conference ID <input [(ngModel)]="videoConferenceId" placeholder="opcional" /></label>
-    <button (click)="loadInstances()">Buscar instancias</button>
-  </div>
+  <section class="stats-grid">
+    <article class="stat-card">
+      <span class="stat-label">Total</span>
+      <strong>{{ totals.total }}</strong>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Conciliadas</span>
+      <strong>{{ totals.matched }}</strong>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Errores</span>
+      <strong>{{ totals.errors }}</strong>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Pendientes de sync</span>
+      <strong>{{ totals.pending_audit }}</strong>
+    </article>
+  </section>
 
-  <article>
-    <h2>Meeting Instances</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Zoom meeting</th>
-          <th>Status</th>
-          <th>Inicio real</th>
-          <th>Fin real</th>
-          <th>Duracion</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          *ngFor="let row of meetingInstances"
-          (click)="selectInstance(row.id)"
-          [class.selected]="row.id === meetingInstanceId"
-        >
-          <td>{{ row.id }}</td>
-          <td>{{ row.zoom_meeting_id }}</td>
-          <td>{{ row.status }}</td>
-          <td>{{ row.actual_start }}</td>
-          <td>{{ row.actual_end }}</td>
-          <td>{{ row.duration_minutes }}</td>
-        </tr>
-      </tbody>
-    </table>
-  </article>
+  <section class="panel filters-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Filtros</p>
+        <h2>Listado operativo</h2>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" (click)="clearFilters()">Limpiar filtros</button>
+    </div>
 
-  <div class="toolbar">
-    <button (click)="recomputeTeacherMetrics()">Recalcular metricas docentes</button>
-    <button (click)="generateSummary()">Generar resumen extractivo</button>
-    <button (click)="refreshInstanceData()">Recargar detalle</button>
-  </div>
+    <div class="filters-grid">
+      <label>
+        <span>Periodo</span>
+        <select [(ngModel)]="filters.semester_id">
+          <option value="">Todos los periodos</option>
+          <option *ngFor="let item of semesterOptions" [value]="item.id">{{ item.name || item.label }}</option>
+        </select>
+      </label>
 
-  <pre *ngIf="lastAction">{{ lastAction | json }}</pre>
+      <label>
+        <span>Sede</span>
+        <select [(ngModel)]="filters.campus_id">
+          <option value="">Todas las sedes</option>
+          <option *ngFor="let item of campusOptions" [value]="item.id">{{ item.name || item.label }}</option>
+        </select>
+      </label>
 
-  <div class="grid three">
-    <article>
-      <h2>Participantes</h2>
-      <table>
+      <label>
+        <span>Facultad</span>
+        <select [(ngModel)]="filters.faculty_id">
+          <option value="">Todas las facultades</option>
+          <option *ngFor="let item of facultyOptions" [value]="item.id">{{ item.name || item.label }}</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Programa</span>
+        <select [(ngModel)]="filters.academic_program_id">
+          <option value="">Todos los programas</option>
+          <option *ngFor="let item of programOptions" [value]="item.id">{{ item.name || item.label }}</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Estado de creacion</span>
+        <select [(ngModel)]="filters.status">
+          <option value="">Todos</option>
+          <option value="MATCHED">MATCHED</option>
+          <option value="CREATED_UNMATCHED">CREATED_UNMATCHED</option>
+          <option value="CREATING">CREATING</option>
+          <option value="ERROR">ERROR</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Estado de auditoria</span>
+        <select [(ngModel)]="filters.audit_sync_status">
+          <option value="">Todos</option>
+          <option value="PENDING">Sin sincronizar</option>
+          <option value="SYNCED">Sincronizada</option>
+          <option value="ERROR">Error de sync</option>
+        </select>
+      </label>
+
+      <label class="search-field">
+        <span>Buscar</span>
+        <input
+          [(ngModel)]="filters.search"
+          type="text"
+          placeholder="Curso, seccion o zoom_meeting_id"
+          (keyup.enter)="applyFilters()" />
+      </label>
+
+      <div class="filter-actions">
+        <button type="button" class="btn btn-primary" (click)="applyFilters()" [disabled]="loading">
+          Buscar
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel table-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Auditoria nueva</p>
+        <h2>Reuniones creadas</h2>
+      </div>
+      <span class="count">{{ totals.total }} resultados</span>
+    </div>
+
+    <p *ngIf="error" class="feedback error">{{ error }}</p>
+
+    <div class="table-wrap" *ngIf="rows.length > 0; else emptyState">
+      <table class="data-table">
         <thead>
           <tr>
-            <th>Nombre</th>
-            <th>Rol</th>
-            <th>Teacher ID</th>
+            <th>Fecha / hora</th>
+            <th>Curso</th>
+            <th>Seccion / grupo</th>
+            <th>Docente</th>
+            <th>Contexto</th>
+            <th>Zoom</th>
+            <th>Estados</th>
+            <th>Conteos</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let row of participants">
-            <td>{{ row.display_name }}</td>
-            <td>{{ row.role }}</td>
-            <td>{{ row.teacher_id }}</td>
+          <tr *ngFor="let row of rows">
+            <td>
+              <div class="cell-stack">
+                <strong>{{ dateLabel(row) }}</strong>
+                <span>{{ timeLabel(row) }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.course_code || 'Curso sin codigo' }}</strong>
+                <span>{{ row.course_name || 'Sin nombre' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ sectionLabel(row) }}</strong>
+                <span>{{ groupLabel(row) }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.teacher_name || 'Sin docente' }}</strong>
+                <span>{{ row.teacher_dni || 'Sin DNI' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.campus_name || 'Sin sede' }}</strong>
+                <span>{{ row.faculty_name || 'Sin facultad' }} | {{ row.academic_program_name || 'Sin programa' }}</span>
+                <span>Ciclo {{ row.cycle || '--' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.zoom_meeting_id || 'Sin conciliacion Zoom' }}</strong>
+                <span>{{ row.zoom_user_name || row.zoom_user_email || 'Sin usuario asignado' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="status-stack">
+                <span class="pill">{{ statusLabel(row.status) }}</span>
+                <span class="pill" [class.pill-ok]="normalizeAuditSyncStatus(row.audit_sync_status) === 'SYNCED'" [class.pill-error]="normalizeAuditSyncStatus(row.audit_sync_status) === 'ERROR'">
+                  {{ auditStatusLabel(row.audit_sync_status) }}
+                </span>
+                <span class="pill" [class.pill-warning]="row.planning_sync_state === 'OUTDATED'" [class.pill-error]="row.planning_sync_state?.includes('REMOVED')">
+                  {{ planningSyncStatusLabel(row.planning_sync_state) }}
+                </span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <span>{{ row.instance_count || 0 }} instancias</span>
+                <span>{{ row.participant_count || 0 }} participantes</span>
+                <span>{{ row.recording_count || 0 }} grabaciones</span>
+              </div>
+            </td>
+            <td class="action-col">
+              <button type="button" class="btn btn-primary btn-sm" (click)="openDetail(row)">
+                Abrir detalle
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>
-    </article>
 
-    <article>
-      <h2>Metricas docente</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Teacher</th>
-            <th>Ingresos</th>
-            <th>Minutos</th>
-            <th>Host</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let row of teacherMetrics">
-            <td>{{ row.teacher_id }}</td>
-            <td>{{ row.join_count }}</td>
-            <td>{{ row.total_minutes }}</td>
-            <td>{{ row.is_host }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </article>
+      <div class="pagination-bar" *ngIf="totals.total > 0">
+        <div class="pagination-size">
+          <span>Items por pagina:</span>
+          <select [ngModel]="pageSize" (ngModelChange)="onPageSizeChange($event)">
+            <option *ngFor="let size of pageSizeOptions" [ngValue]="size">{{ size }}</option>
+          </select>
+        </div>
 
-    <article>
-      <h2>Transcript y resumen</h2>
-      <h3>Transcripts</h3>
-      <pre *ngFor="let row of transcripts">{{ row.transcript_text }}</pre>
-      <h3>Summaries</h3>
-      <pre *ngFor="let row of summaries">{{ row.summary_text }}</pre>
-    </article>
-  </div>
+        <div class="pagination-status">
+          {{ currentPageStart }} - {{ currentPageEnd }} de {{ totals.total }}
+        </div>
+
+        <div class="pagination-actions">
+          <button type="button" class="page-btn" (click)="goToFirstPage()" [disabled]="page <= 1">|<</button>
+          <button type="button" class="page-btn" (click)="goToPreviousPage()" [disabled]="page <= 1"><</button>
+          <button type="button" class="page-btn" (click)="goToNextPage()" [disabled]="page >= totalPages">></button>
+          <button type="button" class="page-btn" (click)="goToLastPage()" [disabled]="page >= totalPages">>|</button>
+        </div>
+      </div>
+    </div>
+
+    <ng-template #emptyState>
+      <div class="empty-block">
+        <h3>{{ loading ? 'Cargando reuniones...' : 'No hay videoconferencias para los filtros actuales.' }}</h3>
+        <p>
+          {{
+            loading
+              ? 'Consultando las videoconferencias creadas desde planificacion.'
+              : 'Prueba con otra combinacion de filtros o sincroniza nuevas reuniones.'
+          }}
+        </p>
+      </div>
+    </ng-template>
+  </section>
 </section>

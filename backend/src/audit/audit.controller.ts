@@ -121,4 +121,39 @@ export class AuditController {
   createTranscript(@Body() dto: CreateMeetingTranscriptDto) {
     return this.auditService.createTranscript(dto);
   }
+
+  @Get('planning-videoconferences')
+  listPlanningVideoconferenceAudits(
+    @Query('page') page?: string,
+    @Query('page_size') pageSize?: string,
+    @Query('semester_id') semesterId?: string,
+    @Query('campus_id') campusId?: string,
+    @Query('faculty_id') facultyId?: string,
+    @Query('academic_program_id') academicProgramId?: string,
+    @Query('status') status?: string,
+    @Query('audit_sync_status') auditSyncStatus?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.auditService.listPlanningVideoconferenceAudits({
+      page: page ? Number(page) : undefined,
+      page_size: pageSize ? Number(pageSize) : undefined,
+      semester_id: semesterId,
+      campus_id: campusId,
+      faculty_id: facultyId,
+      academic_program_id: academicProgramId,
+      status,
+      audit_sync_status: auditSyncStatus,
+      search,
+    });
+  }
+
+  @Get('planning-videoconferences/:id')
+  getPlanningVideoconferenceAuditDetail(@Param('id') id: string) {
+    return this.auditService.getPlanningVideoconferenceAuditDetail(id);
+  }
+
+  @Post('planning-videoconferences/:id/sync')
+  syncPlanningVideoconference(@Param('id') id: string) {
+    return this.auditService.syncPlanningVideoconference(id);
+  }
 }

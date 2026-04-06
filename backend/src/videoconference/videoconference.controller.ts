@@ -1,8 +1,13 @@
-import { Controller, Get, Post, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Delete, Param } from '@nestjs/common';
 import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { VideoconferenceService } from './videoconference.service';
-import { FilterOptionsDto, GenerateVideoconferenceDto } from './videoconference.dto';
+import {
+    FilterOptionsDto,
+    GenerateVideoconferenceDto,
+    PreviewVideoconferenceDto,
+    UpsertVideoconferenceOverrideDto,
+} from './videoconference.dto';
 
 @Controller('videoconference')
 @RequirePermissions(WINDOW_PERMISSIONS.VIDEOCONFERENCES)
@@ -38,12 +43,30 @@ export class VideoconferenceController {
     }
 
     @Post('preview')
-    async preview(@Body() filters: FilterOptionsDto) {
+    async preview(@Body() filters: PreviewVideoconferenceDto) {
         return this.service.preview(filters);
     }
 
     @Post('generate')
     async generate(@Body() payload: GenerateVideoconferenceDto) {
         return this.service.generate(payload);
+    }
+
+    @Post('reconcile/:id')
+    async reconcile(@Param('id') id: string) {
+        return this.service.reconcile(id);
+    }
+
+    @Post('overrides')
+    async upsertOverride(@Body() payload: UpsertVideoconferenceOverrideDto) {
+        return this.service.upsertOverride(payload);
+    }
+
+    @Delete('overrides')
+    async deleteOverride(
+        @Query('scheduleId') scheduleId: string,
+        @Query('conferenceDate') conferenceDate: string,
+    ) {
+        return this.service.deleteOverride(scheduleId, conferenceDate);
     }
 }

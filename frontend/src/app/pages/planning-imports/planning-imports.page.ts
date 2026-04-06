@@ -30,6 +30,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   aliasSaving = false;
   aliasError = '';
   aliasMessage = '';
+  showSyncDiffDetail = false;
   aliasModalMode: 'create' | 'edit' = 'create';
   aliasEditingId = '';
   aliasTargetQuery = '';
@@ -482,6 +483,8 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         : this.previewExcelImportRequest();
     if (!request$) {
       this.uploading = false;
+      this.uploadProgress = 0;
+      this.uploadStageLabel = '';
       return;
     }
     request$
@@ -495,17 +498,25 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         next: (result) => {
           this.applyBatch(result);
           if (result?.status === 'PREVIEW_PROCESSING') {
-            this.message = 'La revision previa esta en proceso. La pantalla se actualizara automaticamente.';
+            this.message = this.isAkademicSourceSelected
+              ? 'El preview desde Akademic esta en proceso. La pantalla se actualizara automaticamente.'
+              : 'La revision previa esta en proceso. La pantalla se actualizara automaticamente.';
             return;
           }
           this.completeUploadProgress();
-          this.message = 'Revision previa generada correctamente.';
+          this.message = this.isAkademicSourceSelected
+            ? 'Preview listo. Revisa el resultado y luego usa el boton para insertar en tablas.'
+            : 'Revision previa generada correctamente.';
         },
         error: (err) => {
           this.stopBatchPolling();
           this.uploadProgress = 0;
           this.uploadStageLabel = '';
-          this.error = err?.error?.message ?? 'No se pudo generar el preview del archivo.';
+          this.error = err?.error?.message ?? (
+            this.isAkademicSourceSelected
+              ? 'No se pudo generar el preview desde Akademic.'
+              : 'No se pudo generar el preview del archivo.'
+          );
         },
       });
   }
@@ -532,11 +543,19 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
           this.applyBatch(result);
           if (result?.status === 'PREVIEW_READY') {
             this.error = '';
-            this.message = this.message || 'Revision previa generada correctamente.';
+            this.message = this.message || (
+              this.isAkademicSourceSelected
+                ? 'Preview listo. Revisa el resultado y luego usa el boton para insertar en tablas.'
+                : 'Revision previa generada correctamente.'
+            );
           }
           if (result?.status === 'PREVIEW_FAILED') {
             this.message = '';
-            this.error = result?.error_message ?? 'No se pudo generar el preview del archivo.';
+            this.error = result?.error_message ?? (
+              this.isAkademicSourceSelected
+                ? 'No se pudo preparar la sincronizacion desde Akademic.'
+                : 'No se pudo generar el preview del archivo.'
+            );
           }
         },
         error: (err) => {
@@ -589,15 +608,21 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         next: (result) => {
           this.applyBatch(result);
           if (result?.status === 'EXECUTING') {
-            this.message = 'La carga se inicio correctamente. Veras el avance en la ventana de seguimiento.';
+            this.message = this.isAkademicSourceSelected
+              ? 'La insercion en tablas se inicio correctamente. Veras el avance en la ventana de seguimiento.'
+              : 'La carga se inicio correctamente. Veras el avance en la ventana de seguimiento.';
             return;
           }
           this.message = this.executionReportSummary
-            ? `Carga masiva ejecutada correctamente. ${this.executionReportSummary}.`
-            : 'Carga masiva ejecutada correctamente.';
+            ? `${this.isAkademicSourceSelected ? 'Insercion en tablas' : 'Carga masiva'} ejecutada correctamente. ${this.executionReportSummary}.`
+            : `${this.isAkademicSourceSelected ? 'Insercion en tablas' : 'Carga masiva'} ejecutada correctamente.`;
         },
         error: (err) => {
-          this.error = err?.error?.message ?? 'No se pudo ejecutar la carga masiva.';
+          this.error = err?.error?.message ?? (
+            this.isAkademicSourceSelected
+              ? 'No se pudo insertar en tablas.'
+              : 'No se pudo ejecutar la carga masiva.'
+          );
         },
       });
   }
@@ -774,12 +799,19 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
 
   get executeButtonLabel() {
     if (this.executing || this.batch?.status === 'EXECUTING') {
-      return 'Ejecutando...';
+      return this.isAkademicSourceSelected ? 'Insertando...' : 'Ejecutando...';
     }
     if (this.batch?.status === 'EXECUTED') {
-      return 'Carga aplicada';
+      return this.isAkademicSourceSelected ? 'Tablas actualizadas' : 'Carga aplicada';
     }
-    return 'Ejecutar carga';
+    return this.isAkademicSourceSelected ? 'Insertar en tablas' : 'Ejecutar carga';
+  }
+
+  get primaryAkademicActionLabel() {
+    if (this.isPreviewProcessing || this.executing || this.isExecutionProcessing) {
+      return this.isAkademicSourceSelected ? 'Generando preview...' : 'Procesando preview...';
+    }
+    return this.isAkademicSourceSelected ? 'Generar preview desde Akademic' : 'Generar revision previa desde Excel';
   }
 
   get executionReportSummary() {
@@ -798,6 +830,50 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   }
 
   get executeHelperText() {
+    if (this.isAkademicSourceSelected) {
+      if (!this.hasBatch) {
+        return 'Primero genera el preview desde Akademic. Despues revisa el resultado y decide cuando insertar en tablas.';
+      }
+      const status = String(this.batch?.status ?? '').trim();
+      if (status === 'PREVIEW_PROCESSING') {
+        return 'Espera a que termine el preview antes de insertar en tablas.';
+      }
+      if (status === 'PREVIEW_FAILED') {
+        return this.batch?.error_message || 'La sincronizacion fallo durante el analisis previo.';
+      }
+      if (status === 'EXECUTING') {
+        return 'La insercion en tablas esta en proceso. La pantalla seguira el avance automaticamente.';
+      }
+      if (status === 'FAILED') {
+        return (
+          this.batch?.error_message ||
+          this.batch?.report?.error_message ||
+          'La ultima sincronizacion fallo. Revisa el detalle y vuelve a intentarlo.'
+        );
+      }
+      if (status === 'EXECUTED') {
+        return this.executionReportSummary || 'La sincronizacion ya se aplico en la plataforma.';
+      }
+      if (this.importableRowCount <= 0) {
+        return 'No se encontraron filas validas para insertar en tablas en este alcance.';
+      }
+      if (this.hasPendingScopeDecisions) {
+        return 'Primero decide que hacer con los grupos que ya tienen informacion guardada.';
+      }
+      if (this.hasPendingMappings) {
+        if (this.allPendingMappingsAlreadySaved) {
+          return 'Los mapeos ya estan guardados, pero este preview aun no se recalculo. Genera nuevamente el preview para habilitar la insercion.';
+        }
+        return 'Primero confirma los mapeos sugeridos que aparecen en la seccion de pendientes.';
+      }
+      if (this.blockedRowCount > 0) {
+        return `Al insertar en tablas entraran ${this.importableRowCount} filas validas y se omitiran ${this.blockedRowCount} bloqueadas.`;
+      }
+      if (this.warningRowCount > 0) {
+        return `Al insertar en tablas entraran ${this.importableRowCount} filas. ${this.warningRowCount} quedaran con observaciones.`;
+      }
+      return `Listo para insertar ${this.importableRowCount} filas validas en tablas, reemplazando la informacion anterior del alcance detectado.`;
+    }
     if (!this.hasBatch) {
       return 'Genera la revision previa para habilitar la carga.';
     }
@@ -845,6 +921,84 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
   get existingScopeDecisions() {
     const items = Array.isArray(this.batch?.scope_decisions) ? this.batch.scope_decisions : [];
     return items.filter((item: any) => this.scopeHasExistingData(item));
+  }
+
+  get effectiveChangeMap() {
+    return this.batch?.summary?.effective_change_map ?? this.batch?.summary?.change_map ?? null;
+  }
+
+  get syncChangeMapCards() {
+    const changeMap = this.effectiveChangeMap;
+    if (!changeMap) {
+      return [];
+    }
+    return [
+      {
+        title: 'Ofertas',
+        value: this.changeTripletLabel(
+          Number(changeMap?.offers_created ?? 0),
+          Number(changeMap?.offers_replaced ?? 0),
+          Number(changeMap?.offers_deleted ?? 0),
+          'creadas',
+          'reemplazadas',
+          'eliminadas',
+        ),
+      },
+      {
+        title: 'Secciones',
+        value: this.changeTripletLabel(
+          Number(changeMap?.sections_created ?? 0),
+          Number(changeMap?.sections_updated ?? 0),
+          Number(changeMap?.sections_deleted ?? 0),
+          'creadas',
+          'actualizadas',
+          'eliminadas',
+        ),
+      },
+      {
+        title: 'Grupos',
+        value: this.changeTripletLabel(
+          Number(changeMap?.groups_created ?? 0),
+          Number(changeMap?.groups_updated ?? 0),
+          Number(changeMap?.groups_deleted ?? 0),
+          'creados',
+          'actualizados',
+          'eliminados',
+        ),
+      },
+      {
+        title: 'Horarios',
+        value: this.changeTripletLabel(
+          Number(changeMap?.schedules_created ?? 0),
+          Number(changeMap?.schedules_updated ?? 0),
+          Number(changeMap?.schedules_deleted ?? 0),
+          'creados',
+          'actualizados',
+          'eliminados',
+        ),
+      },
+    ];
+  }
+
+  get syncScopesWithChanges() {
+    const scopes = Array.isArray(this.batch?.scope_decisions) ? this.batch.scope_decisions : [];
+    return scopes.filter((item: any) => this.scopeHasAnyChange(item?.change_map));
+  }
+
+  get syncDiffSummaryText() {
+    const scopes = this.syncScopesWithChanges.length;
+    const changeMap = this.effectiveChangeMap ?? {};
+    return [
+      scopes > 0 ? `${scopes} grupos detectados con cambios` : 'Sin cambios detectados',
+      `${Number(changeMap?.offers_created ?? 0) + Number(changeMap?.offers_replaced ?? 0) + Number(changeMap?.offers_deleted ?? 0)} movimientos en ofertas`,
+      `${Number(changeMap?.sections_created ?? 0) + Number(changeMap?.sections_updated ?? 0) + Number(changeMap?.sections_deleted ?? 0)} movimientos en secciones`,
+      `${Number(changeMap?.groups_created ?? 0) + Number(changeMap?.groups_updated ?? 0) + Number(changeMap?.groups_deleted ?? 0)} movimientos en grupos`,
+      `${Number(changeMap?.schedules_created ?? 0) + Number(changeMap?.schedules_updated ?? 0) + Number(changeMap?.schedules_deleted ?? 0)} movimientos en horarios`,
+    ].join(' | ');
+  }
+
+  toggleSyncDiffDetail() {
+    this.showSyncDiffDetail = !this.showSyncDiffDetail;
   }
 
   namespaceLabel(namespace: string) {
@@ -996,6 +1150,69 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     ].join(' | ');
   }
 
+  scopeChangeLabel(scopeDecision: any, entity: 'offers' | 'sections' | 'groups' | 'schedules') {
+    const changeMap = scopeDecision?.change_map ?? {};
+    switch (entity) {
+      case 'offers':
+        return this.changeTripletLabel(
+          Number(changeMap?.offers_created ?? 0),
+          Number(changeMap?.offers_replaced ?? 0),
+          Number(changeMap?.offers_deleted ?? 0),
+          'creadas',
+          'reemplazadas',
+          'eliminadas',
+        );
+      case 'sections':
+        return this.changeTripletLabel(
+          Number(changeMap?.sections_created ?? 0),
+          Number(changeMap?.sections_updated ?? 0),
+          Number(changeMap?.sections_deleted ?? 0),
+          'creadas',
+          'actualizadas',
+          'eliminadas',
+        );
+      case 'groups':
+        return this.changeTripletLabel(
+          Number(changeMap?.groups_created ?? 0),
+          Number(changeMap?.groups_updated ?? 0),
+          Number(changeMap?.groups_deleted ?? 0),
+          'creados',
+          'actualizados',
+          'eliminados',
+        );
+      case 'schedules':
+        return this.changeTripletLabel(
+          Number(changeMap?.schedules_created ?? 0),
+          Number(changeMap?.schedules_updated ?? 0),
+          Number(changeMap?.schedules_deleted ?? 0),
+          'creados',
+          'actualizados',
+          'eliminados',
+        );
+      default:
+        return 'Sin cambios';
+    }
+  }
+
+  scopeChangeExamples(scopeDecision: any, entity: 'offers' | 'sections' | 'groups' | 'schedules') {
+    const changeMap = scopeDecision?.change_map ?? {};
+    const prefix = entity;
+    return {
+      created: this.exampleListWithOverflow(
+        changeMap?.[`${prefix}_created_items`] ?? [],
+        Number(changeMap?.[`${prefix}_created`] ?? 0),
+      ),
+      updated: this.exampleListWithOverflow(
+        changeMap?.[`${prefix === 'offers' ? 'offers_replaced_items' : `${prefix}_updated_items`}`] ?? [],
+        Number(changeMap?.[`${prefix === 'offers' ? 'offers_replaced' : `${prefix}_updated`}`] ?? 0),
+      ),
+      deleted: this.exampleListWithOverflow(
+        changeMap?.[`${prefix}_deleted_items`] ?? [],
+        Number(changeMap?.[`${prefix}_deleted`] ?? 0),
+      ),
+    };
+  }
+
   decisionLabel(decision: string) {
     switch (decision) {
       case 'REPLACE_SCOPE':
@@ -1039,17 +1256,23 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     if (previousStatus === 'PREVIEW_PROCESSING' && result?.status === 'PREVIEW_READY') {
       this.error = '';
       this.completeUploadProgress();
-      this.message = 'Revision previa generada correctamente.';
+      this.message = this.isAkademicSourceSelected
+        ? 'Preview listo. Revisa el resultado y luego usa el boton para insertar en tablas.'
+        : 'Revision previa generada correctamente.';
     }
     if (previousStatus === 'PREVIEW_PROCESSING' && result?.status === 'PREVIEW_FAILED') {
       this.message = '';
-      this.error = result?.error_message ?? 'No se pudo generar el preview del archivo.';
+      this.error = result?.error_message ?? (
+        this.isAkademicSourceSelected
+          ? 'No se pudo preparar la sincronizacion desde Akademic.'
+          : 'No se pudo generar el preview del archivo.'
+      );
     }
     if (previousStatus === 'EXECUTING' && result?.status === 'EXECUTED') {
       this.error = '';
       this.message = this.executionReportSummary
-        ? `Carga masiva ejecutada correctamente. ${this.executionReportSummary}.`
-        : 'Carga masiva ejecutada correctamente.';
+        ? `${this.isAkademicSourceSelected ? 'Sincronizacion' : 'Carga masiva'} ejecutada correctamente. ${this.executionReportSummary}.`
+        : `${this.isAkademicSourceSelected ? 'Sincronizacion' : 'Carga masiva'} ejecutada correctamente.`;
     }
     if (previousStatus === 'EXECUTING' && result?.status === 'FAILED') {
       this.message = '';
@@ -1074,18 +1297,31 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     this.cdr.detectChanges();
   }
 
+  private exampleListWithOverflow(values: any[], total: number) {
+    const items = Array.isArray(values)
+      ? values.map((item) => `${item ?? ''}`.trim()).filter(Boolean)
+      : [];
+    const overflow = Math.max(0, total - items.length);
+    if (!items.length && overflow <= 0) {
+      return '';
+    }
+    return overflow > 0 ? `${items.join(' | ')} | y ${overflow} mas` : items.join(' | ');
+  }
+
   private startUploadProgress() {
     this.uploadProgress = 5;
     this.uploadStageLabel =
       this.isAkademicSourceSelected
-        ? 'Preparando consulta contra Akademic...'
+        ? 'Preparando preview desde Akademic...'
         : 'Registrando archivo para generar el preview...';
     this.syncPreviewDurationTimer();
   }
 
   private completeUploadProgress() {
     this.uploadProgress = 100;
-    this.uploadStageLabel = 'Revision previa lista.';
+    this.uploadStageLabel = this.isAkademicSourceSelected
+      ? 'Preview listo. Esperando confirmacion para insertar en tablas.'
+      : 'Revision previa lista.';
   }
 
   private startBatchPolling(batchId: string) {
@@ -1134,7 +1370,9 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     }
     this.uploadProgress = Number(progress.percent ?? 0);
     this.uploadStageLabel =
-      String(progress.message ?? '').trim() || 'Procesando preview...';
+      String(progress.message ?? '').trim() || (
+        this.isAkademicSourceSelected ? 'Procesando preview desde Akademic...' : 'Procesando preview...'
+      );
     this.cdr.detectChanges();
   }
 
@@ -1277,7 +1515,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
 
   private previewAkademicImportRequest() {
     if (!this.akademicForm.semester_id) {
-      this.error = 'Selecciona el semestre de Akademic antes de generar el preview.';
+      this.error = 'Selecciona el semestre de Akademic antes de sincronizar.';
       return null;
     }
     return this.api.previewPlanningAkademicImport({
@@ -1698,5 +1936,40 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       .toLowerCase()
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  private scopeHasAnyChange(changeMap: any) {
+    if (!changeMap || typeof changeMap !== 'object') {
+      return false;
+    }
+    return [
+      'offers_created',
+      'offers_replaced',
+      'offers_deleted',
+      'sections_created',
+      'sections_updated',
+      'sections_deleted',
+      'groups_created',
+      'groups_updated',
+      'groups_deleted',
+      'schedules_created',
+      'schedules_updated',
+      'schedules_deleted',
+    ].some((key) => Number(changeMap?.[key] ?? 0) > 0);
+  }
+
+  private changeTripletLabel(
+    created: number,
+    updated: number,
+    deleted: number,
+    createdLabel: string,
+    updatedLabel: string,
+    deletedLabel: string,
+  ) {
+    return [
+      `${created} ${createdLabel}`,
+      `${updated} ${updatedLabel}`,
+      `${deleted} ${deletedLabel}`,
+    ].join(' | ');
   }
 }

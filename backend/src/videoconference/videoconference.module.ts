@@ -22,6 +22,9 @@ import {
     VcSectionEntity,
     VideoconferenceZoomPoolUserEntity,
     PlanningSubsectionVideoconferenceEntity,
+    PlanningSubsectionVideoconferenceOverrideEntity,
+    VideoconferenceGenerationBatchEntity,
+    VideoconferenceGenerationBatchResultEntity,
     ZoomConfigEntity,
 } from './videoconference.entity';
 import { ZoomSettingsController } from './zoom-settings.controller';
@@ -35,6 +38,9 @@ import { ZoomAccountService } from './zoom-account.service';
             ZoomConfigEntity,
             VideoconferenceZoomPoolUserEntity,
             PlanningSubsectionVideoconferenceEntity,
+            PlanningSubsectionVideoconferenceOverrideEntity,
+            VideoconferenceGenerationBatchEntity,
+            VideoconferenceGenerationBatchResultEntity,
             ZoomUserEntity,
             ExternalSourceEntity,
             CampusEntity,
@@ -50,5 +56,6 @@ import { ZoomAccountService } from './zoom-account.service';
     ],
     controllers: [VideoconferenceController, ZoomSettingsController],
     providers: [VideoconferenceService, ZoomAccountService],
+    exports: [VideoconferenceService, ZoomAccountService],
 })
 export class VideoconferenceModule { }

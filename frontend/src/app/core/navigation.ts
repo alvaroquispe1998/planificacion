@@ -114,12 +114,23 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             },
           },
           {
+            label: 'Usuarios Zoom',
+            path: '/videoconferences/zoom-users',
+            icon: 'users',
+            window: 'window.settings',
+            permission: 'action.settings.manage',
+            match: {
+              exact: ['/videoconferences/zoom-users'],
+            },
+          },
+          {
             label: 'Auditoria Zoom',
             path: '/videoconferences/audit',
             icon: 'search',
             window: 'window.audit',
             match: {
               exact: ['/videoconferences/audit', '/audit'],
+              prefix: ['/videoconferences/audit/'],
             },
           },
         ],

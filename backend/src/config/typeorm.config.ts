@@ -76,6 +76,8 @@ import {
 
 import {
   VideoconferenceEntity,
+  VideoconferenceGenerationBatchEntity,
+  VideoconferenceGenerationBatchResultEntity,
   PlanningSubsectionVideoconferenceEntity,
   VcPeriodEntity,
   VcFacultyEntity,
@@ -94,6 +96,8 @@ export const appEntities = [
   AuthUserRoleAssignmentEntity,
   AuthRefreshTokenEntity,
   VideoconferenceEntity,
+  VideoconferenceGenerationBatchEntity,
+  VideoconferenceGenerationBatchResultEntity,
   ZoomConfigEntity,
   VideoconferenceZoomPoolUserEntity,
   PlanningSubsectionVideoconferenceEntity,

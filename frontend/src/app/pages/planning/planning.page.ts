@@ -91,8 +91,8 @@ export class PlanningPageComponent implements OnInit {
     );
   }
 
-  get periodOptions() {
-    return Array.isArray(this.catalog.vc_periods) ? this.catalog.vc_periods : [];
+  get semesterOptions() {
+    return Array.isArray(this.catalog.semesters) ? this.catalog.semesters : [];
   }
 
   loadBootstrap() {
@@ -132,7 +132,7 @@ export class PlanningPageComponent implements OnInit {
     this.loadRows();
   }
 
-  onVcPeriodChange() {
+  onSemesterChange() {
     this.syncPeriodFiltersFromCatalog();
     this.persistFilters();
     this.loadRows();
@@ -592,16 +592,31 @@ export class PlanningPageComponent implements OnInit {
       this.filters.semester_id = '';
     }
 
-    if (!this.filters.vc_period_id && this.filters.semester_id) {
-      const vcPeriod = this.findVcPeriodBySemesterId(this.filters.semester_id);
-      this.filters.vc_period_id = vcPeriod?.id ?? '';
+    if (!this.filters.semester_id && this.filters.vc_period_id) {
+      this.filters.semester_id = this.resolveSemesterIdFromVcPeriodId(this.filters.vc_period_id) ?? '';
     }
 
-    if (!this.filters.vc_period_id && periods.length > 0) {
-      this.filters.vc_period_id = periods.find((item: any) => item.selected)?.id ?? periods[0].id;
+    if (!this.filters.semester_id && semesters.length > 0) {
+      this.filters.semester_id =
+        semesters.find((item: any) => item.selected)?.id ?? semesters[0].id;
     }
 
-    this.filters.semester_id = this.resolveSemesterIdFromVcPeriodId(this.filters.vc_period_id) ?? '';
+    if (!this.filters.semester_id) {
+      this.filters.vc_period_id = '';
+      return;
+    }
+
+    const vcPeriod = this.findVcPeriodBySemesterId(this.filters.semester_id);
+    if (vcPeriod?.id) {
+      this.filters.vc_period_id = vcPeriod.id;
+      return;
+    }
+
+    if (this.vcPeriodMatchesSemester(this.filters.vc_period_id, this.filters.semester_id)) {
+      return;
+    }
+
+    this.filters.vc_period_id = '';
   }
 
   private resolveSemesterIdFromVcPeriodId(vcPeriodId: string) {
@@ -624,6 +639,13 @@ export class PlanningPageComponent implements OnInit {
       return null;
     }
     return periods.find((item: any) => this.normalizePeriodToken(item.text) === token) ?? null;
+  }
+
+  private vcPeriodMatchesSemester(vcPeriodId: string, semesterId: string) {
+    if (!vcPeriodId || !semesterId) {
+      return false;
+    }
+    return this.resolveSemesterIdFromVcPeriodId(vcPeriodId) === semesterId;
   }
 
   private normalizePeriodToken(value: string | null | undefined) {

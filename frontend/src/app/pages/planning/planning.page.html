@@ -18,9 +18,9 @@
   </header>
 
   <section class="filters-card">
-    <select [(ngModel)]="filters.vc_period_id" (ngModelChange)="onVcPeriodChange()">
-      <option *ngFor="let period of periodOptions" [value]="period.id">
-        {{ period.text || period.label || period.id }}
+    <select [(ngModel)]="filters.semester_id" (ngModelChange)="onSemesterChange()">
+      <option *ngFor="let semester of semesterOptions" [value]="semester.id">
+        {{ semester.name || semester.id }}
       </option>
     </select>
     <select [(ngModel)]="filters.campus_id" (ngModelChange)="loadRows()">

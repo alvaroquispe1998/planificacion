@@ -8,6 +8,7 @@ import {
     CampusEntity,
     ExternalSourceEntity,
     FacultyEntity,
+    SemesterEntity,
     TeacherEntity,
 } from '../entities/catalog-sync.entities';
 import {
@@ -21,10 +22,13 @@ import { SettingsSyncService } from '../settings/settings-sync.service';
 import {
     FilterOptionsDto,
     GenerateVideoconferenceDto,
+    PreviewVideoconferenceDto,
+    UpsertVideoconferenceOverrideDto,
     UpdateZoomPoolDto,
 } from './videoconference.dto';
 import {
     PlanningSubsectionVideoconferenceEntity,
+    PlanningSubsectionVideoconferenceOverrideEntity,
     VcSectionEntity,
     VideoconferenceZoomPoolUserEntity,
 } from './videoconference.entity';
@@ -57,8 +61,11 @@ const DAY_TO_JS_NUMBER: Record<string, number> = {
 
 type ScheduleContextRow = {
     offer_id: string;
+    cycle: number | null;
     section_id: string;
     section_code: string;
+    section_external_code: string | null;
+    section_is_cepea: boolean;
     subsection_id: string;
     subsection_code: string;
     schedule_id: string;
@@ -108,7 +115,7 @@ type ResolvedModality = {
 
 type FilterOptionKey = keyof Pick<
     FilterOptionsDto,
-    'campusIds' | 'facultyIds' | 'programIds' | 'courseIds' | 'modality' | 'days'
+    'semesterId' | 'campusIds' | 'facultyIds' | 'programIds' | 'courseIds' | 'modality' | 'days'
 >;
 
 type FilterCatalogOption = {
@@ -117,6 +124,9 @@ type FilterCatalogOption = {
 };
 
 type FilterOptionRow = {
+    semester_id: string | null;
+    semester_name: string | null;
+    cycle: number | null;
     campus_id: string | null;
     campus_name: string | null;
     faculty_id: string | null;
@@ -126,6 +136,9 @@ type FilterOptionRow = {
     course_id: string | null;
     course_code: string | null;
     course_name: string | null;
+    vc_section_name: string | null;
+    section_external_code: string | null;
+    section_is_cepea: boolean;
     subsection_modality_code: string | null;
     subsection_modality_name: string | null;
     section_modality_code: string | null;
@@ -143,10 +156,18 @@ type ZoomPoolUser = {
 };
 
 type ExpandedOccurrence = {
+    occurrence_key: string;
     row: ScheduleContextRow;
-    conference_date: string;
+    base_conference_date: string;
+    effective_conference_date: string;
+    effective_start_time: string;
+    effective_end_time: string;
     scheduled_start: Date;
     scheduled_end: Date;
+    occurrence_type: 'BASE' | 'RESCHEDULED' | 'SKIPPED';
+    override_id: string | null;
+    override_reason_code: string | null;
+    override_notes: string | null;
 };
 
 type AulaVirtualRequestContext = {
@@ -178,6 +199,7 @@ type AulaVirtualPayload = {
 
 type GenerateResultItem = {
     schedule_id: string;
+    occurrence_key: string | null;
     conference_date: string | null;
     status:
     | 'MATCHED'
@@ -193,8 +215,27 @@ type GenerateResultItem = {
     zoom_meeting_id: string | null;
 };
 
+type ReconcileResult = {
+    success: boolean;
+    matched: boolean;
+    message: string;
+    result: GenerateResultItem;
+};
+
 type ZoomMatchResult = ZoomMeetingSummary & {
     attempts: number;
+};
+
+type StoredOccurrenceOverride = {
+    id: string;
+    schedule_id: string;
+    conference_date: string;
+    action: 'KEEP' | 'SKIP' | 'RESCHEDULE';
+    override_date: string | null;
+    override_start_time: string | null;
+    override_end_time: string | null;
+    reason_code: string | null;
+    notes: string | null;
 };
 
 @Injectable()
@@ -208,6 +249,8 @@ export class VideoconferenceService {
         private readonly zoomPoolRepo: Repository<VideoconferenceZoomPoolUserEntity>,
         @InjectRepository(PlanningSubsectionVideoconferenceEntity)
         private readonly planningVideoconferencesRepo: Repository<PlanningSubsectionVideoconferenceEntity>,
+        @InjectRepository(PlanningSubsectionVideoconferenceOverrideEntity)
+        private readonly planningVideoconferenceOverridesRepo: Repository<PlanningSubsectionVideoconferenceOverrideEntity>,
         @InjectRepository(ZoomUserEntity)
         private readonly zoomUsersRepo: Repository<ZoomUserEntity>,
         @InjectRepository(ExternalSourceEntity)
@@ -309,7 +352,8 @@ export class VideoconferenceService {
     }
 
     async getFilterOptions(filters: FilterOptionsDto) {
-        const [campusRows, facultyRows, programRows, courseRows, modalityRows, dayRows] = await Promise.all([
+        const [periodRows, campusRows, facultyRows, programRows, courseRows, modalityRows, dayRows] = await Promise.all([
+            this.getFilterOptionRows(filters, ['semesterId']),
             this.getFilterOptionRows(filters, ['campusIds']),
             this.getFilterOptionRows(filters, ['facultyIds']),
             this.getFilterOptionRows(filters, ['programIds']),
@@ -319,6 +363,7 @@ export class VideoconferenceService {
         ]);
 
         return {
+            periods: this.buildPeriodOptions(periodRows),
             campuses: this.buildNamedOptions(campusRows, 'campus_id', 'campus_name', '(Sin sede)'),
             faculties: this.buildNamedOptions(facultyRows, 'faculty_id', 'faculty_name', '(Sin facultad)'),
             programs: this.buildNamedOptions(programRows, 'program_id', 'program_name', '(Sin programa)'),
@@ -328,48 +373,25 @@ export class VideoconferenceService {
         };
     }
 
-    async preview(filters: FilterOptionsDto) {
+    async preview(filters: PreviewVideoconferenceDto) {
         const rows = await this.getScheduleRows(filters);
-        return rows.map((row) => {
-            const teacher = resolveTeacher(row);
-            const modality = resolveModality(row);
-            return {
-                id: row.schedule_id,
-                schedule_id: row.schedule_id,
-                section_id: row.section_id,
-                section_code: row.section_code,
-                section_label: buildSectionLabel(row),
-                subsection_id: row.subsection_id,
-                subsection_code: row.subsection_code,
-                subsection_label: row.subsection_code,
-                campus_id: row.campus_id,
-                campus_name: row.campus_name,
-                faculty_id: row.faculty_id,
-                faculty_name: row.faculty_name,
-                program_id: row.program_id,
-                program_name: row.program_name,
-                course_id: row.course_id,
-                course_code: row.course_code,
-                course_name: row.course_name,
-                course_label: buildCourseLabel(row.course_code, row.course_name),
-                modality_code: modality.code,
-                modality_name: modality.name,
-                teacher_id: teacher.id,
-                teacher_name: teacher.name,
-                teacher_dni: teacher.dni,
-                day_of_week: row.day_of_week,
-                day_label: displayDay(row.day_of_week),
-                start_time: compactTime(row.start_time),
-                end_time: compactTime(row.end_time),
-                duration_minutes: row.duration_minutes,
-                vc_period_id: row.vc_period_id,
-                vc_faculty_id: row.vc_faculty_id,
-                vc_academic_program_id: row.vc_academic_program_id,
-                vc_course_id: row.vc_course_id,
-                vc_section_id: row.vc_section_id,
-                vc_section_name: row.vc_section_name,
-            };
-        });
+        const hasStartDate = Boolean(filters.startDate?.trim());
+        const hasEndDate = Boolean(filters.endDate?.trim());
+        if (hasStartDate !== hasEndDate) {
+            throw new BadRequestException('Debe enviar startDate y endDate juntos.');
+        }
+
+        if (!hasStartDate || !hasEndDate) {
+            return rows.map((row) => this.serializeBasePreviewRow(row));
+        }
+
+        const startDate = normalizeIsoDate(filters.startDate ?? '');
+        const endDate = normalizeIsoDate(filters.endDate ?? '');
+        if (startDate > endDate) {
+            throw new BadRequestException('startDate no puede ser mayor que endDate.');
+        }
+        const occurrences = await this.resolveOccurrences(rows, startDate, endDate, 'America/Lima');
+        return occurrences.map((occurrence) => this.serializeOccurrencePreviewRow(occurrence));
     }
 
     async getZoomPool() {
@@ -461,10 +483,96 @@ export class VideoconferenceService {
         return this.getZoomPool();
     }
 
+    async upsertOverride(dto: UpsertVideoconferenceOverrideDto) {
+        const scheduleId = dto.scheduleId.trim();
+        if (!scheduleId) {
+            throw new BadRequestException('scheduleId es requerido.');
+        }
+        const conferenceDate = normalizeIsoDate(dto.conferenceDate);
+        const action = String(dto.action ?? '').trim().toUpperCase() as StoredOccurrenceOverride['action'];
+        if (!['KEEP', 'SKIP', 'RESCHEDULE'].includes(action)) {
+            throw new BadRequestException('action debe ser KEEP, SKIP o RESCHEDULE.');
+        }
+
+        const schedule = await this.schedulesRepo.findOne({ where: { id: scheduleId } });
+        if (!schedule) {
+            throw new BadRequestException('No se encontro el horario base para el override.');
+        }
+
+        let overrideDate: string | null = null;
+        let overrideStartTime: string | null = null;
+        let overrideEndTime: string | null = null;
+        if (action === 'RESCHEDULE') {
+            overrideDate = normalizeIsoDate(dto.overrideDate ?? '');
+            overrideStartTime = normalizeTimeValue(dto.overrideStartTime ?? '');
+            overrideEndTime = normalizeTimeValue(dto.overrideEndTime ?? '');
+            if (!overrideDate || !overrideStartTime || !overrideEndTime) {
+                throw new BadRequestException('La reprogramacion requiere fecha, hora inicio y hora fin.');
+            }
+            if (overrideStartTime >= overrideEndTime) {
+                throw new BadRequestException('La hora inicio debe ser menor que la hora fin.');
+            }
+        }
+
+        const now = new Date();
+        const current = await this.planningVideoconferenceOverridesRepo.findOne({
+            where: {
+                planning_subsection_schedule_id: scheduleId,
+                conference_date: conferenceDate,
+            },
+        });
+        const entity = current
+            ? this.planningVideoconferenceOverridesRepo.merge(current, {
+                action,
+                override_date: overrideDate,
+                override_start_time: overrideStartTime,
+                override_end_time: overrideEndTime,
+                reason_code: normalizeOverrideReason(dto.reasonCode),
+                notes: emptyTextToNull(dto.notes),
+                updated_at: now,
+            })
+            : this.planningVideoconferenceOverridesRepo.create({
+                id: newId(),
+                planning_subsection_schedule_id: scheduleId,
+                conference_date: conferenceDate,
+                action,
+                override_date: overrideDate,
+                override_start_time: overrideStartTime,
+                override_end_time: overrideEndTime,
+                reason_code: normalizeOverrideReason(dto.reasonCode),
+                notes: emptyTextToNull(dto.notes),
+                created_at: now,
+                updated_at: now,
+            });
+
+        const saved = await this.planningVideoconferenceOverridesRepo.save(entity);
+        return this.serializeOverride(saved);
+    }
+
+    async deleteOverride(scheduleIdRaw: string, conferenceDateRaw: string) {
+        const scheduleId = String(scheduleIdRaw ?? '').trim();
+        const conferenceDate = normalizeIsoDate(String(conferenceDateRaw ?? '').trim());
+        if (!scheduleId) {
+            throw new BadRequestException('scheduleId es requerido.');
+        }
+
+        await this.planningVideoconferenceOverridesRepo.delete({
+            planning_subsection_schedule_id: scheduleId,
+            conference_date: conferenceDate,
+        });
+
+        return {
+            success: true,
+            schedule_id: scheduleId,
+            conference_date: conferenceDate,
+        };
+    }
+
     async generate(payload: GenerateVideoconferenceDto) {
         const scheduleIds = normalizeIdArray(payload.scheduleIds);
-        if (!scheduleIds.length) {
-            throw new BadRequestException('Debe enviar al menos un scheduleId.');
+        const occurrenceKeys = normalizeIdArray(payload.occurrenceKeys);
+        if (!scheduleIds.length && !occurrenceKeys.length) {
+            throw new BadRequestException('Debe enviar al menos un scheduleId u occurrenceKey.');
         }
 
         const startDate = normalizeIsoDate(payload.startDate);
@@ -473,9 +581,12 @@ export class VideoconferenceService {
             throw new BadRequestException('startDate no puede ser mayor que endDate.');
         }
 
-        const rows = await this.getScheduleRows(undefined, scheduleIds);
+        const requestedScheduleIds = scheduleIds.length
+            ? scheduleIds
+            : Array.from(new Set(occurrenceKeys.map((item) => parseOccurrenceKey(item).schedule_id).filter(Boolean)));
+        const rows = await this.getScheduleRows(undefined, requestedScheduleIds);
         const rowMap = new Map(rows.map((row) => [row.schedule_id, row] as const));
-        const missingScheduleIds = scheduleIds.filter((scheduleId) => !rowMap.has(scheduleId));
+        const missingScheduleIds = requestedScheduleIds.filter((scheduleId) => !rowMap.has(scheduleId));
 
         const aulaVirtualContext = await this.getAulaVirtualRequestContext();
         const zoomConfig = await this.zoomAccountService.requireConfiguredConfig();
@@ -486,18 +597,22 @@ export class VideoconferenceService {
             );
         }
 
-        const occurrences = this.expandOccurrences(
+        const resolvedOccurrences = await this.resolveOccurrences(
             Array.from(rowMap.values()),
             startDate,
             endDate,
             zoomConfig.timezone,
         );
+        const selectedOccurrences = occurrenceKeys.length
+            ? resolvedOccurrences.filter((item) => occurrenceKeys.includes(item.occurrence_key))
+            : resolvedOccurrences.filter((item) => item.occurrence_type !== 'SKIPPED');
         const remoteMeetingsCache = new Map<string, ZoomMeetingSummary[] | null>();
         const results: GenerateResultItem[] = [];
 
         for (const missingScheduleId of missingScheduleIds) {
             results.push({
                 schedule_id: missingScheduleId,
+                occurrence_key: null,
                 conference_date: null,
                 status: 'ERROR',
                 message: 'No se encontro el horario seleccionado en planificacion.',
@@ -508,7 +623,10 @@ export class VideoconferenceService {
             });
         }
 
-        for (const occurrence of occurrences) {
+        for (const occurrence of selectedOccurrences) {
+            if (occurrence.occurrence_type === 'SKIPPED') {
+                continue;
+            }
             const result = await this.generateOccurrence(
                 occurrence,
                 aulaVirtualContext,
@@ -520,8 +638,8 @@ export class VideoconferenceService {
         }
 
         const summary = {
-            requestedSchedules: scheduleIds.length,
-            requestedOccurrences: occurrences.length,
+            requestedSchedules: requestedScheduleIds.length,
+            requestedOccurrences: selectedOccurrences.length,
             matched: results.filter((item) => item.status === 'MATCHED').length,
             createdUnmatched: results.filter((item) => item.status === 'CREATED_UNMATCHED').length,
             blockedExisting: results.filter((item) => item.status === 'BLOCKED_EXISTING').length,
@@ -538,6 +656,87 @@ export class VideoconferenceService {
         };
     }
 
+    async reconcile(id: string): Promise<ReconcileResult> {
+        const recordId = String(id ?? '').trim();
+        if (!recordId) {
+            throw new BadRequestException('id es requerido.');
+        }
+
+        const record = await this.planningVideoconferencesRepo.findOne({
+            where: { id: recordId },
+        });
+        if (!record) {
+            throw new BadRequestException('No se encontro la videoconferencia a conciliar.');
+        }
+
+        if (record.zoom_meeting_id && record.status === 'MATCHED') {
+            return {
+                success: true,
+                matched: true,
+                message: 'La videoconferencia ya estaba conciliada con Zoom.',
+                result: this.buildGenerationResultFromRecord(
+                    record,
+                    'La videoconferencia ya estaba conciliada con Zoom.',
+                ),
+            };
+        }
+
+        if (!record.zoom_user_email?.trim()) {
+            throw new BadRequestException('La videoconferencia no tiene un usuario Zoom asociado.');
+        }
+        if (!record.topic?.trim()) {
+            throw new BadRequestException('La videoconferencia no tiene topic para intentar la conciliacion.');
+        }
+        if (!record.scheduled_start) {
+            throw new BadRequestException('La videoconferencia no tiene scheduled_start para intentar la conciliacion.');
+        }
+
+        const durationMinutes =
+            calculateDurationMinutes(compactTime(record.start_time), compactTime(record.end_time));
+        const matched = await this.matchZoomMeeting(
+            record.zoom_user_email,
+            record.topic,
+            record.scheduled_start,
+            durationMinutes,
+        );
+
+        if (matched) {
+            record.zoom_meeting_id = matched.id;
+            record.join_url = matched.join_url;
+            record.start_url = matched.start_url;
+            record.status = 'MATCHED';
+            record.match_attempts = (record.match_attempts ?? 0) + matched.attempts;
+            record.matched_at = new Date();
+            record.error_message = null;
+            record.updated_at = new Date();
+            const saved = await this.planningVideoconferencesRepo.save(record);
+            return {
+                success: true,
+                matched: true,
+                message: 'Conciliacion completada. La reunion ya quedo enlazada con Zoom.',
+                result: this.buildGenerationResultFromRecord(
+                    saved,
+                    'Conciliacion completada. La reunion ya quedo enlazada con Zoom.',
+                ),
+            };
+        }
+
+        record.status = record.zoom_meeting_id ? 'MATCHED' : 'CREATED_UNMATCHED';
+        record.match_attempts = (record.match_attempts ?? 0) + ZOOM_MATCH_ATTEMPTS;
+        record.updated_at = new Date();
+        const saved = await this.planningVideoconferencesRepo.save(record);
+        return {
+            success: false,
+            matched: false,
+            message:
+                'No se encontro una coincidencia unica en Zoom con el topic, hora y duracion esperados.',
+            result: this.buildGenerationResultFromRecord(
+                saved,
+                'No se encontro una coincidencia unica en Zoom con el topic, hora y duracion esperados.',
+            ),
+        };
+    }
+
     private async generateOccurrence(
         occurrence: ExpandedOccurrence,
         aulaVirtualContext: AulaVirtualRequestContext,
@@ -549,7 +748,8 @@ export class VideoconferenceService {
         if (validationError) {
             return {
                 schedule_id: occurrence.row.schedule_id,
-                conference_date: occurrence.conference_date,
+                occurrence_key: occurrence.occurrence_key,
+                conference_date: occurrence.effective_conference_date,
                 status: 'VALIDATION_ERROR',
                 message: validationError,
                 record_id: null,
@@ -562,13 +762,14 @@ export class VideoconferenceService {
         const existing = await this.planningVideoconferencesRepo.findOne({
             where: {
                 planning_subsection_schedule_id: occurrence.row.schedule_id,
-                conference_date: occurrence.conference_date,
+                conference_date: occurrence.effective_conference_date,
             },
         });
         if (existing) {
             return {
                 schedule_id: occurrence.row.schedule_id,
-                conference_date: occurrence.conference_date,
+                occurrence_key: occurrence.occurrence_key,
+                conference_date: occurrence.effective_conference_date,
                 status: 'BLOCKED_EXISTING',
                 message: 'Ya existe un registro para este horario en la fecha indicada.',
                 record_id: existing.id,
@@ -588,7 +789,8 @@ export class VideoconferenceService {
         if (!selectedZoomUser) {
             return {
                 schedule_id: occurrence.row.schedule_id,
-                conference_date: occurrence.conference_date,
+                occurrence_key: occurrence.occurrence_key,
+                conference_date: occurrence.effective_conference_date,
                 status: 'NO_AVAILABLE_ZOOM_USER',
                 message:
                     'No se encontro un usuario Zoom disponible para el horario con el margen definido.',
@@ -600,10 +802,9 @@ export class VideoconferenceService {
         }
 
         const teacher = resolveTeacher(occurrence.row);
-        const topic = buildMeetingTopic(occurrence.row, teacher);
+        const topic = buildMeetingTopic(occurrence, teacher);
         const aulaVirtualPayload = this.buildAulaVirtualPayload(
-            occurrence.row,
-            occurrence.conference_date,
+            occurrence,
             selectedZoomUser.zoom_user_id,
             teacher,
             topic,
@@ -616,10 +817,10 @@ export class VideoconferenceService {
             planning_section_id: occurrence.row.section_id,
             planning_subsection_id: occurrence.row.subsection_id,
             planning_subsection_schedule_id: occurrence.row.schedule_id,
-            conference_date: occurrence.conference_date,
-            day_of_week: occurrence.row.day_of_week,
-            start_time: compactTime(occurrence.row.start_time),
-            end_time: compactTime(occurrence.row.end_time),
+            conference_date: occurrence.effective_conference_date,
+            day_of_week: dayCodeForDate(occurrence.effective_conference_date),
+            start_time: compactTime(occurrence.effective_start_time),
+            end_time: compactTime(occurrence.effective_end_time),
             scheduled_start: occurrence.scheduled_start,
             scheduled_end: occurrence.scheduled_end,
             zoom_user_id: selectedZoomUser.zoom_user_id,
@@ -634,7 +835,16 @@ export class VideoconferenceService {
             match_attempts: 0,
             matched_at: null,
             error_message: null,
-            payload_json: aulaVirtualPayload,
+            payload_json: {
+                ...aulaVirtualPayload,
+                occurrence_key: occurrence.occurrence_key,
+                occurrence_type: occurrence.occurrence_type,
+                base_conference_date: occurrence.base_conference_date,
+                effective_conference_date: occurrence.effective_conference_date,
+                override_id: occurrence.override_id,
+                override_reason_code: occurrence.override_reason_code,
+                override_notes: occurrence.override_notes,
+            },
             response_json: null,
             created_at: now,
             updated_at: now,
@@ -669,7 +879,8 @@ export class VideoconferenceService {
                 await this.planningVideoconferencesRepo.save(record);
                 return {
                     schedule_id: occurrence.row.schedule_id,
-                    conference_date: occurrence.conference_date,
+                    occurrence_key: occurrence.occurrence_key,
+                    conference_date: occurrence.effective_conference_date,
                     status: 'MATCHED',
                     message: 'Videoconferencia creada y conciliada con Zoom.',
                     record_id: record.id,
@@ -684,7 +895,8 @@ export class VideoconferenceService {
             await this.planningVideoconferencesRepo.save(record);
             return {
                 schedule_id: occurrence.row.schedule_id,
-                conference_date: occurrence.conference_date,
+                occurrence_key: occurrence.occurrence_key,
+                conference_date: occurrence.effective_conference_date,
                 status: 'CREATED_UNMATCHED',
                 message:
                     'La videoconferencia fue creada en Aula Virtual, pero no se pudo conciliar el zoom_meeting_id.',
@@ -703,7 +915,8 @@ export class VideoconferenceService {
             await this.planningVideoconferencesRepo.save(record);
             return {
                 schedule_id: occurrence.row.schedule_id,
-                conference_date: occurrence.conference_date,
+                occurrence_key: occurrence.occurrence_key,
+                conference_date: occurrence.effective_conference_date,
                 status: 'ERROR',
                 message: toErrorMessage(error),
                 record_id: record.id,
@@ -714,15 +927,40 @@ export class VideoconferenceService {
         }
     }
 
+    private buildGenerationResultFromRecord(
+        record: PlanningSubsectionVideoconferenceEntity,
+        message: string,
+    ): GenerateResultItem {
+        return {
+            schedule_id: record.planning_subsection_schedule_id,
+            occurrence_key: buildOccurrenceKey(
+                record.planning_subsection_schedule_id,
+                record.conference_date,
+            ),
+            conference_date: record.conference_date,
+            status: normalizeGenerationResultStatus(record.status),
+            message,
+            record_id: record.id,
+            zoom_user_id: record.zoom_user_id,
+            zoom_user_email: record.zoom_user_email,
+            zoom_meeting_id: record.zoom_meeting_id,
+        };
+    }
+
     private async getScheduleRows(filters?: FilterOptionsDto, scheduleIds?: string[]) {
         const qb = this.createScheduleBaseQuery()
             .select('offer.id', 'offer_id')
+            .addSelect('offer.cycle', 'cycle')
             .addSelect('section.id', 'section_id')
             .addSelect('section.code', 'section_code')
+            .addSelect('section.external_code', 'section_external_code')
+            .addSelect('section.is_cepea', 'section_is_cepea')
             .addSelect('subsection.id', 'subsection_id')
             .addSelect('subsection.code', 'subsection_code')
             .addSelect('schedule.id', 'schedule_id')
             .addSelect('offer.campus_id', 'campus_id')
+            .addSelect('offer.semester_id', 'semester_id')
+            .addSelect('semester.name', 'semester_name')
             .addSelect('campus.name', 'campus_name')
             .addSelect('offer.faculty_id', 'faculty_id')
             .addSelect('faculty.name', 'faculty_name')
@@ -767,14 +1005,19 @@ export class VideoconferenceService {
             .addOrderBy('schedule.start_time', 'ASC')
             .getRawMany<Record<string, unknown>>();
 
-        return rawRows.map((row) => ({
+        const mappedRows = rawRows.map((row) => ({
             offer_id: readString(row.offer_id),
+            cycle: readNullableNumber(row.cycle),
             section_id: readString(row.section_id),
             section_code: readString(row.section_code),
+            section_external_code: readNullableString(row.section_external_code),
+            section_is_cepea: Boolean(row.section_is_cepea),
             subsection_id: readString(row.subsection_id),
             subsection_code: readString(row.subsection_code),
             schedule_id: readString(row.schedule_id),
             campus_id: readNullableString(row.campus_id),
+            semester_id: readNullableString(row.semester_id),
+            semester_name: readNullableString(row.semester_name),
             campus_name: readNullableString(row.campus_name),
             faculty_id: readNullableString(row.faculty_id),
             faculty_name: readNullableString(row.faculty_name),
@@ -788,7 +1031,9 @@ export class VideoconferenceService {
             vc_academic_program_id: readNullableString(row.vc_academic_program_id),
             vc_course_id: readNullableString(row.vc_course_id),
             vc_section_id: readNullableString(row.vc_section_id),
-            vc_section_name: readNullableString(row.vc_section_name),
+            vc_section_name:
+              readNullableString(row.vc_section_name) ??
+              readNullableString(row.section_external_code),
             responsible_teacher_id: readNullableString(row.responsible_teacher_id),
             responsible_teacher_name: readNullableString(row.responsible_teacher_name),
             responsible_teacher_full_name: readNullableString(row.responsible_teacher_full_name),
@@ -809,11 +1054,16 @@ export class VideoconferenceService {
                 readString(row.end_time),
             ),
         }));
+
+        return filterRowsByModality(mappedRows, filters?.modality);
     }
 
     private async getFilterOptionRows(filters?: FilterOptionsDto, ignoredFilters: FilterOptionKey[] = []) {
         const qb = this.createScheduleBaseQuery()
-            .select('offer.campus_id', 'campus_id')
+            .select('offer.semester_id', 'semester_id')
+            .addSelect('semester.name', 'semester_name')
+            .addSelect('offer.cycle', 'cycle')
+            .addSelect('offer.campus_id', 'campus_id')
             .addSelect('campus.name', 'campus_name')
             .addSelect('offer.faculty_id', 'faculty_id')
             .addSelect('faculty.name', 'faculty_name')
@@ -822,6 +1072,9 @@ export class VideoconferenceService {
             .addSelect('offer.study_plan_course_id', 'course_id')
             .addSelect('offer.course_code', 'course_code')
             .addSelect('offer.course_name', 'course_name')
+            .addSelect('vc_section.name', 'vc_section_name')
+            .addSelect('section.external_code', 'section_external_code')
+            .addSelect('section.is_cepea', 'section_is_cepea')
             .addSelect('subsection_modality.code', 'subsection_modality_code')
             .addSelect('subsection_modality.name', 'subsection_modality_name')
             .addSelect('section_modality.code', 'section_modality_code')
@@ -831,7 +1084,10 @@ export class VideoconferenceService {
         this.applyScheduleFilters(qb, filters, undefined, ignoredFilters);
 
         const rows = await qb.getRawMany<Record<string, unknown>>();
-        return rows.map((row) => ({
+        const mappedRows = rows.map((row) => ({
+            semester_id: readNullableString(row.semester_id),
+            semester_name: readNullableString(row.semester_name),
+            cycle: readNullableNumber(row.cycle),
             campus_id: readNullableString(row.campus_id),
             campus_name: readNullableString(row.campus_name),
             faculty_id: readNullableString(row.faculty_id),
@@ -841,12 +1097,21 @@ export class VideoconferenceService {
             course_id: readNullableString(row.course_id),
             course_code: readNullableString(row.course_code),
             course_name: readNullableString(row.course_name),
+            vc_section_name: readNullableString(row.vc_section_name),
+            section_external_code: readNullableString(row.section_external_code),
+            section_is_cepea: Boolean(row.section_is_cepea),
             subsection_modality_code: readNullableString(row.subsection_modality_code),
             subsection_modality_name: readNullableString(row.subsection_modality_name),
             section_modality_code: readNullableString(row.section_modality_code),
             section_modality_name: readNullableString(row.section_modality_name),
             day_of_week: readNullableString(row.day_of_week),
         }));
+
+        if (!ignoredFilters.includes('modality')) {
+            return filterOptionRowsByModality(mappedRows, filters?.modality);
+        }
+
+        return mappedRows;
     }
 
     private createScheduleBaseQuery() {
@@ -863,6 +1128,7 @@ export class VideoconferenceService {
                 'section.id = subsection.planning_section_id',
             )
             .innerJoin(PlanningOfferEntity, 'offer', 'offer.id = section.planning_offer_id')
+            .leftJoin(SemesterEntity, 'semester', 'semester.id = offer.semester_id')
             .leftJoin(CampusEntity, 'campus', 'campus.id = offer.campus_id')
             .leftJoin(FacultyEntity, 'faculty', 'faculty.id = offer.faculty_id')
             .leftJoin(AcademicProgramEntity, 'program', 'program.id = offer.academic_program_id')
@@ -894,6 +1160,9 @@ export class VideoconferenceService {
         if (scheduleIds?.length) {
             qb.andWhere('schedule.id IN (:...scheduleIds)', { scheduleIds: normalizeIdArray(scheduleIds) });
         }
+        if (!ignoredFilters.includes('semesterId') && filters?.semesterId?.trim()) {
+            qb.andWhere('offer.semester_id = :semesterId', { semesterId: filters.semesterId.trim() });
+        }
         if (!ignoredFilters.includes('campusIds') && filters?.campusIds?.length) {
             qb.andWhere('offer.campus_id IN (:...campusIds)', { campusIds: normalizeIdArray(filters.campusIds) });
         }
@@ -912,16 +1181,6 @@ export class VideoconferenceService {
         }
         if (!ignoredFilters.includes('days') && filters?.days?.length) {
             qb.andWhere('schedule.day_of_week IN (:...days)', { days: normalizeIdArray(filters.days) });
-        }
-        if (!ignoredFilters.includes('modality') && filters?.modality?.trim()) {
-            const normalizedModality = normalizeModalityCode(filters.modality);
-            if (normalizedModality === 'HIBRIDO') {
-                qb.andWhere("COALESCE(subsection_modality.code, section_modality.code, '') LIKE 'HIBRIDO%'");
-            } else if (normalizedModality) {
-                qb.andWhere('COALESCE(subsection_modality.code, section_modality.code) = :modality', {
-                    modality: normalizedModality,
-                });
-            }
         }
     }
 
@@ -942,6 +1201,17 @@ export class VideoconferenceService {
         return sortCatalogOptions(options);
     }
 
+    private buildPeriodOptions(rows: FilterOptionRow[]) {
+        const options = new Map<string, string>();
+        for (const row of rows) {
+            if (!row.semester_id) {
+                continue;
+            }
+            options.set(row.semester_id, row.semester_name ?? '(Sin periodo)');
+        }
+        return sortCatalogOptions(options);
+    }
+
     private buildCourseOptions(rows: FilterOptionRow[]) {
         const options = new Map<string, string>();
         for (const row of rows) {
@@ -956,12 +1226,7 @@ export class VideoconferenceService {
     private buildModalityOptions(rows: FilterOptionRow[]) {
         const options = new Map<string, string>();
         for (const row of rows) {
-            const modality = resolveModalityValues(
-                row.subsection_modality_code,
-                row.subsection_modality_name,
-                row.section_modality_code,
-                row.section_modality_name,
-            );
+            const modality = resolveFilterRowModality(row);
             const modalityCode = normalizeModalityCode(modality.code);
             if (!modalityCode) {
                 continue;
@@ -983,6 +1248,114 @@ export class VideoconferenceService {
         return [...options.entries()]
             .map(([id, label]) => ({ id, label }))
             .sort((left, right) => getDaySortOrder(left.id) - getDaySortOrder(right.id));
+    }
+
+    private serializeBasePreviewRow(row: ScheduleContextRow) {
+        const teacher = resolveTeacher(row);
+        const modality = resolveModality(row);
+        return {
+            id: row.schedule_id,
+            occurrence_key: `schedule:${row.schedule_id}`,
+            schedule_id: row.schedule_id,
+            section_id: row.section_id,
+            section_code: row.section_code,
+            section_label: buildSectionLabel(row),
+            subsection_id: row.subsection_id,
+            subsection_code: row.subsection_code,
+            subsection_label: row.subsection_code,
+            campus_id: row.campus_id,
+            campus_name: row.campus_name,
+            faculty_id: row.faculty_id,
+            faculty_name: row.faculty_name,
+            program_id: row.program_id,
+            program_name: row.program_name,
+            course_id: row.course_id,
+            cycle: row.cycle,
+            course_code: row.course_code,
+            course_name: row.course_name,
+            course_label: buildCourseLabel(row.course_code, row.course_name),
+            modality_code: modality.code,
+            modality_name: modality.name,
+            teacher_id: teacher.id,
+            teacher_name: teacher.name,
+            teacher_dni: teacher.dni,
+            day_of_week: row.day_of_week,
+            day_label: displayDay(row.day_of_week),
+            start_time: compactTime(row.start_time),
+            end_time: compactTime(row.end_time),
+            duration_minutes: row.duration_minutes,
+            vc_period_id: row.vc_period_id,
+            vc_faculty_id: row.vc_faculty_id,
+            vc_academic_program_id: row.vc_academic_program_id,
+            vc_course_id: row.vc_course_id,
+            vc_section_id: row.vc_section_id,
+            vc_section_name: row.vc_section_name,
+            occurrence_type: 'BASE' as const,
+            base_conference_date: '',
+            effective_conference_date: '',
+            effective_start_time: compactTime(row.start_time),
+            effective_end_time: compactTime(row.end_time),
+            override_id: null,
+            override_reason_code: null,
+            override_notes: null,
+            selectable: true,
+        };
+    }
+
+    private serializeOccurrencePreviewRow(occurrence: ExpandedOccurrence) {
+        const row = occurrence.row;
+        const teacher = resolveTeacher(row);
+        const modality = resolveModality(row);
+        return {
+            id: occurrence.occurrence_key,
+            occurrence_key: occurrence.occurrence_key,
+            schedule_id: row.schedule_id,
+            section_id: row.section_id,
+            section_code: row.section_code,
+            section_label: buildSectionLabel(row),
+            subsection_id: row.subsection_id,
+            subsection_code: row.subsection_code,
+            subsection_label: row.subsection_code,
+            campus_id: row.campus_id,
+            campus_name: row.campus_name,
+            faculty_id: row.faculty_id,
+            faculty_name: row.faculty_name,
+            program_id: row.program_id,
+            program_name: row.program_name,
+            course_id: row.course_id,
+            cycle: row.cycle,
+            course_code: row.course_code,
+            course_name: row.course_name,
+            course_label: buildCourseLabel(row.course_code, row.course_name),
+            modality_code: modality.code,
+            modality_name: modality.name,
+            teacher_id: teacher.id,
+            teacher_name: teacher.name,
+            teacher_dni: teacher.dni,
+            day_of_week: dayCodeForDate(occurrence.effective_conference_date),
+            day_label: displayDay(dayCodeForDate(occurrence.effective_conference_date)),
+            start_time: compactTime(occurrence.effective_start_time),
+            end_time: compactTime(occurrence.effective_end_time),
+            duration_minutes: calculateDurationMinutes(
+                occurrence.effective_start_time,
+                occurrence.effective_end_time,
+            ),
+            vc_period_id: row.vc_period_id,
+            vc_faculty_id: row.vc_faculty_id,
+            vc_academic_program_id: row.vc_academic_program_id,
+            vc_course_id: row.vc_course_id,
+            vc_section_id: row.vc_section_id,
+            vc_section_name: row.vc_section_name,
+            occurrence_type: occurrence.occurrence_type,
+            base_conference_date: occurrence.base_conference_date,
+            effective_conference_date: occurrence.effective_conference_date,
+            effective_start_time: compactTime(occurrence.effective_start_time),
+            effective_end_time: compactTime(occurrence.effective_end_time),
+            override_id: occurrence.override_id,
+            override_reason_code: occurrence.override_reason_code,
+            override_notes: occurrence.override_notes,
+            selectable: occurrence.occurrence_type !== 'SKIPPED',
+        };
     }
 
     private async getActiveZoomPoolUsers() {
@@ -1012,28 +1385,74 @@ export class VideoconferenceService {
             .filter((item) => Boolean(item.email));
     }
 
-    private expandOccurrences(rows: ScheduleContextRow[], startDate: string, endDate: string, timezone: string) {
+    private async resolveOccurrences(
+        rows: ScheduleContextRow[],
+        startDate: string,
+        endDate: string,
+        timezone: string,
+    ) {
+        const overrides = await this.listOverridesForRange(
+            rows.map((row) => row.schedule_id),
+            startDate,
+            endDate,
+        );
+        const overrideMap = new Map(
+            overrides.map((item) => [`${item.schedule_id}::${item.conference_date}`, item] as const),
+        );
         const occurrences: ExpandedOccurrence[] = [];
         for (const row of rows) {
             for (const conferenceDate of enumerateConferenceDates(row.day_of_week, startDate, endDate)) {
-                occurrences.push({
-                    row,
-                    conference_date: conferenceDate,
-                    scheduled_start: buildDateTime(conferenceDate, row.start_time, timezone),
-                    scheduled_end: buildDateTime(conferenceDate, row.end_time, timezone),
-                });
+                const override = overrideMap.get(`${row.schedule_id}::${conferenceDate}`) ?? null;
+                occurrences.push(buildOccurrence(row, conferenceDate, override, timezone));
             }
         }
 
         return occurrences.sort((left, right) => {
-            if (left.conference_date !== right.conference_date) {
-                return left.conference_date.localeCompare(right.conference_date);
+            if (left.effective_conference_date !== right.effective_conference_date) {
+                return left.effective_conference_date.localeCompare(right.effective_conference_date);
             }
-            if (left.row.day_of_week !== right.row.day_of_week) {
-                return left.row.day_of_week.localeCompare(right.row.day_of_week);
+            if (left.occurrence_type !== right.occurrence_type) {
+                return left.occurrence_type.localeCompare(right.occurrence_type);
             }
-            return left.row.start_time.localeCompare(right.row.start_time);
+            if (left.effective_start_time !== right.effective_start_time) {
+                return left.effective_start_time.localeCompare(right.effective_start_time);
+            }
+            return left.occurrence_key.localeCompare(right.occurrence_key);
         });
+    }
+
+    private async listOverridesForRange(scheduleIds: string[], startDate: string, endDate: string) {
+        const normalizedScheduleIds = normalizeIdArray(scheduleIds);
+        if (!normalizedScheduleIds.length) {
+            return [];
+        }
+
+        const entities = await this.planningVideoconferenceOverridesRepo
+            .createQueryBuilder('override')
+            .where('override.planning_subsection_schedule_id IN (:...scheduleIds)', {
+                scheduleIds: normalizedScheduleIds,
+            })
+            .andWhere('override.conference_date BETWEEN :startDate AND :endDate', {
+                startDate,
+                endDate,
+            })
+            .getMany();
+
+        return entities.map((item) => this.serializeOverride(item));
+    }
+
+    private serializeOverride(entity: PlanningSubsectionVideoconferenceOverrideEntity): StoredOccurrenceOverride {
+        return {
+            id: entity.id,
+            schedule_id: entity.planning_subsection_schedule_id,
+            conference_date: entity.conference_date,
+            action: entity.action,
+            override_date: entity.override_date,
+            override_start_time: entity.override_start_time ? compactTime(entity.override_start_time) : null,
+            override_end_time: entity.override_end_time ? compactTime(entity.override_end_time) : null,
+            reason_code: entity.reason_code,
+            notes: entity.notes,
+        };
     }
 
     private validateScheduleForGeneration(row: ScheduleContextRow) {
@@ -1081,33 +1500,37 @@ export class VideoconferenceService {
     }
 
     private buildAulaVirtualPayload(
-        row: ScheduleContextRow,
-        conferenceDate: string,
+        occurrence: ExpandedOccurrence,
         zoomUserId: string,
         teacher: ResolvedTeacher,
         topic: string,
     ): AulaVirtualPayload {
-        const startTime = compactTime(row.start_time);
-        const endTime = compactTime(row.end_time);
+        const startTime = compactTime(occurrence.effective_start_time);
+        const endTime = compactTime(occurrence.effective_end_time);
+        const dayOfWeek = dayCodeForDate(occurrence.effective_conference_date);
+        const minutes = calculateDurationMinutes(
+            occurrence.effective_start_time,
+            occurrence.effective_end_time,
+        );
         return {
-            courseCode: row.course_code?.trim() ?? '',
-            courseName: row.course_name?.trim() ?? '',
-            section: row.vc_section_name?.trim() ?? '',
+            courseCode: occurrence.row.course_code?.trim() ?? '',
+            courseName: occurrence.row.course_name?.trim() ?? '',
+            section: occurrence.row.vc_section_name?.trim() ?? '',
             dni: teacher.dni?.trim() ?? '',
             teacher: teacher.name?.trim() ?? '',
-            day: row.day_of_week,
+            day: dayOfWeek,
             startTime,
             endTime,
-            termId: row.vc_period_id?.trim() ?? '',
-            facultyId: row.vc_faculty_id?.trim() ?? '',
-            careerId: row.vc_academic_program_id?.trim() ?? '',
-            courseId: row.vc_course_id?.trim() ?? '',
+            termId: occurrence.row.vc_period_id?.trim() ?? '',
+            facultyId: occurrence.row.vc_faculty_id?.trim() ?? '',
+            careerId: occurrence.row.vc_academic_program_id?.trim() ?? '',
+            courseId: occurrence.row.vc_course_id?.trim() ?? '',
             name: topic,
-            sectionId: row.vc_section_id?.trim() ?? '',
-            start: `${formatDateForAulaVirtual(conferenceDate)} ${startTime}`,
-            end: `${formatDateForAulaVirtual(conferenceDate)} ${endTime}`,
-            minutes: String(row.duration_minutes),
-            'daysOfWeek[0]': String(DAY_TO_AULA_VIRTUAL_NUMBER[row.day_of_week]),
+            sectionId: occurrence.row.vc_section_id?.trim() ?? '',
+            start: `${formatDateForAulaVirtual(occurrence.effective_conference_date)} ${startTime}`,
+            end: `${formatDateForAulaVirtual(occurrence.effective_conference_date)} ${endTime}`,
+            minutes: String(minutes),
+            'daysOfWeek[0]': String(DAY_TO_AULA_VIRTUAL_NUMBER[dayOfWeek]),
             credentialId: zoomUserId,
         };
     }
@@ -1304,14 +1727,14 @@ function buildCourseLabel(courseCode: string | null, courseName: string | null) 
     return parts.join(' - ') || '(Sin curso)';
 }
 
-function buildMeetingTopic(row: ScheduleContextRow, teacher: ResolvedTeacher) {
+function buildMeetingTopic(occurrence: ExpandedOccurrence, teacher: ResolvedTeacher) {
     return [
-        row.course_code?.trim() ?? '',
-        row.course_name?.trim() ?? '',
-        row.vc_section_name?.trim() ?? '',
+        occurrence.row.course_code?.trim() ?? '',
+        occurrence.row.course_name?.trim() ?? '',
+        occurrence.row.vc_section_name?.trim() ?? '',
         teacher.dni?.trim() ?? '',
         teacher.name?.trim() ?? '',
-        `${row.day_of_week} ${compactTime(row.start_time)}-${compactTime(row.end_time)}`,
+        `${dayCodeForDate(occurrence.effective_conference_date)} ${compactTime(occurrence.effective_start_time)}-${compactTime(occurrence.effective_end_time)}`,
     ].join('|');
 }
 
@@ -1326,6 +1749,31 @@ function resolveTeacher(row: ScheduleContextRow): ResolvedTeacher {
 }
 
 function resolveModality(row: ScheduleContextRow): ResolvedModality {
+    const sectionCodeModality = resolveSectionCodeModality(
+        row.vc_section_name,
+        row.section_external_code,
+        row.section_is_cepea,
+    );
+    if (sectionCodeModality) {
+        return sectionCodeModality;
+    }
+    return resolveModalityValues(
+        row.subsection_modality_code,
+        row.subsection_modality_name,
+        row.section_modality_code,
+        row.section_modality_name,
+    );
+}
+
+function resolveFilterRowModality(row: FilterOptionRow): ResolvedModality {
+    const sectionCodeModality = resolveSectionCodeModality(
+        row.vc_section_name,
+        row.section_external_code,
+        row.section_is_cepea,
+    );
+    if (sectionCodeModality) {
+        return sectionCodeModality;
+    }
     return resolveModalityValues(
         row.subsection_modality_code,
         row.subsection_modality_name,
@@ -1351,10 +1799,28 @@ function normalizeModalityCode(value: string | null | undefined) {
     if (!normalized) {
         return null;
     }
-    if (normalized.startsWith('HIBRIDO')) {
-        return 'HIBRIDO';
-    }
     return normalized;
+}
+
+function normalizeGenerationResultStatus(
+    value: string | null | undefined,
+): GenerateResultItem['status'] {
+    switch (`${value ?? ''}`.trim().toUpperCase()) {
+        case 'MATCHED':
+            return 'MATCHED';
+        case 'CREATED_UNMATCHED':
+            return 'CREATED_UNMATCHED';
+        case 'BLOCKED_EXISTING':
+            return 'BLOCKED_EXISTING';
+        case 'NO_AVAILABLE_ZOOM_USER':
+            return 'NO_AVAILABLE_ZOOM_USER';
+        case 'VALIDATION_ERROR':
+            return 'VALIDATION_ERROR';
+        case 'ERROR':
+            return 'ERROR';
+        default:
+            return 'ERROR';
+    }
 }
 
 function displayModality(code: string | null | undefined, fallbackName?: string | null | undefined) {
@@ -1363,11 +1829,131 @@ function displayModality(code: string | null | undefined, fallbackName?: string 
             return 'Presencial';
         case 'VIRTUAL':
             return 'Virtual';
-        case 'HIBRIDO':
-            return 'Hibrido';
+        case 'HIBRIDO_PRESENCIAL':
+            return 'Hibrido presencial';
+        case 'HIBRIDO_VIRTUAL':
+            return 'Hibrido virtual';
         default:
             return coalesceText(fallbackName, code) ?? 'Sin modalidad';
     }
+}
+
+function resolveSectionCodeModality(
+    vcSectionName: string | null | undefined,
+    sectionExternalCode: string | null | undefined,
+    isCepea: boolean,
+): ResolvedModality | null {
+    if (isCepea) {
+        return { code: 'VIRTUAL', name: 'Virtual' };
+    }
+    const sectionToken = extractSectionToken(vcSectionName) ?? extractSectionToken(sectionExternalCode);
+    if (!sectionToken) {
+        return null;
+    }
+    if (sectionToken.length > 2 && sectionToken.endsWith('HV')) {
+        return { code: 'HIBRIDO_VIRTUAL', name: 'Hibrido virtual' };
+    }
+    if (sectionToken.length > 2 && sectionToken.endsWith('HP')) {
+        return { code: 'HIBRIDO_PRESENCIAL', name: 'Hibrido presencial' };
+    }
+    if (sectionToken.endsWith('V')) {
+        return { code: 'VIRTUAL', name: 'Virtual' };
+    }
+    if (sectionToken.endsWith('P')) {
+        return { code: 'PRESENCIAL', name: 'Presencial' };
+    }
+    return null;
+}
+
+function extractSectionToken(value: string | null | undefined) {
+    const normalized = String(value ?? '').trim().toUpperCase();
+    if (!normalized) {
+        return null;
+    }
+    return normalized.split('-')[0]?.replace(/\s+/g, '') ?? null;
+}
+
+function filterRowsByModality(rows: ScheduleContextRow[], modality: string | null | undefined) {
+    const normalized = normalizeModalityCode(modality);
+    if (!normalized) {
+        return rows;
+    }
+    return rows.filter((row) => normalizeModalityCode(resolveModality(row).code) === normalized);
+}
+
+function filterOptionRowsByModality(rows: FilterOptionRow[], modality: string | null | undefined) {
+    const normalized = normalizeModalityCode(modality);
+    if (!normalized) {
+        return rows;
+    }
+    return rows.filter((row) => normalizeModalityCode(resolveFilterRowModality(row).code) === normalized);
+}
+
+function buildOccurrence(
+    row: ScheduleContextRow,
+    conferenceDate: string,
+    override: StoredOccurrenceOverride | null,
+    timezone: string,
+): ExpandedOccurrence {
+    const action = override?.action ?? 'KEEP';
+    const occurrenceType: ExpandedOccurrence['occurrence_type'] =
+        action === 'RESCHEDULE' ? 'RESCHEDULED' : action === 'SKIP' ? 'SKIPPED' : 'BASE';
+    const effectiveConferenceDate =
+        action === 'RESCHEDULE' ? normalizeIsoDate(override?.override_date ?? conferenceDate) : conferenceDate;
+    const effectiveStartTime =
+        action === 'RESCHEDULE' ? normalizeTimeValue(override?.override_start_time ?? row.start_time) : compactTime(row.start_time);
+    const effectiveEndTime =
+        action === 'RESCHEDULE' ? normalizeTimeValue(override?.override_end_time ?? row.end_time) : compactTime(row.end_time);
+
+    return {
+        occurrence_key: buildOccurrenceKey(row.schedule_id, conferenceDate),
+        row,
+        base_conference_date: conferenceDate,
+        effective_conference_date: effectiveConferenceDate,
+        effective_start_time: effectiveStartTime,
+        effective_end_time: effectiveEndTime,
+        scheduled_start: buildDateTime(effectiveConferenceDate, effectiveStartTime, timezone),
+        scheduled_end: buildDateTime(effectiveConferenceDate, effectiveEndTime, timezone),
+        occurrence_type: occurrenceType,
+        override_id: override?.id ?? null,
+        override_reason_code: override?.reason_code ?? null,
+        override_notes: override?.notes ?? null,
+    };
+}
+
+function buildOccurrenceKey(scheduleId: string, conferenceDate: string) {
+    return `${scheduleId}::${conferenceDate}`;
+}
+
+function parseOccurrenceKey(value: string) {
+    const [schedule_id = '', base_conference_date = ''] = String(value ?? '').split('::');
+    return {
+        schedule_id: schedule_id.trim(),
+        base_conference_date: base_conference_date.trim(),
+    };
+}
+
+function normalizeTimeValue(value: string | null | undefined) {
+    const normalized = compactTime(value);
+    if (!/^\d{2}:\d{2}$/.test(normalized)) {
+        throw new BadRequestException(`Hora invalida: ${value}`);
+    }
+    return normalized;
+}
+
+function normalizeOverrideReason(
+    value: string | null | undefined,
+): 'HOLIDAY' | 'WEATHER' | 'OTHER' {
+    const normalized = String(value ?? '').trim().toUpperCase();
+    if (normalized === 'HOLIDAY' || normalized === 'WEATHER' || normalized === 'OTHER') {
+        return normalized;
+    }
+    return 'OTHER';
+}
+
+function emptyTextToNull(value: string | null | undefined) {
+    const normalized = String(value ?? '').trim();
+    return normalized || null;
 }
 
 function coalesceText(...values: Array<string | null | undefined>) {
@@ -1405,6 +1991,10 @@ function compactTime(value: string | null | undefined) {
         return '--:--';
     }
     return value.slice(0, 5);
+}
+
+function dayCodeForDate(value: string) {
+    return jsDayToCode(parseUtcDate(value).getUTCDay());
 }
 
 function getDaySortOrder(dayCode: string) {
@@ -1476,6 +2066,27 @@ function parseUtcDate(value: string) {
 
 function formatUtcDate(value: Date) {
     return value.toISOString().slice(0, 10);
+}
+
+function jsDayToCode(day: number) {
+    switch (day) {
+        case 0:
+            return 'DOMINGO';
+        case 1:
+            return 'LUNES';
+        case 2:
+            return 'MARTES';
+        case 3:
+            return 'MIERCOLES';
+        case 4:
+            return 'JUEVES';
+        case 5:
+            return 'VIERNES';
+        case 6:
+            return 'SABADO';
+        default:
+            return 'LUNES';
+    }
 }
 
 function buildDateTime(date: string, time: string, timezone: string) {
@@ -1563,6 +2174,20 @@ function readNumber(value: unknown) {
         return Number.isFinite(parsed) ? parsed : 0;
     }
     return 0;
+}
+
+function readNullableNumber(value: unknown) {
+    if (value === null || value === undefined || value === '') {
+        return null;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
 }
 
 function toErrorMessage(error: unknown) {
