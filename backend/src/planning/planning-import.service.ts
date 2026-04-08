@@ -1090,9 +1090,8 @@ export class PlanningImportService {
 
       const sections = await this.fetchAkademicSections(enrichedCourse.id, dto.semester_id);
       const sectionRows = await runWithConcurrency(sections, AKADEMIC_SECTION_CONCURRENCY, async (section) => {
-        const shouldFetchDetail = this.shouldFetchAkademicSectionDetail(enrichedCourse, section);
         const [detail, schedules] = await Promise.all([
-          shouldFetchDetail ? this.fetchAkademicSectionDetail(section.id) : Promise.resolve(null),
+          this.fetchAkademicSectionDetail(section.id),
           this.fetchAkademicSectionSchedules(section.id),
         ]);
         return this.buildAkademicPreviewRowsForSection(
@@ -1252,6 +1251,95 @@ export class PlanningImportService {
       .filter((item): item is AkademicScheduleRow => Boolean(item));
   }
 
+  private buildFallbackAkademicCourseForSectionSync(
+    offer: PlanningOfferEntity,
+    detail: Record<string, unknown> | null,
+    catalog: ImportCatalog,
+  ): AkademicCourseRow | null {
+    const courseId =
+      recordString(detail ?? {}, 'courseId') ??
+      offer.source_course_id ??
+      null;
+    const courseCode = offer.course_code ?? recordString(detail ?? {}, 'courseCode');
+    const courseName = offer.course_name ?? recordString(detail ?? {}, 'courseName');
+    if (!courseId || !courseCode || !courseName) {
+      return null;
+    }
+
+    const programName =
+      (offer.academic_program_id
+        ? catalog.programs.find((item) => item.id === offer.academic_program_id)?.name ?? null
+        : null) ??
+      recordString(detail ?? {}, 'careerName') ??
+      recordString(detail ?? {}, 'programName');
+
+    return {
+      id: courseId,
+      code: courseCode,
+      name: courseName,
+      career_name: programName,
+      credits: null,
+      academic_year: offer.cycle ?? null,
+      type_raw: offer.course_type ?? null,
+      raw: {
+        id: courseId,
+        code: courseCode,
+        name: courseName,
+        careerName: programName,
+        detail,
+      },
+    };
+  }
+
+  private buildFallbackAkademicSectionForSectionSync(
+    currentSection: PlanningSectionEntity,
+    sourceCourseId: string,
+    detail: Record<string, unknown> | null,
+  ): AkademicSectionRow | null {
+    const sectionId = recordString(detail ?? {}, 'id') ?? currentSection.source_section_id ?? null;
+    const externalCode =
+      recordString(detail ?? {}, 'code') ??
+      currentSection.external_code ??
+      null;
+    if (!sectionId || !externalCode) {
+      return null;
+    }
+
+    const teacherSections = Array.isArray(pick(detail ?? {}, 'teacherSections'))
+      ? (pick(detail ?? {}, 'teacherSections') as unknown[])
+      : [];
+
+    return {
+      id: sectionId,
+      course_id: sourceCourseId,
+      external_code: externalCode,
+      modality_raw:
+        pick(detail ?? {}, 'modality', 'sessionType') as number | string | null,
+      vacancies: this.resolveAkademicSectionVacancies(
+        {
+          id: sectionId,
+          course_id: sourceCourseId,
+          external_code: externalCode,
+          modality_raw: null,
+          vacancies: null,
+          teacher_names: [],
+          teacher_ids: [],
+          raw: detail ?? {},
+        },
+        detail,
+      ),
+      teacher_names: teacherSections
+        .map((item) => asNullableString(pick(asRecord(item) ?? {}, 'fullName', 'teacherName')))
+        .filter((item): item is string => Boolean(item)),
+      teacher_ids: teacherSections
+        .map((item) =>
+          asNullableString(pick(asRecord(item) ?? {}, 'teacherId', 'userId')),
+        )
+        .filter((item): item is string => Boolean(item)),
+      raw: detail ?? {},
+    };
+  }
+
   private shouldFetchAkademicSectionDetail(
     course: AkademicCourseRow,
     section: AkademicSectionRow,
@@ -1331,6 +1419,12 @@ export class PlanningImportService {
     schedules: AkademicScheduleRow[],
   ): Promise<PreviewRow[]> {
     const issues: PreviewIssue[] = [];
+    const resolvedSectionVacancies = this.resolveAkademicSectionVacancies(section, detail);
+    const mergedSectionSourcePayload = this.buildAkademicSectionSourcePayload(
+      section.raw,
+      detail,
+      resolvedSectionVacancies,
+    );
     const parsedSection = parseAkademicExternalSectionCode(section.external_code);
     if (!parsedSection.section_code) {
       return [
@@ -1338,7 +1432,7 @@ export class PlanningImportService {
           row_number: 0,
           source_json: {
             course: course.raw,
-            section: section.raw,
+            section: mergedSectionSourcePayload,
             detail,
             schedules: schedules.map((item) => item.raw),
           },
@@ -1398,7 +1492,6 @@ export class PlanningImportService {
             .filter((item): item is string => Boolean(item))
         : []),
     ];
-
     const semester = catalog.semesters.find((item) => item.id === dto.semester_id) ?? null;
     const sourceVcAcademicProgramId = extractAkademicProgramIdFromSource(course.raw, detail);
     const sourceVcFacultyId = extractAkademicFacultyIdFromSource(course.raw, detail);
@@ -1578,7 +1671,7 @@ export class PlanningImportService {
           row_number: 0,
           source_json: {
             course: course.raw,
-            section: section.raw,
+            section: mergedSectionSourcePayload,
             detail,
             schedule: schedule?.raw ?? null,
           },
@@ -1642,8 +1735,8 @@ export class PlanningImportService {
                 : groupHours.offer_practical_hours > 0
                   ? 'PRACTICO'
                   : 'TEORICO',
-            projected_vacancies: section.vacancies,
-            capacity_snapshot: schedule?.capacity ?? section.vacancies ?? null,
+            projected_vacancies: resolvedSectionVacancies,
+            capacity_snapshot: schedule?.capacity ?? resolvedSectionVacancies ?? null,
             subsection_kind: group.subsection_kind,
             assigned_theoretical_hours: groupHours.assigned_theoretical_hours,
             assigned_practical_hours: groupHours.assigned_practical_hours,
@@ -2286,17 +2379,59 @@ export class PlanningImportService {
       ),
     );
     const normalizedSchedules = this.applyAkademicScheduleHeuristics(sortedSchedules);
-    return [
-      {
-        import_subsection_code: sectionCode,
-        subsection_kind: this.deriveAkademicSubsectionKindFromSchedules(
-          courseType,
-          normalizedSchedules,
-        ),
-        schedules: normalizedSchedules,
-        warning: null,
-      },
-    ];
+    if (normalizedSchedules.length <= 1) {
+      return [
+        {
+          import_subsection_code: sectionCode,
+          subsection_kind: this.deriveAkademicSubsectionKindFromSchedules(
+            courseType,
+            normalizedSchedules,
+          ),
+          schedules: normalizedSchedules,
+          warning: null,
+        },
+      ];
+    }
+
+    return normalizedSchedules.map((schedule, index) => ({
+      import_subsection_code: index === 0 ? sectionCode : `${sectionCode}${index}`,
+      subsection_kind: this.deriveAkademicSubsectionKindFromSchedules(courseType, [schedule]),
+      schedules: [schedule],
+      warning: null,
+    }));
+  }
+
+  private resolveAkademicSectionVacancies(
+    section: AkademicSectionRow,
+    detail: Record<string, unknown> | null,
+  ) {
+    const detailRecord = detail ?? {};
+    const detailVacancies =
+      [
+        asNullableInt(pick(detailRecord, 'vacancies')),
+        asNullableInt(pick(detailRecord, 'availableVacancies')),
+        asNullableInt(pick(detailRecord, 'quota')),
+        asNullableInt(pick(detailRecord, 'totalVacancies')),
+        asNullableInt(pick(detailRecord, 'vacantSeats')),
+        asNullableInt(pick(detailRecord, 'section.vacancies')),
+        asNullableInt(pick(detailRecord, 'section.availableVacancies')),
+        asNullableInt(pick(detailRecord, 'courseTerm.vacancies')),
+        asNullableInt(pick(detailRecord, 'detail.vacancies')),
+        asNullableInt(pick(detailRecord, 'data.vacancies')),
+      ].find((value) => value !== null && value !== undefined) ?? null;
+    return detailVacancies ?? section.vacancies ?? null;
+  }
+
+  private buildAkademicSectionSourcePayload(
+    sectionRaw: Record<string, unknown> | null | undefined,
+    detail: Record<string, unknown> | null,
+    vacancies: number | null,
+  ) {
+    return {
+      ...(sectionRaw ?? {}),
+      ...(detail ?? {}),
+      vacancies,
+    };
   }
 
   private applyAkademicScheduleHeuristics(
@@ -5456,21 +5591,24 @@ export class PlanningImportService {
       course_code: offer.course_code ?? undefined,
     };
 
-    const [catalog, sourceCourses] = await Promise.all([
+    const [catalog, sourceCourses, detail] = await Promise.all([
       this.loadImportCatalog(),
       this.fetchAkademicCourses(sourceTermId),
+      this.fetchAkademicSectionDetail(section.source_section_id),
     ]);
     const sourceCourse =
       sourceCourses.find((item) => item.id === offer.source_course_id) ??
+      sourceCourses.find((item) => item.id === recordString(detail ?? {}, 'courseId')) ??
       sourceCourses.find((item) => normalizeLoose(item.code) === normalizeLoose(offer.course_code)) ??
-      null;
+      this.buildFallbackAkademicCourseForSectionSync(offer, detail, catalog);
     if (!sourceCourse) {
       throw new BadRequestException('No se encontro el curso origen en Akademic para esta seccion.');
     }
 
-    const sourceSections = await this.fetchAkademicSections(sourceCourse.id, sourceTermId);
+    const sourceSections = await this.fetchAkademicSections(sourceCourse.id, sourceTermId).catch(() => []);
     const sourceSection =
-      sourceSections.find((item: AkademicSectionRow) => item.id === section.source_section_id) ?? null;
+      sourceSections.find((item: AkademicSectionRow) => item.id === section.source_section_id) ??
+      this.buildFallbackAkademicSectionForSectionSync(section, sourceCourse.id, detail);
 
     if (!sourceSection) {
       const deleted = await this.offersRepo.manager.transaction(async (manager) => {
@@ -5501,10 +5639,7 @@ export class PlanningImportService {
       };
     }
 
-    const [detail, schedules] = await Promise.all([
-      this.fetchAkademicSectionDetail(sourceSection.id),
-      this.fetchAkademicSectionSchedules(sourceSection.id),
-    ]);
+    const schedules = await this.fetchAkademicSectionSchedules(sourceSection.id);
     const previewRows = await this.buildAkademicPreviewRowsForSection(
       syncDto,
       catalog,
@@ -5893,6 +6028,9 @@ export class PlanningImportService {
       }
 
       currentOffer.last_synced_at = now;
+      if (sourceCourse.id && currentOffer.source_course_id !== sourceCourse.id) {
+        currentOffer.source_course_id = sourceCourse.id;
+      }
       currentOffer.updated_at = now;
       await manager.save(PlanningOfferEntity, currentOffer);
 
@@ -5917,9 +6055,18 @@ export class PlanningImportService {
     if (!scheduleIds.length) {
       return;
     }
-    await manager.delete(PlanningSubsectionVideoconferenceOverrideEntity, {
-      planning_subsection_schedule_id: In(scheduleIds),
-    });
+    const placeholders = scheduleIds.map(() => '?').join(', ');
+    try {
+      await manager.query(
+        `DELETE FROM planning_subsection_videoconference_overrides WHERE planning_subsection_schedule_id IN (${placeholders})`,
+        scheduleIds,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error ?? ''}`;
+      if (!/doesn't exist|does not exist|unknown table/i.test(message)) {
+        throw error;
+      }
+    }
   }
 
   private async deleteAkademicSubsectionTree(
@@ -6136,18 +6283,18 @@ export class PlanningImportService {
       let sectionRepairedSubsections = 0;
 
       for (const group of groupedSubsections) {
-        const targetSubsection =
+        const canReuseSingleExistingSubsection =
+          groupedSubsections.length === 1 && existingSubsections.length === 1;
+        const matchedSubsection =
           existingSubsections.find((item) => item.code === group.import_subsection_code) ??
-          (existingSubsections.length === 1 ? existingSubsections[0] : null);
-        if (!targetSubsection) {
-          continue;
-        }
-
-        const currentScheduleCount = await this.schedulesRepo.count({
-          where: { planning_subsection_id: targetSubsection.id },
-        });
-        if (currentScheduleCount > 0) {
-          continue;
+          (canReuseSingleExistingSubsection ? existingSubsections[0] : null);
+        if (matchedSubsection) {
+          const currentScheduleCount = await this.schedulesRepo.count({
+            where: { planning_subsection_id: matchedSubsection.id },
+          });
+          if (currentScheduleCount > 0) {
+            continue;
+          }
         }
 
         const rowIssues: PreviewIssue[] = [];
@@ -6204,6 +6351,56 @@ export class PlanningImportService {
         );
         const shiftResolution = this.resolveAkademicShift(group.schedules);
         const assignedHours = this.computeAkademicAssignedHours(group.schedules);
+        let targetSubsection = matchedSubsection;
+        if (!targetSubsection) {
+          targetSubsection = await this.subsectionsRepo.save(
+            this.subsectionsRepo.create({
+              id: newId(),
+              planning_section_id: section.id,
+              code: group.import_subsection_code,
+              kind: this.deriveAkademicSubsectionKindFromSchedules(offer.course_type, group.schedules),
+              responsible_teacher_id:
+                uniqueScheduleTeacherIds.length === 1 ? uniqueScheduleTeacherIds[0] : null,
+              course_modality_id: section.course_modality_id ?? null,
+              building_id: uniqueScheduleBuildingIds.length === 1 ? uniqueScheduleBuildingIds[0] : null,
+              classroom_id: uniqueScheduleClassroomIds.length === 1 ? uniqueScheduleClassroomIds[0] : null,
+              capacity_snapshot: maxNumber(
+                resolvedSchedules.map((row) => recordNumberOrNull(row, 'capacity_snapshot')),
+              ),
+              shift: shiftResolution.target_id ?? null,
+              projected_vacancies: section.projected_vacancies ?? null,
+              course_type: offer.course_type,
+              assigned_theoretical_hours: assignedHours.assigned_theoretical_hours,
+              assigned_practical_hours: assignedHours.assigned_practical_hours,
+              assigned_total_hours: assignedHours.assigned_total_hours,
+              denomination: buildDenomination(
+                offer.course_code,
+                offer.course_name,
+                section.code,
+                group.import_subsection_code,
+                offer.campus_id,
+              ),
+              vc_section_id: null,
+              status: 'DRAFT',
+              created_at: now,
+              updated_at: now,
+            }),
+          );
+          await this.logChange(
+            'planning_subsection',
+            targetSubsection.id,
+            'CREATE',
+            null,
+            targetSubsection,
+            {
+              ...this.buildSubsectionLogContext(targetSubsection, section, offer),
+              reason: 'repair_missing_akademic_schedules',
+            },
+            actor,
+          );
+          existingSubsections.push(targetSubsection);
+        }
+
         const nextSubsection = this.subsectionsRepo.create({
           ...targetSubsection,
           kind: this.deriveAkademicSubsectionKindFromSchedules(offer.course_type, group.schedules),
@@ -6257,7 +6454,7 @@ export class PlanningImportService {
         for (const selectedSchedule of resolvedSchedules) {
           const schedule = this.schedulesRepo.create({
             id: newId(),
-            planning_subsection_id: targetSubsection.id,
+            planning_subsection_id: nextSubsection.id,
             day_of_week: recordString(selectedSchedule, 'day_of_week') as (typeof DayOfWeekValues)[number],
             start_time: recordString(selectedSchedule, 'start_time')!,
             end_time: recordString(selectedSchedule, 'end_time')!,

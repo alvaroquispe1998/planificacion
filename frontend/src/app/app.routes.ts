@@ -16,6 +16,8 @@ import { PlanningWorkspacePageComponent } from './pages/planning-workspace/plann
 import { PlanningVcMatchPageComponent } from './pages/planning-vc-match/planning-vc-match.page';
 import { SecurityPageComponent } from './pages/security/security.page';
 import { SettingsPageComponent } from './pages/settings/settings.page';
+import { VideoconferenceZoomConfigPageComponent } from './pages/videoconference-zoom-config/videoconference-zoom-config.page';
+import { VideoconferenceInheritancesPageComponent } from './pages/videoconference-inheritances/videoconference-inheritances.page';
 import { VideoconferenceZoomUsersPageComponent } from './pages/videoconference-zoom-users/videoconference-zoom-users.page';
 
 import { VideoconferencesPageComponent } from './pages/videoconferences/videoconferences.page';
@@ -97,6 +99,24 @@ export const routes: Routes = [
     component: AuditDetailPageComponent,
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.audit' },
+  },
+  {
+    path: 'videoconferences/zoom-config',
+    component: VideoconferenceZoomConfigPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.settings',
+      requiredPermission: 'action.settings.manage',
+    },
+  },
+  {
+    path: 'videoconferences/inheritances',
+    component: VideoconferenceInheritancesPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.settings',
+      requiredPermission: 'action.settings.manage',
+    },
   },
   {
     path: 'videoconferences/zoom-users',

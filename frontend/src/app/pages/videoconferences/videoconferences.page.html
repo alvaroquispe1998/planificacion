@@ -388,12 +388,16 @@
             <strong>{{ getContextPrimary(item) }}</strong>
             <span class="meta-inline">{{ getContextSecondary(item) }}</span>
             <span class="meta-inline">{{ getVcContext(item) }}</span>
+            <span class="meta-inline" [class.meta-inline-accent]="item.inheritance.is_inherited">
+              {{ inheritanceLabel(item) }}
+            </span>
           </div>
 
           <div class="actions-cell">
             <button class="btn btn-secondary btn-sm" type="button" (click)="openOverrideEditor(item)" [disabled]="loading || !canManageOccurrence(item)">
               Reprogramar
             </button>
+            <span *ngIf="item.inheritance.is_inherited" class="meta-inline meta-inline-accent">Override en el padre</span>
           </div>
         </div>
       </div>

@@ -801,6 +801,11 @@ h1 {
   line-height: 1.3;
 }
 
+.meta-inline-accent {
+  color: #1b5fa9;
+  font-weight: 700;
+}
+
 .empty-state {
   padding: 1.8rem 1.4rem;
   text-align: center;

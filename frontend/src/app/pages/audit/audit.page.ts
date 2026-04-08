@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService } from '../../core/api.service';
@@ -23,6 +23,19 @@ type AuditFilters = {
 })
 export class AuditPageComponent implements OnInit {
   readonly pageSizeOptions = [20, 50, 100];
+  readonly creationStatusOptions = [
+    { value: '', label: 'Todos' },
+    { value: 'MATCHED', label: 'Lista en Zoom' },
+    { value: 'CREATED_UNMATCHED', label: 'Creada por revisar' },
+    { value: 'CREATING', label: 'En proceso' },
+    { value: 'ERROR', label: 'Con error' },
+  ];
+  readonly auditStatusOptions = [
+    { value: '', label: 'Todos' },
+    { value: 'PENDING', label: 'Sin sincronizar' },
+    { value: 'SYNCED', label: 'Sincronizada' },
+    { value: 'ERROR', label: 'Error de sync' },
+  ];
   loading = true;
   error = '';
   rows: any[] = [];
@@ -54,6 +67,7 @@ export class AuditPageComponent implements OnInit {
   constructor(
     private readonly api: ApiService,
     private readonly router: Router,
+    private readonly cdr: ChangeDetectorRef,
   ) {}
 
   ngOnInit(): void {
@@ -76,10 +90,12 @@ export class AuditPageComponent implements OnInit {
         this.page = Number(result?.page ?? this.page);
         this.pageSize = Number(result?.page_size ?? this.pageSize);
         this.loading = false;
+        this.cdr.detectChanges();
       },
       error: (err) => {
         this.error = err?.error?.message ?? 'No se pudo cargar la auditoria Zoom.';
         this.loading = false;
+        this.cdr.detectChanges();
       },
     });
   }
@@ -88,8 +104,11 @@ export class AuditPageComponent implements OnInit {
     this.api.getPlanningCatalogFilters().subscribe({
       next: (catalog) => {
         this.catalog = catalog ?? this.catalog;
+        this.cdr.detectChanges();
       },
-      error: () => undefined,
+      error: () => {
+        this.cdr.detectChanges();
+      },
     });
   }
 
@@ -127,6 +146,16 @@ export class AuditPageComponent implements OnInit {
 
   get totalPages() {
     return Math.max(1, Math.ceil(this.totals.total / this.pageSize));
+  }
+
+  get resultBadgeLabel() {
+    if (this.loading) {
+      return 'Actualizando lista';
+    }
+    if (this.totals.total === 1) {
+      return '1 resultado';
+    }
+    return `${this.totals.total} resultados`;
   }
 
   get currentPageStart() {
@@ -198,16 +227,35 @@ export class AuditPageComponent implements OnInit {
   statusLabel(value: string | null | undefined) {
     switch (value) {
       case 'MATCHED':
-        return 'Conciliada';
+        return 'Lista en Zoom';
       case 'CREATED_UNMATCHED':
-        return 'Creada sin match';
+        return 'Creada por revisar';
       case 'ERROR':
-        return 'Error';
+        return 'Con error';
       case 'CREATING':
-        return 'Creando';
+        return 'En proceso';
       default:
         return value || 'Sin estado';
     }
+  }
+
+  statusToneClass(value: string | null | undefined) {
+    switch (value) {
+      case 'MATCHED':
+        return 'pill-ok';
+      case 'CREATED_UNMATCHED':
+        return 'pill-warning';
+      case 'ERROR':
+        return 'pill-error';
+      case 'CREATING':
+        return 'pill-info';
+      default:
+        return '';
+    }
+  }
+
+  linkModeLabel(value: string | null | undefined) {
+    return value === 'INHERITED' ? 'Heredada' : 'Owner';
   }
 
   normalizeAuditSyncStatus(value: string | null | undefined) {
@@ -240,6 +288,10 @@ export class AuditPageComponent implements OnInit {
       default:
         return 'Sin validar';
     }
+  }
+
+  hasActiveFilters() {
+    return Object.values(this.filters).some((value) => `${value ?? ''}`.trim() !== '');
   }
 
   sectionLabel(row: any) {

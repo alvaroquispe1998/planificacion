@@ -290,6 +290,12 @@ export class VideoconferencesPageComponent implements OnInit {
     return item.vc_section_name ? `VC: ${item.vc_section_name}` : 'VC sin seccion';
   }
 
+  inheritanceLabel(item: VideoconferencePreviewItem) {
+    return item.inheritance?.is_inherited
+      ? `Hereda de: ${item.inheritance.parent_label || item.inheritance.parent_schedule_id || 'Horario padre'}`
+      : 'Owner Zoom';
+  }
+
   getOccurrenceBadgeLabel(item: VideoconferencePreviewItem) {
     switch (item.occurrence_type) {
       case 'RESCHEDULED':
@@ -323,7 +329,7 @@ export class VideoconferencesPageComponent implements OnInit {
   }
 
   canManageOccurrence(item: VideoconferencePreviewItem) {
-    return Boolean(item.base_conference_date);
+    return Boolean(item.base_conference_date) && !item.inheritance?.is_inherited;
   }
 
   openOverrideEditor(item: PreviewSelectionItem) {
@@ -489,7 +495,6 @@ export class VideoconferencesPageComponent implements OnInit {
       return;
     }
 
-    this.loading = true;
     const payload = this.usesOccurrenceRows
       ? {
           occurrenceKeys: selected.map((item) => item.occurrence_key),
@@ -501,30 +506,16 @@ export class VideoconferencesPageComponent implements OnInit {
           startDate: this.startDate,
           endDate: this.endDate,
         };
-    this.api
-      .generate(payload)
-      .subscribe({
-        next: async (res) => {
-          this.generationResult = res;
-          this.loading = false;
-          await this.dialog.alert({
-            title: 'Proceso finalizado',
-            message: res.message || 'Las videoconferencias fueron procesadas.',
-            tone: 'success',
-          });
-        },
-        error: async () => {
-          this.loading = false;
-          await this.dialog.alert({
-            title: 'No se pudieron generar las videoconferencias',
-            message: 'Error generando videoconferencias.',
-            tone: 'danger',
-          });
-        },
-      });
+    this.executeGeneration(payload, false);
   }
 
   resultStatusLabel(item: VideoconferenceGenerationResultItem) {
+    if (item.link_mode === 'INHERITED' && item.status === 'MATCHED') {
+      return 'Heredada';
+    }
+    if (item.link_mode === 'INHERITED' && item.status === 'CREATED_UNMATCHED') {
+      return 'Heredada pendiente';
+    }
     switch (item.status) {
       case 'MATCHED':
         return 'Conciliada';
@@ -565,11 +556,15 @@ export class VideoconferencesPageComponent implements OnInit {
     if (!item.preview) {
       return item.conference_date || 'Sin contexto local';
     }
-    return [
+    const parts = [
       this.getSectionDisplay(item.preview),
       this.getSubsectionDisplay(item.preview),
       item.conference_date || item.preview.effective_conference_date || item.preview.base_conference_date,
-    ]
+    ];
+    if (item.preview.inheritance?.is_inherited) {
+      parts.push(item.preview.inheritance.parent_label || 'Hereda Zoom');
+    }
+    return parts
       .filter(Boolean)
       .join(' | ');
   }
@@ -850,6 +845,55 @@ export class VideoconferencesPageComponent implements OnInit {
       validationErrors: results.filter((item) => item.status === 'VALIDATION_ERROR').length,
       errors: results.filter((item) => item.status === 'ERROR').length,
     };
+  }
+
+  private executeGeneration(
+    payload: {
+      scheduleIds?: string[];
+      occurrenceKeys?: string[];
+      startDate: string;
+      endDate: string;
+      allowPoolWarnings?: boolean;
+    },
+    hasConfirmedWarnings: boolean,
+  ) {
+    this.loading = true;
+    this.api.generate(payload).subscribe({
+      next: async (res) => {
+        this.generationResult = res;
+        this.loading = false;
+        await this.dialog.alert({
+          title: 'Proceso finalizado',
+          message: res.message || 'Las videoconferencias fueron procesadas.',
+          tone: 'success',
+        });
+      },
+      error: async (error) => {
+        this.loading = false;
+        const message = error?.error?.message ?? 'Error generando videoconferencias.';
+        const shouldConfirmPoolWarning =
+          !hasConfirmedWarnings &&
+          typeof message === 'string' &&
+          message.includes('Confirma si deseas continuar');
+        if (shouldConfirmPoolWarning) {
+          const confirmed = await this.dialog.confirm({
+            title: 'Advertencia del pool Zoom',
+            message,
+            confirmLabel: 'Continuar',
+            cancelLabel: 'Cancelar',
+          });
+          if (confirmed) {
+            this.executeGeneration({ ...payload, allowPoolWarnings: true }, true);
+          }
+          return;
+        }
+        await this.dialog.alert({
+          title: 'No se pudieron generar las videoconferencias',
+          message,
+          tone: 'danger',
+        });
+      },
+    });
   }
 
   private blurActiveElement() {

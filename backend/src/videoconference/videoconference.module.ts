@@ -20,6 +20,7 @@ import { VideoconferenceController } from './videoconference.controller';
 import { VideoconferenceService } from './videoconference.service';
 import {
     VcSectionEntity,
+    PlanningSubsectionScheduleVcInheritanceEntity,
     VideoconferenceZoomPoolUserEntity,
     PlanningSubsectionVideoconferenceEntity,
     PlanningSubsectionVideoconferenceOverrideEntity,
@@ -37,6 +38,7 @@ import { ZoomAccountService } from './zoom-account.service';
             VcSectionEntity,
             ZoomConfigEntity,
             VideoconferenceZoomPoolUserEntity,
+            PlanningSubsectionScheduleVcInheritanceEntity,
             PlanningSubsectionVideoconferenceEntity,
             PlanningSubsectionVideoconferenceOverrideEntity,
             VideoconferenceGenerationBatchEntity,

@@ -29,10 +29,16 @@ import {
 import {
     PlanningSubsectionVideoconferenceEntity,
     PlanningSubsectionVideoconferenceOverrideEntity,
+    PlanningSubsectionScheduleVcInheritanceEntity,
+    PlanningSubsectionVideoconferenceLinkModeValues,
     VcSectionEntity,
     VideoconferenceZoomPoolUserEntity,
 } from './videoconference.entity';
-import { ZoomAccountService, ZoomMeetingSummary } from './zoom-account.service';
+import {
+    ZoomAccountService,
+    ZoomAccountUserSummary,
+    ZoomMeetingSummary,
+} from './zoom-account.service';
 
 const ACTIVE_CONFERENCE_STATUSES = ['CREATING', 'CREATED_UNMATCHED', 'MATCHED'] as const;
 const ZOOM_MATCH_ATTEMPTS = 5;
@@ -66,9 +72,12 @@ type ScheduleContextRow = {
     section_code: string;
     section_external_code: string | null;
     section_is_cepea: boolean;
+    section_projected_vacancies: number | null;
     subsection_id: string;
     subsection_code: string;
+    subsection_projected_vacancies: number | null;
     schedule_id: string;
+    semester_id: string | null;
     campus_id: string | null;
     campus_name: string | null;
     faculty_id: string | null;
@@ -155,6 +164,12 @@ type ZoomPoolUser = {
     email: string | null;
 };
 
+type ZoomPoolLicenseSnapshot = {
+    ok: boolean;
+    error: string | null;
+    byEmail: Map<string, ZoomAccountUserSummary>;
+};
+
 type ExpandedOccurrence = {
     occurrence_key: string;
     row: ScheduleContextRow;
@@ -168,6 +183,14 @@ type ExpandedOccurrence = {
     override_id: string | null;
     override_reason_code: string | null;
     override_notes: string | null;
+    inheritance: {
+        is_inherited: boolean;
+        mapping_id: string | null;
+        parent_schedule_id: string | null;
+        parent_occurrence_key: string | null;
+        parent_label: string | null;
+        family_owner_schedule_id: string;
+    };
 };
 
 type AulaVirtualRequestContext = {
@@ -213,6 +236,9 @@ type GenerateResultItem = {
     zoom_user_id: string | null;
     zoom_user_email: string | null;
     zoom_meeting_id: string | null;
+    link_mode: (typeof PlanningSubsectionVideoconferenceLinkModeValues)[number];
+    owner_videoconference_id: string | null;
+    inheritance: ExpandedOccurrence['inheritance'];
 };
 
 type ReconcileResult = {
@@ -238,6 +264,29 @@ type StoredOccurrenceOverride = {
     notes: string | null;
 };
 
+type ScheduleInheritanceMapping = {
+    id: string;
+    parent_schedule_id: string;
+    child_schedule_id: string;
+    notes: string | null;
+    is_active: boolean;
+    created_at: Date;
+    updated_at: Date;
+};
+
+type ScheduleInheritanceInfo = {
+    mapping: ScheduleInheritanceMapping | null;
+    parent_schedule_id: string | null;
+    family_owner_schedule_id: string;
+    is_inherited: boolean;
+    parent_label: string | null;
+};
+
+type InheritanceIndex = {
+    byChild: Map<string, ScheduleInheritanceMapping>;
+    childrenByParent: Map<string, ScheduleInheritanceMapping[]>;
+};
+
 @Injectable()
 export class VideoconferenceService {
     constructor(
@@ -247,6 +296,8 @@ export class VideoconferenceService {
         private readonly schedulesRepo: Repository<PlanningSubsectionScheduleEntity>,
         @InjectRepository(VideoconferenceZoomPoolUserEntity)
         private readonly zoomPoolRepo: Repository<VideoconferenceZoomPoolUserEntity>,
+        @InjectRepository(PlanningSubsectionScheduleVcInheritanceEntity)
+        private readonly inheritanceRepo: Repository<PlanningSubsectionScheduleVcInheritanceEntity>,
         @InjectRepository(PlanningSubsectionVideoconferenceEntity)
         private readonly planningVideoconferencesRepo: Repository<PlanningSubsectionVideoconferenceEntity>,
         @InjectRepository(PlanningSubsectionVideoconferenceOverrideEntity)
@@ -373,8 +424,153 @@ export class VideoconferenceService {
         };
     }
 
+    async getInheritanceCatalog(filters: {
+        semesterId: string;
+        campusId: string;
+        facultyId: string;
+        programId: string;
+    }) {
+        const semesterId = String(filters.semesterId ?? '').trim();
+        const campusId = String(filters.campusId ?? '').trim();
+        const facultyId = String(filters.facultyId ?? '').trim();
+        const programId = String(filters.programId ?? '').trim();
+        if (!semesterId || !campusId || !facultyId || !programId) {
+            throw new BadRequestException('Periodo, sede, facultad y programa son requeridos.');
+        }
+
+        const rows = await this.getScheduleRows({
+            semesterId,
+            campusIds: [campusId],
+            facultyIds: [facultyId],
+            programIds: [programId],
+        });
+        const inheritances = await this.listInheritedMappings(rows.map((row) => row.schedule_id));
+        const inheritanceMap = new Map(inheritances.map((item) => [item.child_schedule_id, item] as const));
+
+        return {
+            schedules: rows.map((row) => {
+                const inheritance = inheritanceMap.get(row.schedule_id) ?? null;
+                return {
+                    schedule_id: row.schedule_id,
+                    subsection_id: row.subsection_id,
+                    section_id: row.section_id,
+                    course_id: row.course_id,
+                    course_code: row.course_code,
+                    course_name: row.course_name,
+                    course_label: buildCourseLabel(row.course_code, row.course_name),
+                    section_label: buildSectionLabel(row),
+                    subsection_label: buildGroupLabel(row),
+                    day_of_week: row.day_of_week,
+                    day_label: displayDay(row.day_of_week),
+                    start_time: row.start_time,
+                    end_time: row.end_time,
+                    schedule_label: buildScheduleLabel(row),
+                    vacancy_label: buildVacancyLabel(row),
+                    section_projected_vacancies: row.section_projected_vacancies,
+                    subsection_projected_vacancies: row.subsection_projected_vacancies,
+                    teacher_name: resolveTeacher(row).name,
+                    is_child_inherited: Boolean(inheritance?.is_active),
+                    inherited_from_schedule_id: inheritance?.parent_schedule_id ?? null,
+                };
+            }),
+        };
+    }
+
+    async listVideoconferenceInheritances() {
+        const mappings = await this.inheritanceRepo.find({
+            order: { updated_at: 'DESC', created_at: 'DESC' },
+        });
+        return this.serializeInheritanceMappings(mappings);
+    }
+
+    async createVideoconferenceInheritance(payload: {
+        parentScheduleId: string;
+        childScheduleId: string;
+        notes?: string;
+        isActive?: boolean;
+    }) {
+        const normalized = await this.validateInheritanceDefinition(
+            String(payload.parentScheduleId ?? ''),
+            String(payload.childScheduleId ?? ''),
+        );
+        const existing = await this.inheritanceRepo.findOne({
+            where: { child_schedule_id: normalized.child.schedule_id },
+        });
+        if (existing) {
+            throw new BadRequestException('El horario hijo ya tiene una herencia configurada.');
+        }
+
+        const now = new Date();
+        const entity = this.inheritanceRepo.create({
+            id: newId(),
+            parent_schedule_id: normalized.parent.schedule_id,
+            child_schedule_id: normalized.child.schedule_id,
+            notes: emptyTextToNull(payload.notes),
+            is_active: payload.isActive ?? true,
+            created_at: now,
+            updated_at: now,
+        });
+        await this.inheritanceRepo.save(entity);
+        return (await this.serializeInheritanceMappings([entity]))[0] ?? null;
+    }
+
+    async updateVideoconferenceInheritance(
+        id: string,
+        payload: {
+            parentScheduleId?: string;
+            childScheduleId?: string;
+            notes?: string;
+            isActive?: boolean;
+        },
+    ) {
+        const entity = await this.inheritanceRepo.findOne({ where: { id: String(id ?? '').trim() } });
+        if (!entity) {
+            throw new BadRequestException('No se encontro el mapeo de herencia.');
+        }
+
+        const nextParentId = String(payload.parentScheduleId ?? entity.parent_schedule_id);
+        const nextChildId = String(payload.childScheduleId ?? entity.child_schedule_id);
+        const normalized = await this.validateInheritanceDefinition(nextParentId, nextChildId, entity.id);
+
+        entity.parent_schedule_id = normalized.parent.schedule_id;
+        entity.child_schedule_id = normalized.child.schedule_id;
+        if (payload.notes !== undefined) {
+            entity.notes = emptyTextToNull(payload.notes);
+        }
+        if (payload.isActive !== undefined) {
+            entity.is_active = Boolean(payload.isActive);
+        }
+        entity.updated_at = new Date();
+        await this.inheritanceRepo.save(entity);
+        return (await this.serializeInheritanceMappings([entity]))[0] ?? null;
+    }
+
+    async deleteVideoconferenceInheritance(id: string) {
+        const normalizedId = String(id ?? '').trim();
+        if (!normalizedId) {
+            throw new BadRequestException('id es requerido.');
+        }
+        await this.inheritanceRepo.delete({ id: normalizedId });
+        return { success: true, id: normalizedId };
+    }
+
     async preview(filters: PreviewVideoconferenceDto) {
-        const rows = await this.getScheduleRows(filters);
+        const requestedRows = await this.getScheduleRows(filters);
+        const requestedScheduleIds = requestedRows.map((row) => row.schedule_id);
+        const requestedInheritanceIndex = await this.buildInheritanceIndex(requestedScheduleIds);
+        const expandedScheduleIds = new Set<string>(requestedScheduleIds);
+        for (const scheduleId of requestedScheduleIds) {
+            const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
+            if (inherited?.parent_schedule_id) {
+                expandedScheduleIds.add(inherited.parent_schedule_id);
+            }
+            const childMappings = requestedInheritanceIndex.childrenByParent.get(scheduleId) ?? [];
+            for (const item of childMappings) {
+                expandedScheduleIds.add(item.child_schedule_id);
+            }
+        }
+        const rows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
+        const inheritanceIndex = await this.buildInheritanceIndex(Array.from(expandedScheduleIds));
         const hasStartDate = Boolean(filters.startDate?.trim());
         const hasEndDate = Boolean(filters.endDate?.trim());
         if (hasStartDate !== hasEndDate) {
@@ -382,7 +578,7 @@ export class VideoconferenceService {
         }
 
         if (!hasStartDate || !hasEndDate) {
-            return rows.map((row) => this.serializeBasePreviewRow(row));
+            return rows.map((row) => this.serializeBasePreviewRow(row, this.resolveScheduleInheritance(row.schedule_id, inheritanceIndex, rows)));
         }
 
         const startDate = normalizeIsoDate(filters.startDate ?? '');
@@ -390,7 +586,7 @@ export class VideoconferenceService {
         if (startDate > endDate) {
             throw new BadRequestException('startDate no puede ser mayor que endDate.');
         }
-        const occurrences = await this.resolveOccurrences(rows, startDate, endDate, 'America/Lima');
+        const occurrences = await this.resolveOccurrences(rows, startDate, endDate, 'America/Lima', inheritanceIndex);
         return occurrences.map((occurrence) => this.serializeOccurrencePreviewRow(occurrence));
     }
 
@@ -411,6 +607,7 @@ export class VideoconferenceService {
         const users = await this.zoomUsersRepo.find({
             order: { name: 'ASC', email: 'ASC' },
         });
+        const licenseSnapshot = await this.loadZoomPoolLicenseSnapshot();
         const selectedIds = new Set(poolRows.map((row) => readString(row.zoom_user_id)));
 
         return {
@@ -421,13 +618,17 @@ export class VideoconferenceService {
                 is_active: Boolean(row.is_active),
                 name: readNullableString(row.name),
                 email: readNullableString(row.email),
+                ...this.resolveZoomLicenseMetadata(readNullableString(row.email), licenseSnapshot),
             })),
             users: users.map((user) => ({
                 id: user.id,
                 name: user.name,
                 email: user.email,
                 in_pool: selectedIds.has(user.id),
+                ...this.resolveZoomLicenseMetadata(user.email, licenseSnapshot),
             })),
+            license_sync_ok: licenseSnapshot.ok,
+            license_sync_error: licenseSnapshot.error,
         };
     }
 
@@ -487,6 +688,14 @@ export class VideoconferenceService {
         const scheduleId = dto.scheduleId.trim();
         if (!scheduleId) {
             throw new BadRequestException('scheduleId es requerido.');
+        }
+        const inheritance = await this.inheritanceRepo.findOne({
+            where: { child_schedule_id: scheduleId, is_active: true },
+        });
+        if (inheritance?.parent_schedule_id) {
+            throw new BadRequestException(
+                `Este horario hereda Zoom del horario padre ${inheritance.parent_schedule_id}. El override debe configurarse en el padre.`,
+            );
         }
         const conferenceDate = normalizeIsoDate(dto.conferenceDate);
         const action = String(dto.action ?? '').trim().toUpperCase() as StoredOccurrenceOverride['action'];
@@ -555,6 +764,14 @@ export class VideoconferenceService {
         if (!scheduleId) {
             throw new BadRequestException('scheduleId es requerido.');
         }
+        const inheritance = await this.inheritanceRepo.findOne({
+            where: { child_schedule_id: scheduleId, is_active: true },
+        });
+        if (inheritance?.parent_schedule_id) {
+            throw new BadRequestException(
+                `Este horario hereda Zoom del horario padre ${inheritance.parent_schedule_id}. El override debe administrarse en el padre.`,
+            );
+        }
 
         await this.planningVideoconferenceOverridesRepo.delete({
             planning_subsection_schedule_id: scheduleId,
@@ -584,13 +801,31 @@ export class VideoconferenceService {
         const requestedScheduleIds = scheduleIds.length
             ? scheduleIds
             : Array.from(new Set(occurrenceKeys.map((item) => parseOccurrenceKey(item).schedule_id).filter(Boolean)));
-        const rows = await this.getScheduleRows(undefined, requestedScheduleIds);
+        const requestedRows = await this.getScheduleRows(undefined, requestedScheduleIds);
+        const missingScheduleIds = requestedScheduleIds.filter(
+            (scheduleId) => !requestedRows.some((row) => row.schedule_id === scheduleId),
+        );
+        const requestedInheritanceIndex = await this.buildInheritanceIndex(requestedScheduleIds);
+        const expandedScheduleIds = new Set<string>(requestedScheduleIds);
+        for (const scheduleId of requestedScheduleIds) {
+            const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
+            if (inherited?.parent_schedule_id) {
+                expandedScheduleIds.add(inherited.parent_schedule_id);
+            }
+            const childMappings = requestedInheritanceIndex.childrenByParent.get(scheduleId) ?? [];
+            for (const item of childMappings) {
+                expandedScheduleIds.add(item.child_schedule_id);
+            }
+        }
+
+        const rows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
         const rowMap = new Map(rows.map((row) => [row.schedule_id, row] as const));
-        const missingScheduleIds = requestedScheduleIds.filter((scheduleId) => !rowMap.has(scheduleId));
+        const inheritanceIndex = await this.buildInheritanceIndex(Array.from(expandedScheduleIds));
 
         const aulaVirtualContext = await this.getAulaVirtualRequestContext();
         const zoomConfig = await this.zoomAccountService.requireConfiguredConfig();
-        const zoomUsers = await this.getActiveZoomPoolUsers();
+        const poolValidation = await this.getActiveZoomPoolUsers(Boolean(payload.allowPoolWarnings));
+        const zoomUsers = poolValidation.users;
         if (!zoomUsers.length) {
             throw new BadRequestException(
                 'No hay usuarios Zoom activos en el pool de videoconferencias.',
@@ -602,10 +837,28 @@ export class VideoconferenceService {
             startDate,
             endDate,
             zoomConfig.timezone,
+            inheritanceIndex,
         );
         const selectedOccurrences = occurrenceKeys.length
             ? resolvedOccurrences.filter((item) => occurrenceKeys.includes(item.occurrence_key))
-            : resolvedOccurrences.filter((item) => item.occurrence_type !== 'SKIPPED');
+            : resolvedOccurrences.filter(
+                (item) =>
+                    requestedScheduleIds.includes(item.row.schedule_id) && item.occurrence_type !== 'SKIPPED',
+            );
+        const familyKeys = Array.from(
+            new Set(
+                selectedOccurrences.map((item) =>
+                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date),
+                ),
+            ),
+        );
+        const familyOccurrences = familyKeys.flatMap((familyKey) =>
+            resolvedOccurrences.filter(
+                (item) =>
+                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date) === familyKey &&
+                    item.occurrence_type !== 'SKIPPED',
+            ),
+        );
         const remoteMeetingsCache = new Map<string, ZoomMeetingSummary[] | null>();
         const results: GenerateResultItem[] = [];
 
@@ -620,26 +873,45 @@ export class VideoconferenceService {
                 zoom_user_id: null,
                 zoom_user_email: null,
                 zoom_meeting_id: null,
+                link_mode: 'OWNED',
+                owner_videoconference_id: null,
+                inheritance: buildDefaultInheritance(missingScheduleId),
             });
         }
 
-        for (const occurrence of selectedOccurrences) {
-            if (occurrence.occurrence_type === 'SKIPPED') {
+        for (const familyKey of familyKeys) {
+            const familyItems = familyOccurrences.filter(
+                (item) =>
+                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date) === familyKey,
+            );
+            const ownerOccurrence =
+                familyItems.find((item) => !item.inheritance.is_inherited) ?? null;
+            if (!ownerOccurrence) {
                 continue;
             }
-            const result = await this.generateOccurrence(
-                occurrence,
+
+            const ownerResult = await this.generateOccurrence(
+                ownerOccurrence,
                 aulaVirtualContext,
                 zoomConfig.maxConcurrent,
                 zoomUsers,
                 remoteMeetingsCache,
             );
-            results.push(result);
+            results.push(ownerResult);
+
+            const ownerRecord =
+                ownerResult.record_id
+                    ? await this.planningVideoconferencesRepo.findOne({ where: { id: ownerResult.record_id } })
+                    : null;
+            for (const childOccurrence of familyItems.filter((item) => item.inheritance.is_inherited)) {
+                const inheritedResult = await this.upsertInheritedOccurrence(childOccurrence, ownerRecord, ownerResult);
+                results.push(inheritedResult);
+            }
         }
 
         const summary = {
             requestedSchedules: requestedScheduleIds.length,
-            requestedOccurrences: selectedOccurrences.length,
+            requestedOccurrences: familyOccurrences.length,
             matched: results.filter((item) => item.status === 'MATCHED').length,
             createdUnmatched: results.filter((item) => item.status === 'CREATED_UNMATCHED').length,
             blockedExisting: results.filter((item) => item.status === 'BLOCKED_EXISTING').length,
@@ -650,9 +922,10 @@ export class VideoconferenceService {
 
         return {
             success: true,
-            message: buildGenerationMessage(summary),
+            message: buildGenerationMessage(summary, poolValidation.warning_count),
             summary,
             results,
+            pool_warnings: poolValidation.warnings,
         };
     }
 
@@ -667,6 +940,23 @@ export class VideoconferenceService {
         });
         if (!record) {
             throw new BadRequestException('No se encontro la videoconferencia a conciliar.');
+        }
+
+        if (record.link_mode === 'INHERITED' && record.owner_videoconference_id) {
+            const owner = await this.planningVideoconferencesRepo.findOne({
+                where: { id: record.owner_videoconference_id },
+            });
+            if (owner) {
+                return {
+                    success: true,
+                    matched: owner.status === 'MATCHED',
+                    message: 'Esta videoconferencia es heredada. La conciliacion se gestiona desde el horario padre.',
+                    result: this.buildGenerationResultFromRecord(
+                        record,
+                        'Esta videoconferencia es heredada. La conciliacion se gestiona desde el horario padre.',
+                    ),
+                };
+            }
         }
 
         if (record.zoom_meeting_id && record.status === 'MATCHED') {
@@ -756,6 +1046,9 @@ export class VideoconferenceService {
                 zoom_user_id: null,
                 zoom_user_email: null,
                 zoom_meeting_id: null,
+                link_mode: 'OWNED',
+                owner_videoconference_id: null,
+                inheritance: occurrence.inheritance,
             };
         }
 
@@ -776,6 +1069,9 @@ export class VideoconferenceService {
                 zoom_user_id: existing.zoom_user_id,
                 zoom_user_email: existing.zoom_user_email,
                 zoom_meeting_id: existing.zoom_meeting_id,
+                link_mode: existing.link_mode ?? 'OWNED',
+                owner_videoconference_id: existing.owner_videoconference_id,
+                inheritance: occurrence.inheritance,
             };
         }
 
@@ -798,6 +1094,9 @@ export class VideoconferenceService {
                 zoom_user_id: null,
                 zoom_user_email: null,
                 zoom_meeting_id: null,
+                link_mode: 'OWNED',
+                owner_videoconference_id: null,
+                inheritance: occurrence.inheritance,
             };
         }
 
@@ -831,6 +1130,9 @@ export class VideoconferenceService {
             aula_virtual_name: aulaVirtualPayload.name,
             join_url: null,
             start_url: null,
+            link_mode: 'OWNED',
+            owner_videoconference_id: null,
+            inheritance_mapping_id: null,
             status: 'CREATING',
             match_attempts: 0,
             matched_at: null,
@@ -887,6 +1189,9 @@ export class VideoconferenceService {
                     zoom_user_id: record.zoom_user_id,
                     zoom_user_email: record.zoom_user_email,
                     zoom_meeting_id: record.zoom_meeting_id,
+                    link_mode: 'OWNED',
+                    owner_videoconference_id: null,
+                    inheritance: occurrence.inheritance,
                 };
             }
 
@@ -904,6 +1209,9 @@ export class VideoconferenceService {
                 zoom_user_id: record.zoom_user_id,
                 zoom_user_email: record.zoom_user_email,
                 zoom_meeting_id: null,
+                link_mode: 'OWNED',
+                owner_videoconference_id: null,
+                inheritance: occurrence.inheritance,
             };
         } catch (error) {
             record.status = 'ERROR';
@@ -923,14 +1231,150 @@ export class VideoconferenceService {
                 zoom_user_id: record.zoom_user_id,
                 zoom_user_email: record.zoom_user_email,
                 zoom_meeting_id: record.zoom_meeting_id,
+                link_mode: 'OWNED',
+                owner_videoconference_id: null,
+                inheritance: occurrence.inheritance,
             };
         }
+    }
+
+    private async upsertInheritedOccurrence(
+        occurrence: ExpandedOccurrence,
+        ownerRecord: PlanningSubsectionVideoconferenceEntity | null,
+        ownerResult: GenerateResultItem,
+    ): Promise<GenerateResultItem> {
+        const now = new Date();
+        const existing = await this.planningVideoconferencesRepo.findOne({
+            where: {
+                planning_subsection_schedule_id: occurrence.row.schedule_id,
+                conference_date: occurrence.effective_conference_date,
+            },
+        });
+
+        const status =
+            ownerRecord?.status === 'ERROR'
+                ? 'ERROR'
+                : ownerRecord?.status ?? normalizeRecordStatusFromResult(ownerResult.status);
+        const errorMessage =
+            status === 'ERROR'
+                ? ownerRecord?.error_message || 'No se pudo heredar porque el horario padre fallo.'
+                : null;
+        const joinUrl = ownerRecord?.join_url ?? null;
+        const startUrl = ownerRecord?.start_url ?? null;
+        const zoomMeetingId = ownerRecord?.zoom_meeting_id ?? null;
+        const zoomUserId = ownerRecord?.zoom_user_id ?? ownerResult.zoom_user_id;
+        const zoomUserEmail = ownerRecord?.zoom_user_email ?? ownerResult.zoom_user_email;
+        const zoomUserName = ownerRecord?.zoom_user_name ?? null;
+        const topic = ownerRecord?.topic ?? null;
+        const aulaVirtualName = ownerRecord?.aula_virtual_name ?? null;
+        const ownerId = ownerRecord?.id ?? ownerResult.record_id ?? null;
+        const entity = existing
+            ? this.planningVideoconferencesRepo.merge(existing, {
+                planning_offer_id: occurrence.row.offer_id,
+                planning_section_id: occurrence.row.section_id,
+                planning_subsection_id: occurrence.row.subsection_id,
+                scheduled_start: occurrence.scheduled_start,
+                scheduled_end: occurrence.scheduled_end,
+                day_of_week: dayCodeForDate(occurrence.effective_conference_date),
+                start_time: compactTime(occurrence.effective_start_time),
+                end_time: compactTime(occurrence.effective_end_time),
+                zoom_user_id: zoomUserId ?? null,
+                zoom_user_email: zoomUserEmail ?? null,
+                zoom_user_name: zoomUserName,
+                zoom_meeting_id: zoomMeetingId,
+                topic,
+                aula_virtual_name: aulaVirtualName,
+                join_url: joinUrl,
+                start_url: startUrl,
+                link_mode: 'INHERITED',
+                owner_videoconference_id: ownerId,
+                inheritance_mapping_id: occurrence.inheritance.mapping_id,
+                status,
+                matched_at: ownerRecord?.matched_at ?? null,
+                match_attempts: ownerRecord?.match_attempts ?? 0,
+                error_message: errorMessage,
+                payload_json: {
+                    inherited_from_schedule_id: occurrence.inheritance.parent_schedule_id,
+                    inherited_from_occurrence_key: occurrence.inheritance.parent_occurrence_key,
+                    inherited_from_record_id: ownerId,
+                    owner_status: ownerRecord?.status ?? ownerResult.status,
+                    inheritance: occurrence.inheritance,
+                },
+                response_json: ownerRecord?.response_json ?? null,
+                audit_sync_status: ownerRecord?.audit_sync_status ?? 'PENDING',
+                audit_synced_at: ownerRecord?.audit_synced_at ?? null,
+                audit_sync_error: ownerRecord?.audit_sync_error ?? null,
+                updated_at: now,
+              })
+            : this.planningVideoconferencesRepo.create({
+                id: newId(),
+                planning_offer_id: occurrence.row.offer_id,
+                planning_section_id: occurrence.row.section_id,
+                planning_subsection_id: occurrence.row.subsection_id,
+                planning_subsection_schedule_id: occurrence.row.schedule_id,
+                conference_date: occurrence.effective_conference_date,
+                day_of_week: dayCodeForDate(occurrence.effective_conference_date),
+                start_time: compactTime(occurrence.effective_start_time),
+                end_time: compactTime(occurrence.effective_end_time),
+                scheduled_start: occurrence.scheduled_start,
+                scheduled_end: occurrence.scheduled_end,
+                zoom_user_id: zoomUserId ?? null,
+                zoom_user_email: zoomUserEmail ?? null,
+                zoom_user_name: zoomUserName,
+                zoom_meeting_id: zoomMeetingId,
+                topic,
+                aula_virtual_name: aulaVirtualName,
+                join_url: joinUrl,
+                start_url: startUrl,
+                link_mode: 'INHERITED',
+                owner_videoconference_id: ownerId,
+                inheritance_mapping_id: occurrence.inheritance.mapping_id,
+                status,
+                match_attempts: ownerRecord?.match_attempts ?? 0,
+                matched_at: ownerRecord?.matched_at ?? null,
+                error_message: errorMessage,
+                payload_json: {
+                    inherited_from_schedule_id: occurrence.inheritance.parent_schedule_id,
+                    inherited_from_occurrence_key: occurrence.inheritance.parent_occurrence_key,
+                    inherited_from_record_id: ownerId,
+                    owner_status: ownerRecord?.status ?? ownerResult.status,
+                    inheritance: occurrence.inheritance,
+                },
+                response_json: ownerRecord?.response_json ?? null,
+                audit_sync_status: ownerRecord?.audit_sync_status ?? 'PENDING',
+                audit_synced_at: ownerRecord?.audit_synced_at ?? null,
+                audit_sync_error: ownerRecord?.audit_sync_error ?? null,
+                created_at: now,
+                updated_at: now,
+              });
+
+        const saved = await this.planningVideoconferencesRepo.save(entity);
+        return {
+            schedule_id: occurrence.row.schedule_id,
+            occurrence_key: occurrence.occurrence_key,
+            conference_date: occurrence.effective_conference_date,
+            status: normalizeGenerationResultStatus(saved.status),
+            message:
+                saved.status === 'ERROR'
+                    ? 'No se pudo heredar porque la videoconferencia del horario padre fallo.'
+                    : saved.status === 'CREATED_UNMATCHED'
+                        ? 'Hereda la videoconferencia del horario padre, pero el match con Zoom sigue pendiente.'
+                        : 'Hereda la videoconferencia del horario padre.',
+            record_id: saved.id,
+            zoom_user_id: saved.zoom_user_id,
+            zoom_user_email: saved.zoom_user_email,
+            zoom_meeting_id: saved.zoom_meeting_id,
+            link_mode: 'INHERITED',
+            owner_videoconference_id: saved.owner_videoconference_id,
+            inheritance: occurrence.inheritance,
+        };
     }
 
     private buildGenerationResultFromRecord(
         record: PlanningSubsectionVideoconferenceEntity,
         message: string,
     ): GenerateResultItem {
+        const payloadInheritance = readRecordInheritance(record.payload_json);
         return {
             schedule_id: record.planning_subsection_schedule_id,
             occurrence_key: buildOccurrenceKey(
@@ -944,6 +1388,11 @@ export class VideoconferenceService {
             zoom_user_id: record.zoom_user_id,
             zoom_user_email: record.zoom_user_email,
             zoom_meeting_id: record.zoom_meeting_id,
+            link_mode: record.link_mode ?? 'OWNED',
+            owner_videoconference_id: record.owner_videoconference_id,
+            inheritance:
+                payloadInheritance ??
+                buildDefaultInheritance(record.planning_subsection_schedule_id),
         };
     }
 
@@ -955,8 +1404,10 @@ export class VideoconferenceService {
             .addSelect('section.code', 'section_code')
             .addSelect('section.external_code', 'section_external_code')
             .addSelect('section.is_cepea', 'section_is_cepea')
+            .addSelect('section.projected_vacancies', 'section_projected_vacancies')
             .addSelect('subsection.id', 'subsection_id')
             .addSelect('subsection.code', 'subsection_code')
+            .addSelect('subsection.projected_vacancies', 'subsection_projected_vacancies')
             .addSelect('schedule.id', 'schedule_id')
             .addSelect('offer.campus_id', 'campus_id')
             .addSelect('offer.semester_id', 'semester_id')
@@ -1012,8 +1463,10 @@ export class VideoconferenceService {
             section_code: readString(row.section_code),
             section_external_code: readNullableString(row.section_external_code),
             section_is_cepea: Boolean(row.section_is_cepea),
+            section_projected_vacancies: readNullableNumber(row.section_projected_vacancies),
             subsection_id: readString(row.subsection_id),
             subsection_code: readString(row.subsection_code),
+            subsection_projected_vacancies: readNullableNumber(row.subsection_projected_vacancies),
             schedule_id: readString(row.schedule_id),
             campus_id: readNullableString(row.campus_id),
             semester_id: readNullableString(row.semester_id),
@@ -1250,7 +1703,7 @@ export class VideoconferenceService {
             .sort((left, right) => getDaySortOrder(left.id) - getDaySortOrder(right.id));
     }
 
-    private serializeBasePreviewRow(row: ScheduleContextRow) {
+    private serializeBasePreviewRow(row: ScheduleContextRow, inheritance: ScheduleInheritanceInfo) {
         const teacher = resolveTeacher(row);
         const modality = resolveModality(row);
         return {
@@ -1262,7 +1715,7 @@ export class VideoconferenceService {
             section_label: buildSectionLabel(row),
             subsection_id: row.subsection_id,
             subsection_code: row.subsection_code,
-            subsection_label: row.subsection_code,
+            subsection_label: buildGroupLabel(row),
             campus_id: row.campus_id,
             campus_name: row.campus_name,
             faculty_id: row.faculty_id,
@@ -1299,6 +1752,14 @@ export class VideoconferenceService {
             override_reason_code: null,
             override_notes: null,
             selectable: true,
+            inheritance: {
+                is_inherited: inheritance.is_inherited,
+                mapping_id: inheritance.mapping?.id ?? null,
+                parent_schedule_id: inheritance.parent_schedule_id,
+                parent_occurrence_key: null,
+                parent_label: inheritance.parent_label,
+                family_owner_schedule_id: inheritance.family_owner_schedule_id,
+            },
         };
     }
 
@@ -1315,7 +1776,7 @@ export class VideoconferenceService {
             section_label: buildSectionLabel(row),
             subsection_id: row.subsection_id,
             subsection_code: row.subsection_code,
-            subsection_label: row.subsection_code,
+            subsection_label: buildGroupLabel(row),
             campus_id: row.campus_id,
             campus_name: row.campus_name,
             faculty_id: row.faculty_id,
@@ -1355,11 +1816,12 @@ export class VideoconferenceService {
             override_reason_code: occurrence.override_reason_code,
             override_notes: occurrence.override_notes,
             selectable: occurrence.occurrence_type !== 'SKIPPED',
+            inheritance: occurrence.inheritance,
         };
     }
 
-    private async getActiveZoomPoolUsers() {
-        const rows = await this.zoomPoolRepo
+    private async getActiveZoomPoolUsers(allowWarnings: boolean) {
+        const rawRows = await this.zoomPoolRepo
             .createQueryBuilder('pool')
             .innerJoin(ZoomUserEntity, 'zoom_user', 'zoom_user.id = pool.zoom_user_id')
             .select('pool.id', 'pool_id')
@@ -1373,7 +1835,7 @@ export class VideoconferenceService {
             .addOrderBy('zoom_user.name', 'ASC')
             .getRawMany<Record<string, unknown>>();
 
-        return rows
+        const rows = rawRows
             .map((row) => ({
                 pool_id: readString(row.pool_id),
                 zoom_user_id: readString(row.zoom_user_id),
@@ -1383,6 +1845,98 @@ export class VideoconferenceService {
                 email: readNullableString(row.email),
             }))
             .filter((item) => Boolean(item.email));
+
+        const licenseSnapshot = await this.loadZoomPoolLicenseSnapshot();
+
+        if (!licenseSnapshot.ok) {
+            const warnings = [
+                `No se pudo validar licencias Zoom en tiempo real: ${licenseSnapshot.error ?? 'sin detalle'}.`,
+            ];
+            if (!allowWarnings) {
+                throw new BadRequestException(`${warnings[0]} Confirma si deseas continuar de todos modos.`);
+            }
+            return {
+                users: rows,
+                warnings,
+                warning_count: warnings.length,
+            };
+        }
+
+        const usersWithLicense = rows.map((row) => ({
+            ...row,
+            license: this.resolveZoomLicenseMetadata(row.email, licenseSnapshot),
+        }));
+        const warnedUsers = usersWithLicense.filter((row) => row.license.is_licensed !== true);
+
+        const warnings = warnedUsers.length
+            ? [
+                `${warnedUsers.length} usuario(s) activo(s) del pool no aparecen con licencia Zoom verificada y podrian usarse solo si lo confirmas: ${warnedUsers
+                    .map(
+                        (item) =>
+                            `${item.email || item.name || item.zoom_user_id} (${item.license.license_label})`,
+                    )
+                    .join(', ')}.`,
+              ]
+            : [];
+
+        if (warnings.length && !allowWarnings) {
+            throw new BadRequestException(`${warnings[0]} Confirma si deseas continuar y usarlos de todos modos.`);
+        }
+
+        return {
+            users: rows,
+            warnings,
+            warning_count: warnings.length,
+        };
+    }
+
+    private async loadZoomPoolLicenseSnapshot() {
+        try {
+            const zoomUsers = await this.zoomAccountService.listAccountUsers();
+            const byEmail = new Map(
+                zoomUsers
+                    .filter((item) => item.email?.trim())
+                    .map((item) => [item.email!.trim().toLowerCase(), item] as const),
+            );
+            return {
+                ok: true,
+                error: null,
+                byEmail,
+            } satisfies ZoomPoolLicenseSnapshot;
+        } catch (error) {
+            return {
+                ok: false,
+                error: toErrorMessage(error),
+                byEmail: new Map<string, ZoomAccountUserSummary>(),
+            } satisfies ZoomPoolLicenseSnapshot;
+        }
+    }
+
+    private resolveZoomLicenseMetadata(
+        email: string | null | undefined,
+        snapshot: ZoomPoolLicenseSnapshot,
+    ) {
+        if (!snapshot.ok) {
+            return {
+                license_status: 'UNKNOWN' as const,
+                license_label: 'Licencia no verificada',
+                is_licensed: null,
+            };
+        }
+        const normalizedEmail = `${email ?? ''}`.trim().toLowerCase();
+        const found = normalizedEmail ? snapshot.byEmail.get(normalizedEmail) ?? null : null;
+        if (!found) {
+            return {
+                license_status: 'UNKNOWN' as const,
+                license_label: 'No encontrado en Zoom',
+                is_licensed: null,
+            };
+        }
+        return {
+            license_status: found.license_status,
+            license_label: displayZoomLicenseStatus(found.license_status),
+            is_licensed: found.is_licensed,
+        };
     }
 
     private async resolveOccurrences(
@@ -1390,20 +1944,72 @@ export class VideoconferenceService {
         startDate: string,
         endDate: string,
         timezone: string,
+        inheritanceIndex?: InheritanceIndex,
     ) {
+        const effectiveInheritanceIndex =
+            inheritanceIndex ?? (await this.buildInheritanceIndex(rows.map((row) => row.schedule_id)));
+        const ownerRows = rows.filter(
+            (row) => !this.resolveScheduleInheritance(row.schedule_id, effectiveInheritanceIndex, rows).is_inherited,
+        );
         const overrides = await this.listOverridesForRange(
-            rows.map((row) => row.schedule_id),
+            ownerRows.map((row) => row.schedule_id),
             startDate,
             endDate,
         );
         const overrideMap = new Map(
             overrides.map((item) => [`${item.schedule_id}::${item.conference_date}`, item] as const),
         );
-        const occurrences: ExpandedOccurrence[] = [];
-        for (const row of rows) {
+        const ownerOccurrenceMap = new Map<string, ExpandedOccurrence>();
+        for (const row of ownerRows) {
             for (const conferenceDate of enumerateConferenceDates(row.day_of_week, startDate, endDate)) {
                 const override = overrideMap.get(`${row.schedule_id}::${conferenceDate}`) ?? null;
-                occurrences.push(buildOccurrence(row, conferenceDate, override, timezone));
+                const occurrence = buildOccurrence(row, conferenceDate, override, timezone, {
+                    is_inherited: false,
+                    mapping_id: null,
+                    parent_schedule_id: null,
+                    parent_occurrence_key: null,
+                    parent_label: null,
+                    family_owner_schedule_id: row.schedule_id,
+                });
+                ownerOccurrenceMap.set(occurrence.occurrence_key, occurrence);
+            }
+        }
+
+        const occurrences: ExpandedOccurrence[] = [];
+        for (const row of rows) {
+            const inheritance = this.resolveScheduleInheritance(row.schedule_id, effectiveInheritanceIndex, rows);
+            if (!inheritance.is_inherited) {
+                for (const conferenceDate of enumerateConferenceDates(row.day_of_week, startDate, endDate)) {
+                    const key = buildOccurrenceKey(row.schedule_id, conferenceDate);
+                    const ownerOccurrence = ownerOccurrenceMap.get(key);
+                    if (ownerOccurrence) {
+                        occurrences.push(ownerOccurrence);
+                    }
+                }
+                continue;
+            }
+
+            const parentRow = rows.find((item) => item.schedule_id === inheritance.parent_schedule_id) ?? null;
+            for (const conferenceDate of enumerateConferenceDates(row.day_of_week, startDate, endDate)) {
+                const parentOccurrence = ownerOccurrenceMap.get(
+                    buildOccurrenceKey(inheritance.family_owner_schedule_id, conferenceDate),
+                );
+                if (!parentOccurrence) {
+                    continue;
+                }
+                occurrences.push({
+                    ...parentOccurrence,
+                    occurrence_key: buildOccurrenceKey(row.schedule_id, conferenceDate),
+                    row,
+                    inheritance: {
+                        is_inherited: true,
+                        mapping_id: inheritance.mapping?.id ?? null,
+                        parent_schedule_id: inheritance.parent_schedule_id,
+                        parent_occurrence_key: parentOccurrence.occurrence_key,
+                        parent_label: parentRow ? `${buildSectionLabel(parentRow)} | ${buildScheduleLabel(parentRow)}` : null,
+                        family_owner_schedule_id: inheritance.family_owner_schedule_id,
+                    },
+                });
             }
         }
 
@@ -1453,6 +2059,171 @@ export class VideoconferenceService {
             reason_code: entity.reason_code,
             notes: entity.notes,
         };
+    }
+
+    private async listInheritedMappings(scheduleIds: string[]) {
+        const normalized = normalizeIdArray(scheduleIds);
+        if (!normalized.length) {
+            return [] as ScheduleInheritanceMapping[];
+        }
+        const rows = await this.inheritanceRepo.find({
+            where: [
+                { parent_schedule_id: In(normalized) },
+                { child_schedule_id: In(normalized) },
+            ],
+        });
+        return rows.map((row) => ({
+            id: row.id,
+            parent_schedule_id: row.parent_schedule_id,
+            child_schedule_id: row.child_schedule_id,
+            notes: row.notes,
+            is_active: Boolean(row.is_active),
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }));
+    }
+
+    private async buildInheritanceIndex(scheduleIds: string[]): Promise<InheritanceIndex> {
+        const mappings = (await this.listInheritedMappings(scheduleIds)).filter((item) => item.is_active);
+        const byChild = new Map<string, ScheduleInheritanceMapping>();
+        const childrenByParent = new Map<string, ScheduleInheritanceMapping[]>();
+        for (const mapping of mappings) {
+            byChild.set(mapping.child_schedule_id, mapping);
+            const siblings = childrenByParent.get(mapping.parent_schedule_id) ?? [];
+            siblings.push(mapping);
+            childrenByParent.set(mapping.parent_schedule_id, siblings);
+        }
+        return { byChild, childrenByParent };
+    }
+
+    private resolveScheduleInheritance(
+        scheduleId: string,
+        inheritanceIndex: InheritanceIndex,
+        rows: ScheduleContextRow[],
+    ): ScheduleInheritanceInfo {
+        const mapping = inheritanceIndex.byChild.get(scheduleId) ?? null;
+        if (!mapping) {
+            return {
+                mapping: null,
+                parent_schedule_id: null,
+                family_owner_schedule_id: scheduleId,
+                is_inherited: false,
+                parent_label: null,
+            };
+        }
+        const parentRow = rows.find((item) => item.schedule_id === mapping.parent_schedule_id) ?? null;
+        return {
+            mapping,
+            parent_schedule_id: mapping.parent_schedule_id,
+            family_owner_schedule_id: parentRow?.schedule_id ?? mapping.parent_schedule_id,
+            is_inherited: true,
+            parent_label: parentRow ? `${buildSectionLabel(parentRow)} | ${buildScheduleLabel(parentRow)}` : null,
+        };
+    }
+
+    private async validateInheritanceDefinition(parentScheduleIdRaw: string, childScheduleIdRaw: string, currentId?: string) {
+        const parentScheduleId = String(parentScheduleIdRaw ?? '').trim();
+        const childScheduleId = String(childScheduleIdRaw ?? '').trim();
+        if (!parentScheduleId || !childScheduleId) {
+            throw new BadRequestException('parentScheduleId y childScheduleId son requeridos.');
+        }
+        if (parentScheduleId === childScheduleId) {
+            throw new BadRequestException('El horario padre y el hijo no pueden ser el mismo.');
+        }
+
+        const rows = await this.getScheduleRows(undefined, [parentScheduleId, childScheduleId]);
+        const parent = rows.find((row) => row.schedule_id === parentScheduleId) ?? null;
+        const child = rows.find((row) => row.schedule_id === childScheduleId) ?? null;
+        if (!parent || !child) {
+            throw new BadRequestException('No se encontro el horario padre o hijo en planificacion.');
+        }
+
+        if (
+            parent.semester_id !== child.semester_id ||
+            parent.campus_id !== child.campus_id ||
+            parent.faculty_id !== child.faculty_id ||
+            parent.program_id !== child.program_id
+        ) {
+            throw new BadRequestException(
+                'Padre e hijo deben pertenecer al mismo periodo, sede, facultad y programa academico.',
+            );
+        }
+        if (
+            normalizeLoose(parent.day_of_week) !== normalizeLoose(child.day_of_week) ||
+            compactTime(parent.start_time) !== compactTime(child.start_time) ||
+            compactTime(parent.end_time) !== compactTime(child.end_time)
+        ) {
+            throw new BadRequestException('Padre e hijo deben tener el mismo dia y la misma franja horaria.');
+        }
+
+        const activeMappings = await this.inheritanceRepo.find({
+            where: [
+                { child_schedule_id: childScheduleId, is_active: true },
+                { child_schedule_id: parentScheduleId, is_active: true },
+                { parent_schedule_id: childScheduleId, is_active: true },
+            ],
+        });
+        for (const mapping of activeMappings) {
+            if (currentId && mapping.id === currentId) {
+                continue;
+            }
+            if (mapping.child_schedule_id === childScheduleId) {
+                throw new BadRequestException('El horario hijo ya tiene una herencia activa.');
+            }
+            if (mapping.child_schedule_id === parentScheduleId) {
+                throw new BadRequestException('El horario padre no puede ser hijo de otro horario.');
+            }
+            if (mapping.parent_schedule_id === childScheduleId) {
+                throw new BadRequestException('El horario hijo no puede actuar como padre de otro horario.');
+            }
+        }
+
+        return { parent, child };
+    }
+
+    private async serializeInheritanceMappings(mappings: PlanningSubsectionScheduleVcInheritanceEntity[] | ScheduleInheritanceMapping[]) {
+        if (!mappings.length) {
+            return [];
+        }
+        const scheduleIds = Array.from(
+            new Set(
+                mappings.flatMap((item) => [item.parent_schedule_id, item.child_schedule_id]).filter(Boolean),
+            ),
+        );
+        const rows = await this.getScheduleRows(undefined, scheduleIds);
+        const rowMap = new Map(rows.map((row) => [row.schedule_id, row] as const));
+
+        return mappings.map((item) => {
+            const parent = rowMap.get(item.parent_schedule_id) ?? null;
+            const child = rowMap.get(item.child_schedule_id) ?? null;
+            return {
+                id: item.id,
+                parent_schedule_id: item.parent_schedule_id,
+                child_schedule_id: item.child_schedule_id,
+                notes: item.notes ?? null,
+                is_active: Boolean(item.is_active),
+                created_at: item.created_at,
+                updated_at: item.updated_at,
+                parent: parent
+                    ? {
+                        schedule_id: parent.schedule_id,
+                        course_label: buildCourseLabel(parent.course_code, parent.course_name),
+                        section_label: buildSectionLabel(parent),
+                        subsection_label: buildGroupLabel(parent),
+                        schedule_label: buildScheduleLabel(parent),
+                      }
+                    : null,
+                child: child
+                    ? {
+                        schedule_id: child.schedule_id,
+                        course_label: buildCourseLabel(child.course_code, child.course_name),
+                        section_label: buildSectionLabel(child),
+                        subsection_label: buildGroupLabel(child),
+                        schedule_label: buildScheduleLabel(child),
+                      }
+                    : null,
+            };
+        });
     }
 
     private validateScheduleForGeneration(row: ScheduleContextRow) {
@@ -1705,7 +2476,7 @@ function buildGenerationMessage(summary: {
     noAvailableZoomUser: number;
     validationErrors: number;
     errors: number;
-}) {
+}, warningCount = 0) {
     const parts = [
         `${summary.matched} conciliadas`,
         `${summary.createdUnmatched} creadas sin match`,
@@ -1714,6 +2485,9 @@ function buildGenerationMessage(summary: {
         `${summary.validationErrors} con validacion pendiente`,
         `${summary.errors} con error`,
     ];
+    if (warningCount > 0) {
+        parts.push(`${warningCount} advertencia(s) de licencias`);
+    }
     return `Proceso completado: ${parts.join(', ')}.`;
 }
 
@@ -1722,20 +2496,93 @@ function buildSectionLabel(row: ScheduleContextRow) {
     return `${course} | Seccion ${row.section_code}`;
 }
 
+function buildGroupLabel(row: ScheduleContextRow) {
+    return row.subsection_code?.trim() ? `Grupo ${row.subsection_code.trim()}` : 'Grupo sin codigo';
+}
+
+function buildScheduleLabel(row: Pick<ScheduleContextRow, 'day_of_week' | 'start_time' | 'end_time'>) {
+    return `${displayDay(row.day_of_week)} ${compactTime(row.start_time)}-${compactTime(row.end_time)}`;
+}
+
+function buildVacancyLabel(
+    row: Pick<ScheduleContextRow, 'section_projected_vacancies' | 'subsection_projected_vacancies'>,
+) {
+    const sectionVacancies = row.section_projected_vacancies;
+    const subsectionVacancies = row.subsection_projected_vacancies;
+    return `Vac. seccion: ${sectionVacancies ?? 0} | Vac. grupo: ${subsectionVacancies ?? 0}`;
+}
+
 function buildCourseLabel(courseCode: string | null, courseName: string | null) {
     const parts = [courseCode?.trim(), courseName?.trim()].filter(Boolean);
     return parts.join(' - ') || '(Sin curso)';
 }
 
+function buildDefaultInheritance(scheduleId: string): ExpandedOccurrence['inheritance'] {
+    return {
+        is_inherited: false,
+        mapping_id: null,
+        parent_schedule_id: null,
+        parent_occurrence_key: null,
+        parent_label: null,
+        family_owner_schedule_id: scheduleId,
+    };
+}
+
+function readRecordInheritance(payload: Record<string, unknown> | null | undefined) {
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+    const raw = (payload as Record<string, unknown>).inheritance;
+    if (!raw || typeof raw !== 'object') {
+        return null;
+    }
+    const item = raw as Record<string, unknown>;
+    return {
+        is_inherited: Boolean(item.is_inherited),
+        mapping_id: readNullableString(item.mapping_id),
+        parent_schedule_id: readNullableString(item.parent_schedule_id),
+        parent_occurrence_key: readNullableString(item.parent_occurrence_key),
+        parent_label: readNullableString(item.parent_label),
+        family_owner_schedule_id: readNullableString(item.family_owner_schedule_id) ?? '',
+    };
+}
+
+function normalizeRecordStatusFromResult(
+    value: GenerateResultItem['status'],
+): PlanningSubsectionVideoconferenceEntity['status'] {
+    switch (value) {
+        case 'MATCHED':
+            return 'MATCHED';
+        case 'CREATED_UNMATCHED':
+            return 'CREATED_UNMATCHED';
+        case 'BLOCKED_EXISTING':
+        case 'NO_AVAILABLE_ZOOM_USER':
+        case 'VALIDATION_ERROR':
+        case 'ERROR':
+        default:
+            return 'ERROR';
+    }
+}
+
 function buildMeetingTopic(occurrence: ExpandedOccurrence, teacher: ResolvedTeacher) {
-    return [
-        occurrence.row.course_code?.trim() ?? '',
+    const topicParts = [
         occurrence.row.course_name?.trim() ?? '',
         occurrence.row.vc_section_name?.trim() ?? '',
         teacher.dni?.trim() ?? '',
         teacher.name?.trim() ?? '',
         `${dayCodeForDate(occurrence.effective_conference_date)} ${compactTime(occurrence.effective_start_time)}-${compactTime(occurrence.effective_end_time)}`,
-    ].join('|');
+    ];
+
+    const courseCode = occurrence.row.course_code?.trim() ?? '';
+    if (courseCode) {
+        topicParts.unshift(courseCode);
+    }
+
+    if (occurrence.occurrence_type === 'RESCHEDULED') {
+        topicParts.unshift('REP');
+    }
+
+    return topicParts.join('|');
 }
 
 function resolveTeacher(row: ScheduleContextRow): ResolvedTeacher {
@@ -1838,6 +2685,19 @@ function displayModality(code: string | null | undefined, fallbackName?: string 
     }
 }
 
+function displayZoomLicenseStatus(value: 'LICENSED' | 'BASIC' | 'ON_PREM' | 'UNKNOWN') {
+    switch (value) {
+        case 'LICENSED':
+            return 'Licenciado';
+        case 'ON_PREM':
+            return 'On-prem';
+        case 'BASIC':
+            return 'Basico';
+        default:
+            return 'No verificado';
+    }
+}
+
 function resolveSectionCodeModality(
     vcSectionName: string | null | undefined,
     sectionExternalCode: string | null | undefined,
@@ -1894,6 +2754,7 @@ function buildOccurrence(
     conferenceDate: string,
     override: StoredOccurrenceOverride | null,
     timezone: string,
+    inheritance: ExpandedOccurrence['inheritance'],
 ): ExpandedOccurrence {
     const action = override?.action ?? 'KEEP';
     const occurrenceType: ExpandedOccurrence['occurrence_type'] =
@@ -1918,6 +2779,7 @@ function buildOccurrence(
         override_id: override?.id ?? null,
         override_reason_code: override?.reason_code ?? null,
         override_notes: override?.notes ?? null,
+        inheritance,
     };
 }
 

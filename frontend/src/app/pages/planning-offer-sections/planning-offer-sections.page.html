@@ -106,7 +106,7 @@
               </div>
               <div class="section-summary-pills">
                 <span *ngIf="section.is_cepea" class="pill neutral">CEPEA</span>
-                <span class="pill neutral">{{ section.subsections?.length || 0 }} grupos</span>
+                <span class="pill neutral">{{ sectionGroupBadgeLabel(section) }}</span>
                 <span class="pill neutral">{{ sectionScheduleCount(section) }} horarios</span>
                 <span class="pill" [ngClass]="sectionStatusClass(section)">
                   {{ sectionStatusLabel(section) }}
@@ -202,6 +202,52 @@
             </label>
           </div>
 
+          <div *ngIf="sectionUsesDirectScheduleView(section); else groupedSubsectionsTable" class="subsections-table-wrap">
+            <table class="subsections-table direct-schedules-table">
+              <thead>
+                <tr>
+                  <th>Horario</th>
+                  <th>Tipo de sesion</th>
+                  <th>Docente</th>
+                  <th>Ubicacion</th>
+                  <th>Horas</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  *ngFor="let schedule of sectionDirectSchedules(section)"
+                  [class.row-conflict]="(sectionDirectSubsection(section)?.conflicts?.length || 0) > 0">
+                  <td>
+                    <div class="table-code-cell">
+                      <strong>{{ dayLabel(schedule.day_of_week) }}</strong>
+                      <span>{{ timeLabel(schedule.start_time) }} - {{ timeLabel(schedule.end_time) }}</span>
+                    </div>
+                  </td>
+                  <td>{{ scheduleSessionTypeLabel(schedule) }}</td>
+                  <td>{{ scheduleTeacherLabel(schedule, sectionDirectSubsection(section)) }}</td>
+                  <td>{{ scheduleLocationLabel(schedule, sectionDirectSubsection(section)) }}</td>
+                  <td>{{ formatAcademicHours(schedule.academic_hours) }} h acad.</td>
+                  <td>
+                    <span class="pill" [ngClass]="subsectionStatusClass(sectionDirectSubsection(section))">
+                      {{ subsectionStatusLabel(sectionDirectSubsection(section)) }}
+                    </span>
+                  </td>
+                  <td class="table-action">
+                    <button
+                      type="button"
+                      class="btn btn-secondary btn-sm"
+                      (click)="openSubsectionDrawer(section, sectionDirectSubsection(section))">
+                      {{ isWorkflowReadOnly ? 'Ver seccion' : 'Editar seccion' }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <ng-template #groupedSubsectionsTable>
           <div class="subsections-table-wrap">
             <table class="subsections-table">
               <thead>
@@ -247,6 +293,7 @@
               </tbody>
             </table>
           </div>
+          </ng-template>
         </div>
       </article>
     </div>

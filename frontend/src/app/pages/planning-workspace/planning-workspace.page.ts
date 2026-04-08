@@ -303,7 +303,11 @@ export class PlanningWorkspacePageComponent implements OnInit {
       }
       map.set(offer.campus_id, {
         id: offer.campus_id,
-        name: offer?.campus?.name ?? offer?.campus_name ?? offer.campus_id,
+        name:
+          this.findCatalogName(this.catalog.campuses, offer.campus_id) ??
+          offer?.campus?.name ??
+          offer?.campus_name ??
+          offer.campus_id,
       });
     });
     return [...map.values()].sort((left, right) => `${left.name ?? ''}`.localeCompare(`${right.name ?? ''}`));
@@ -317,7 +321,11 @@ export class PlanningWorkspacePageComponent implements OnInit {
       }
       map.set(offer.faculty_id, {
         id: offer.faculty_id,
-        name: offer?.faculty?.name ?? offer?.faculty_name ?? offer.faculty_id,
+        name:
+          this.findCatalogName(this.catalog.faculties, offer.faculty_id) ??
+          offer?.faculty?.name ??
+          offer?.faculty_name ??
+          offer.faculty_id,
       });
     });
     return [...map.values()].sort((left, right) => `${left.name ?? ''}`.localeCompare(`${right.name ?? ''}`));
@@ -332,6 +340,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
       map.set(offer.academic_program_id, {
         id: offer.academic_program_id,
         name:
+          this.findCatalogName(this.catalog.academic_programs, offer.academic_program_id) ??
           offer?.academic_program?.name ??
           offer?.academic_program_name ??
           offer.academic_program_id,
@@ -349,7 +358,11 @@ export class PlanningWorkspacePageComponent implements OnInit {
       }
       map.set(offer.study_plan_id, {
         id: offer.study_plan_id,
-        name: offer?.study_plan?.name ?? offer?.study_plan_name ?? offer.study_plan_id,
+        name:
+          this.findCatalogName(this.catalog.study_plans, offer.study_plan_id) ??
+          offer?.study_plan?.name ??
+          offer?.study_plan_name ??
+          offer.study_plan_id,
         faculty_id: offer?.faculty_id ?? null,
         academic_program_id: offer?.academic_program_id ?? null,
       });
@@ -794,6 +807,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
       return;
     }
 
+    const sectionPayload: Record<string, unknown> = {};
     const subsectionPayload: Record<string, unknown> = {};
     const nextTeacherId = this.drawer.form.teacher_id.trim();
     if (!row.meeting_id && nextTeacherId !== (this.primaryTeacher(row)?.teacher_id ?? '')) {
@@ -832,7 +846,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
 
     const projectedVacancies = this.parseOptionalInt(this.drawer.form.projected_vacancies);
     if (projectedVacancies !== null && projectedVacancies !== row.projected_vacancies) {
-      subsectionPayload['projected_vacancies'] = projectedVacancies;
+      sectionPayload['projected_vacancies'] = projectedVacancies;
     }
 
     if (this.drawer.form.offering_status !== row.offering_status) {
@@ -890,6 +904,9 @@ export class PlanningWorkspacePageComponent implements OnInit {
     }
 
     const requests = [] as any[];
+    if (Object.keys(sectionPayload).length > 0) {
+      requests.push(this.api.updatePlanningSection(row.section_id, sectionPayload));
+    }
     if (Object.keys(subsectionPayload).length > 0) {
       requests.push(this.api.updatePlanningSubsection(row.group_id, subsectionPayload));
     }
@@ -1490,6 +1507,13 @@ export class PlanningWorkspacePageComponent implements OnInit {
     };
   }
 
+  private findCatalogName(items: any[], id: string | null | undefined) {
+    if (!id || !Array.isArray(items)) {
+      return null;
+    }
+    return items.find((item: any) => item?.id === id)?.name ?? null;
+  }
+
   private normalizeWorkspace(response: any): PlanningWorkspaceResponse {
     return {
       filters: response?.filters ?? {},
@@ -1815,7 +1839,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
       internal_section_code: section.code ?? null,
       delivery_modality_id: subsection.course_modality_id ?? '',
       shift_id: subsection.shift ?? '',
-      projected_vacancies: subsection.projected_vacancies ?? section.projected_vacancies ?? null,
+      projected_vacancies: section.projected_vacancies ?? null,
       offering_status: (subsection.status ?? offer.status) !== 'CLOSED',
       source_status: subsection.status ?? offer.status ?? 'DRAFT',
       group_type: subsection.kind ?? 'MIXED',

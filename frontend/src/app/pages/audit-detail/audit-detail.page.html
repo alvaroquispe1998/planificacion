@@ -4,7 +4,7 @@
       <p class="eyebrow">Detalle de reunion</p>
       <h1>{{ record ? (record.course_code || 'Videoconferencia') : 'Auditoria Zoom' }}</h1>
       <p class="hero-copy" *ngIf="record">
-        {{ record.course_name || 'Sin curso' }} · {{ sectionLabel(record) }} · {{ groupLabel(record) }}
+        {{ record.course_name || 'Sin curso' }} | {{ sectionLabel(record) }} | {{ groupLabel(record) }}
       </p>
     </div>
     <div class="hero-actions">
@@ -14,7 +14,7 @@
         class="btn btn-primary"
         (click)="syncZoomData()"
         [disabled]="!record?.can_sync || syncing || loading">
-        {{ syncing ? 'Sincronizando...' : 'Sincronizar datos Zoom' }}
+        {{ syncButtonLabel }}
       </button>
     </div>
   </header>
@@ -53,6 +53,7 @@
         <span class="info-label">Zoom</span>
         <strong>{{ record.zoom_meeting_id || 'Sin conciliacion Zoom' }}</strong>
         <span>{{ record.zoom_user_name || record.zoom_user_email || 'Sin usuario Zoom' }}</span>
+        <span *ngIf="record.link_mode === 'INHERITED'">{{ record.owner_label || 'Usa el Zoom del horario padre' }}</span>
       </article>
     </section>
 
@@ -61,6 +62,14 @@
         <div>
           <span class="meta-label">Topic</span>
           <strong>{{ record.topic || 'Sin topic' }}</strong>
+        </div>
+        <div>
+          <span class="meta-label">Tipo de enlace</span>
+          <strong>{{ record.link_mode === 'INHERITED' ? 'Heredada' : 'Owner' }}</strong>
+        </div>
+        <div *ngIf="record.link_mode === 'INHERITED'">
+          <span class="meta-label">Horario owner</span>
+          <strong>{{ record.owner_label || 'Sin referencia' }}</strong>
         </div>
         <div>
           <span class="meta-label">Estado de creacion</span>
@@ -143,27 +152,39 @@
           <div>
             <p class="eyebrow">Participacion</p>
             <h2>Participantes</h2>
+            <p class="hero-copy" *ngIf="hiddenDuplicateParticipantsCount > 0">
+              Se ocultaron {{ hiddenDuplicateParticipantsCount }} registro(s) duplicado(s) en esta vista.
+            </p>
           </div>
-          <span class="count">{{ instance.participants?.length || 0 }}</span>
+          <span class="count">{{ visibleParticipants.length }}</span>
         </div>
 
-        <div class="table-wrap" *ngIf="(instance.participants?.length || 0) > 0; else noParticipants">
-          <table class="data-table small">
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Email</th>
-                <th>Rol</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let participant of instance.participants">
-                <td>{{ participant.display_name }}</td>
-                <td>{{ participant.email || '--' }}</td>
-                <td>{{ participant.role }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="participant-list" *ngIf="visibleParticipants.length > 0; else noParticipants">
+          <article class="participant-card" *ngFor="let participant of visibleParticipants">
+            <div class="participant-avatar" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path [attr.d]="iconPath('user')"></path>
+              </svg>
+            </div>
+
+            <div class="participant-main">
+              <strong>{{ participant.display_name }}</strong>
+              <div class="participant-meta">
+                <span class="meta-chip">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path [attr.d]="iconPath('mail')"></path>
+                  </svg>
+                  {{ participant.email || 'Sin correo reportado' }}
+                </span>
+                <span class="meta-chip">
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path [attr.d]="iconPath('badge')"></path>
+                  </svg>
+                  {{ participantRoleLabel(participant.role) }}
+                </span>
+              </div>
+            </div>
+          </article>
         </div>
 
         <ng-template #noParticipants>
@@ -177,19 +198,38 @@
             <p class="eyebrow">Archivos</p>
             <h2>Grabaciones</h2>
           </div>
-          <span class="count">{{ instance.recordings?.length || 0 }}</span>
+          <span class="count">{{ visibleRecordings.length }}</span>
         </div>
 
-        <div class="recording-list" *ngIf="(instance.recordings?.length || 0) > 0; else noRecordings">
-          <article class="recording-card" *ngFor="let recording of instance.recordings">
-            <div>
-              <strong>{{ recording.recording_type }}</strong>
-              <span>{{ recording.file_extension || '--' }} · {{ recording.status || 'AVAILABLE' }}</span>
+        <div class="recording-list" *ngIf="visibleRecordings.length > 0; else noRecordings">
+          <article class="recording-card" *ngFor="let recording of visibleRecordings">
+            <div class="recording-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path [attr.d]="iconPath(recordingIcon(recording))"></path>
+              </svg>
+            </div>
+
+            <div class="recording-main">
+              <strong>{{ recordingTypeLabel(recording) }}</strong>
+              <div class="recording-meta">
+                <span class="meta-chip">{{ recording.file_extension || '--' }}</span>
+                <span class="meta-chip">{{ recordingStatusLabel(recording.status) }}</span>
+              </div>
               <span>{{ formatDateTime(recording.start_time) }}</span>
             </div>
             <div class="recording-actions">
-              <a *ngIf="recording.play_url" [href]="recording.play_url" target="_blank" rel="noopener">Ver</a>
-              <a *ngIf="recording.download_url" [href]="recording.download_url" target="_blank" rel="noopener">Descargar</a>
+              <a *ngIf="recording.play_url" class="action-link" [href]="recording.play_url" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path [attr.d]="iconPath('eye')"></path>
+                </svg>
+                Ver
+              </a>
+              <a *ngIf="recording.download_url" class="action-link" [href]="recording.download_url" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path [attr.d]="iconPath('download')"></path>
+                </svg>
+                Descargar
+              </a>
             </div>
           </article>
         </div>
@@ -239,7 +279,7 @@
       <p>
         {{
           loading
-            ? 'Estamos preparando el detalle completo de la reunion.'
+            ? 'Estamos consultando el registro local de la videoconferencia y sus instancias ya guardadas.'
             : 'La reunion solicitada no existe o fue eliminada.'
         }}
       </p>

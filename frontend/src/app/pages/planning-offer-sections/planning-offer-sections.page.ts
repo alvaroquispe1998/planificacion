@@ -787,6 +787,26 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     return '';
   }
 
+  sectionUsesDirectScheduleView(section: any) {
+    return Number(section?.subsections?.length ?? 0) === 1;
+  }
+
+  sectionGroupBadgeLabel(section: any) {
+    const count = Number(section?.subsections?.length ?? 0);
+    if (this.sectionUsesDirectScheduleView(section)) {
+      return count > 0 ? 'Seccion directa' : 'Sin grupos';
+    }
+    return `${count} grupos`;
+  }
+
+  sectionDirectSubsection(section: any) {
+    return (section?.subsections ?? [])[0] ?? null;
+  }
+
+  sectionDirectSchedules(section: any) {
+    return this.sectionDirectSubsection(section)?.schedules ?? [];
+  }
+
   scheduleSummary(subsection: any) {
     const schedules = subsection?.schedules ?? [];
     if (schedules.length === 0) {
@@ -1102,6 +1122,9 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     const scheduled = subsections.filter((item: any) => (item?.schedules?.length || 0) > 0);
     if (scheduled.length === 0) {
       return 'Sin horarios';
+    }
+    if (this.sectionUsesDirectScheduleView(section) && scheduled.length === 1) {
+      return this.scheduleSummary(scheduled[0]);
     }
     if (scheduled.length === 1) {
       return `Grupo ${scheduled[0].code}: ${this.scheduleSummary(scheduled[0])}`;

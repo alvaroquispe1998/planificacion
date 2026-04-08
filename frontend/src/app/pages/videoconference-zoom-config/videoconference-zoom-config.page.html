@@ -1,0 +1,174 @@
+<div class="zoom-config-shell">
+  <header class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Configuracion Zoom</p>
+      <h1>Cuenta Zoom</h1>
+      <p class="subtle">
+        Registra las credenciales de la cuenta Server-to-Server OAuth que usaremos para validar licencias, consultar reuniones y conciliar el
+        `zoom_meeting_id`.
+      </p>
+    </div>
+
+    <div class="hero-actions">
+      <a class="btn btn-secondary" routerLink="/videoconferences/zoom-users">Ver usuarios Zoom</a>
+      <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="loading || saving || testing">
+        Actualizar
+      </button>
+      <button type="button" class="btn btn-primary" (click)="save()" [disabled]="loading || saving || testing || !isDirty">
+        {{ saving ? 'Guardando...' : 'Guardar cambios' }}
+      </button>
+    </div>
+  </header>
+
+  <p *ngIf="message" class="flash success">{{ message }}</p>
+  <p *ngIf="error" class="flash error">{{ error }}</p>
+  <p *ngIf="!loading && !isConfigured" class="flash warning">
+    La configuracion Zoom aun no esta completa. Mientras falten credenciales no podremos probar conexion ni validar licencias en tiempo real.
+  </p>
+
+  <section class="stats-grid">
+    <article class="stat-card">
+      <span>Estado</span>
+      <strong>{{ completenessLabel }}</strong>
+      <small class="state-pill" [ngClass]="completenessClass">{{ completenessLabel }}</small>
+    </article>
+    <article class="stat-card">
+      <span>Max concurrente</span>
+      <strong>{{ form.maxConcurrent }}</strong>
+      <small>Limite global por host Zoom para la asignacion automatica</small>
+    </article>
+    <article class="stat-card">
+      <span>Page size</span>
+      <strong>{{ form.pageSize }}</strong>
+      <small>Tamano de lote al consultar usuarios y reuniones en Zoom</small>
+    </article>
+    <article class="stat-card">
+      <span>Timezone</span>
+      <strong>{{ form.timezone || '-' }}</strong>
+      <small>Se usa al generar y validar horarios contra Zoom</small>
+    </article>
+  </section>
+
+  <section class="workspace-grid">
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Credenciales</p>
+          <h2>Conexion principal</h2>
+          <p class="panel-copy">
+            Estos datos quedan guardados en la configuracion general de Zoom y son los que usa el backend cuando genera, valida licencias o sincroniza.
+          </p>
+        </div>
+      </div>
+
+      <div *ngIf="loading" class="empty-state">
+        <h3>Cargando configuracion Zoom...</h3>
+      </div>
+
+      <form *ngIf="!loading" class="config-form">
+        <label class="field">
+          <span>Account ID</span>
+          <input type="text" [(ngModel)]="form.accountId" name="accountId" placeholder="ej. 9xY..." [disabled]="saving || testing" />
+        </label>
+
+        <label class="field">
+          <span>Client ID</span>
+          <input type="text" [(ngModel)]="form.clientId" name="clientId" placeholder="ej. abc123..." [disabled]="saving || testing" />
+        </label>
+
+        <label class="field">
+          <span>Client Secret</span>
+          <div class="secret-field">
+            <input
+              [type]="showSecret ? 'text' : 'password'"
+              [(ngModel)]="form.clientSecret"
+              name="clientSecret"
+              placeholder="Pega aqui el client secret"
+              [disabled]="saving || testing" />
+            <button type="button" class="btn btn-secondary btn-sm" (click)="showSecret = !showSecret" [disabled]="saving || testing">
+              {{ showSecret ? 'Ocultar' : 'Ver' }}
+            </button>
+          </div>
+        </label>
+
+        <div class="config-grid">
+          <label class="field">
+            <span>Max concurrente</span>
+            <input type="number" min="1" [(ngModel)]="form.maxConcurrent" name="maxConcurrent" [disabled]="saving || testing" />
+          </label>
+
+          <label class="field">
+            <span>Page size</span>
+            <input type="number" min="1" [(ngModel)]="form.pageSize" name="pageSize" [disabled]="saving || testing" />
+          </label>
+
+          <label class="field field-wide">
+            <span>Timezone</span>
+            <input type="text" [(ngModel)]="form.timezone" name="timezone" placeholder="America/Lima" [disabled]="saving || testing" />
+          </label>
+        </div>
+
+        <div class="panel-actions">
+          <button type="button" class="btn btn-primary" (click)="save()" [disabled]="saving || testing || !isDirty">
+            {{ saving ? 'Guardando...' : 'Guardar configuracion' }}
+          </button>
+          <button type="button" class="btn btn-secondary" (click)="testConnection()" [disabled]="loading || saving || testing">
+            {{ testing ? 'Probando...' : (isDirty ? 'Guardar y probar conexion' : 'Probar conexion') }}
+          </button>
+        </div>
+      </form>
+    </article>
+
+    <article class="panel side-panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Operacion</p>
+          <h2>Chequeo rapido</h2>
+          <p class="panel-copy">
+            Desde aqui validas si la cuenta responde antes de pasar al pool de usuarios o a la generacion de videoconferencias.
+          </p>
+        </div>
+      </div>
+
+      <div class="check-list">
+        <article class="info-card">
+          <strong>Ultima actualizacion</strong>
+          <span>{{ form.updated_at ? (form.updated_at | date: 'yyyy-MM-dd HH:mm') : 'Sin guardar aun' }}</span>
+        </article>
+        <article class="info-card">
+          <strong>Pool de usuarios</strong>
+          <span>Despues de guardar esta configuracion, arma el pool en `Usuarios Zoom`.</span>
+        </article>
+      </div>
+
+      <article *ngIf="lastTest" class="test-result" [class.test-ok]="lastTest.ok" [class.test-error]="!lastTest.ok">
+        <h3>{{ lastTest.ok ? 'Conexion valida' : 'Conexion fallida' }}</h3>
+        <p *ngIf="lastTest.ok">
+          Zoom respondio correctamente para la cuenta <strong>{{ lastTest.accountId || form.accountId }}</strong> y devolvio
+          <strong>{{ lastTest.userCount ?? 0 }}</strong> usuario(s) en la prueba.
+        </p>
+        <p *ngIf="!lastTest.ok">{{ lastTest.reason || 'No se pudo validar la conexion.' }}</p>
+      </article>
+
+      <div class="empty-state compact" *ngIf="!lastTest">
+        <h3>Sin prueba reciente</h3>
+        <p>Usa el boton de prueba para confirmar que las credenciales guardadas ya permiten hablar con la API de Zoom.</p>
+      </div>
+
+      <div class="tip-list">
+        <article class="tip-card">
+          <strong>1. Guarda antes de operar</strong>
+          <p>La verificacion de licencias del pool y el sync con Zoom dependen de estas credenciales guardadas.</p>
+        </article>
+        <article class="tip-card">
+          <strong>2. Mantener `maxConcurrent` global</strong>
+          <p>Ese valor sigue aplicando a todos los hosts del pool por igual, tal como vienes manejando las licencias.</p>
+        </article>
+        <article class="tip-card">
+          <strong>3. Si falla la prueba</strong>
+          <p>Revisa `accountId`, `clientId`, `clientSecret` y que la app Zoom tenga permisos para listar usuarios y reuniones.</p>
+        </article>
+      </div>
+    </article>
+  </section>
+</div>

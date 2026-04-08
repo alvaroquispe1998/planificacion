@@ -1,12 +1,15 @@
-import { Controller, Get, Post, Body, Query, Delete, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Delete, Param, Patch } from '@nestjs/common';
 import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { VideoconferenceService } from './videoconference.service';
 import {
+    CreateVideoconferenceInheritanceDto,
     FilterOptionsDto,
     GenerateVideoconferenceDto,
     PreviewVideoconferenceDto,
+    UpdateVideoconferenceInheritanceDto,
     UpsertVideoconferenceOverrideDto,
+    VideoconferenceInheritanceCatalogDto,
 } from './videoconference.dto';
 
 @Controller('videoconference')
@@ -40,6 +43,34 @@ export class VideoconferenceController {
     @Post('filter-options')
     async getFilterOptions(@Body() filters: FilterOptionsDto) {
         return this.service.getFilterOptions(filters);
+    }
+
+    @Get('inheritances')
+    async listInheritances() {
+        return this.service.listVideoconferenceInheritances();
+    }
+
+    @Get('inheritances/catalog')
+    async getInheritanceCatalog(@Query() query: VideoconferenceInheritanceCatalogDto) {
+        return this.service.getInheritanceCatalog(query);
+    }
+
+    @Post('inheritances')
+    async createInheritance(@Body() payload: CreateVideoconferenceInheritanceDto) {
+        return this.service.createVideoconferenceInheritance(payload);
+    }
+
+    @Patch('inheritances/:id')
+    async updateInheritance(
+        @Param('id') id: string,
+        @Body() payload: UpdateVideoconferenceInheritanceDto,
+    ) {
+        return this.service.updateVideoconferenceInheritance(id, payload);
+    }
+
+    @Delete('inheritances/:id')
+    async deleteInheritance(@Param('id') id: string) {
+        return this.service.deleteVideoconferenceInheritance(id);
     }
 
     @Post('preview')

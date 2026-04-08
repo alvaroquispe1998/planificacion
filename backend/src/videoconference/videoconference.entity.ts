@@ -13,6 +13,11 @@ export const PlanningSubsectionVideoconferenceAuditStatusValues = [
     'ERROR',
 ] as const;
 
+export const PlanningSubsectionVideoconferenceLinkModeValues = [
+    'OWNED',
+    'INHERITED',
+] as const;
+
 export const PlanningSubsectionVideoconferenceOverrideActionValues = [
     'KEEP',
     'SKIP',
@@ -219,6 +224,32 @@ export class VideoconferenceZoomPoolUserEntity {
     updated_at!: Date;
 }
 
+@Entity({ name: 'planning_subsection_schedule_vc_inheritances' })
+@Index(['parent_schedule_id'])
+@Index(['child_schedule_id'], { unique: true })
+export class PlanningSubsectionScheduleVcInheritanceEntity {
+    @PrimaryColumn({ type: 'varchar', length: 36 })
+    id!: string;
+
+    @Column({ type: 'varchar', length: 36 })
+    parent_schedule_id!: string;
+
+    @Column({ type: 'varchar', length: 36 })
+    child_schedule_id!: string;
+
+    @Column({ type: 'varchar', length: 500, nullable: true })
+    notes!: string | null;
+
+    @Column({ type: 'boolean', default: true })
+    is_active!: boolean;
+
+    @Column({ type: 'datetime' })
+    created_at!: Date;
+
+    @Column({ type: 'datetime' })
+    updated_at!: Date;
+}
+
 @Entity({ name: 'planning_subsection_videoconferences' })
 @Index(['planning_subsection_schedule_id', 'conference_date'], { unique: true })
 @Index(['zoom_user_id', 'conference_date'])
@@ -226,6 +257,8 @@ export class VideoconferenceZoomPoolUserEntity {
 @Index(['planning_offer_id', 'scheduled_start'])
 @Index(['planning_section_id', 'conference_date'])
 @Index(['status', 'audit_sync_status'])
+@Index(['owner_videoconference_id'])
+@Index(['inheritance_mapping_id'])
 export class PlanningSubsectionVideoconferenceEntity {
     @PrimaryColumn({ type: 'varchar', length: 36 })
     id!: string;
@@ -283,6 +316,19 @@ export class PlanningSubsectionVideoconferenceEntity {
 
     @Column({ type: 'varchar', length: 2048, nullable: true })
     start_url!: string | null;
+
+    @Column({
+        type: 'enum',
+        enum: PlanningSubsectionVideoconferenceLinkModeValues,
+        default: 'OWNED',
+    })
+    link_mode!: (typeof PlanningSubsectionVideoconferenceLinkModeValues)[number];
+
+    @Column({ type: 'varchar', length: 36, nullable: true })
+    owner_videoconference_id!: string | null;
+
+    @Column({ type: 'varchar', length: 36, nullable: true })
+    inheritance_mapping_id!: string | null;
 
     @Column({
         type: 'enum',

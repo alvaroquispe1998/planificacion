@@ -74,6 +74,11 @@ export class GenerateVideoconferenceDto {
 
     @IsDateString()
     endDate!: string;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    allowPoolWarnings?: boolean;
 }
 
 export class UpsertVideoconferenceOverrideDto {
@@ -156,4 +161,54 @@ export class UpdateZoomPoolDto {
     @ValidateNested({ each: true })
     @Type(() => UpdateZoomPoolItemDto)
     items!: UpdateZoomPoolItemDto[];
+}
+
+export class VideoconferenceInheritanceCatalogDto {
+    @IsString()
+    semesterId!: string;
+
+    @IsString()
+    campusId!: string;
+
+    @IsString()
+    facultyId!: string;
+
+    @IsString()
+    programId!: string;
+}
+
+export class CreateVideoconferenceInheritanceDto {
+    @IsString()
+    parentScheduleId!: string;
+
+    @IsString()
+    childScheduleId!: string;
+
+    @IsOptional()
+    @IsString()
+    notes?: string;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    isActive?: boolean;
+}
+
+export class UpdateVideoconferenceInheritanceDto {
+    @IsOptional()
+    @IsString()
+    parentScheduleId?: string;
+
+    @IsOptional()
+    @IsString()
+    childScheduleId?: string;
+
+    @IsOptional()
+    @IsString()
+    notes?: string;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    isActive?: boolean;
 }

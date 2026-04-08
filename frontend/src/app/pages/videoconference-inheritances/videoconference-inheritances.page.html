@@ -1,0 +1,253 @@
+<div class="inheritances-page">
+  <section class="page-hero">
+    <div>
+      <span class="eyebrow">Configuracion Zoom</span>
+      <h1>Herencias Zoom</h1>
+      <p>
+        Configura que seccion-horario hereda la videoconferencia de otra dentro del mismo periodo,
+        sede, facultad y programa.
+      </p>
+    </div>
+  </section>
+
+  <p *ngIf="error" class="feedback error">{{ error }}</p>
+  <p *ngIf="message" class="feedback success">{{ message }}</p>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <span class="eyebrow">Contexto</span>
+        <h2>Catalogo de horarios</h2>
+      </div>
+      <div class="panel-head-actions">
+        <span class="pill" *ngIf="filtersLoading">Actualizando filtros...</span>
+        <span class="pill" *ngIf="catalogLoading">Cargando horarios...</span>
+      </div>
+    </div>
+
+    <div class="filters-grid">
+      <label class="field">
+        <span>Periodo</span>
+        <select [(ngModel)]="filters.semesterId" (ngModelChange)="onFiltersChanged()">
+          <option value="">Selecciona un periodo</option>
+          <option *ngFor="let option of periodOptions" [value]="option.id">{{ option.label }}</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Sede</span>
+        <select [(ngModel)]="filters.campusId" (ngModelChange)="onFiltersChanged()">
+          <option value="">Selecciona una sede</option>
+          <option *ngFor="let option of campusOptions" [value]="option.id">{{ option.label }}</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Facultad</span>
+        <select [(ngModel)]="filters.facultyId" (ngModelChange)="onFiltersChanged()">
+          <option value="">Selecciona una facultad</option>
+          <option *ngFor="let option of facultyOptions" [value]="option.id">{{ option.label }}</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Programa</span>
+        <select [(ngModel)]="filters.programId" (ngModelChange)="onFiltersChanged()">
+          <option value="">Selecciona un programa</option>
+          <option *ngFor="let option of programOptions" [value]="option.id">{{ option.label }}</option>
+        </select>
+      </label>
+    </div>
+
+    <p class="context-note">{{ catalogHint }}</p>
+  </section>
+
+  <section class="panel" *ngIf="canLoadCatalog">
+    <div class="panel-head">
+      <div>
+        <span class="eyebrow">Nueva herencia</span>
+        <h2>{{ form.id ? 'Editar mapeo' : 'Crear mapeo' }}</h2>
+      </div>
+      <button
+        *ngIf="form.id"
+        type="button"
+        class="btn btn-secondary"
+        (click)="startNewMapping()">
+        Nuevo mapeo
+      </button>
+    </div>
+
+    <div class="mapping-grid">
+      <article class="mapping-column">
+        <span class="column-title">Horario padre</span>
+
+        <div class="field">
+          <span>Curso</span>
+          <div class="search-select" [class.open]="parentCourseDropdownOpen">
+            <button
+              type="button"
+              class="search-select-trigger"
+              (click)="toggleParentCourseDropdown()">
+              <span [class.placeholder]="!form.parentCourseId">{{ selectedParentCourseLabel }}</span>
+              <span class="search-select-arrow" aria-hidden="true"></span>
+            </button>
+
+            <div class="search-select-dropdown" *ngIf="parentCourseDropdownOpen">
+              <div class="search-select-box">
+                <input
+                  type="text"
+                  [(ngModel)]="form.parentCourseSearch"
+                  placeholder="Buscar por codigo o nombre"
+                  (click)="$event.stopPropagation()" />
+              </div>
+
+              <div class="search-select-options">
+                <button
+                  *ngFor="let option of parentCourseOptions"
+                  type="button"
+                  class="search-select-option"
+                  [class.is-selected]="option.id === form.parentCourseId"
+                  (click)="selectParentCourse(option.id)">
+                  {{ option.label }}
+                </button>
+
+                <div class="search-select-empty" *ngIf="parentCourseOptions.length === 0">
+                  No se encontraron cursos.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Seccion</span>
+          <select
+            [(ngModel)]="form.parentSectionId"
+            (ngModelChange)="onParentSectionChange()"
+            [disabled]="!form.parentCourseId">
+            <option value="">Selecciona una seccion</option>
+            <option *ngFor="let option of parentSectionOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Horario</span>
+          <select
+            [(ngModel)]="form.parentScheduleId"
+            (ngModelChange)="onParentScheduleChange()"
+            [disabled]="!form.parentSectionId">
+            <option value="">Selecciona un horario</option>
+            <option *ngFor="let item of parentScheduleOptions" [value]="item.schedule_id">
+              {{ item.subsection_label }} | {{ item.schedule_label }}
+            </option>
+          </select>
+        </label>
+      </article>
+
+      <article class="mapping-column">
+        <span class="column-title">Horario hijo</span>
+
+        <label class="field">
+          <span>Curso</span>
+          <select [(ngModel)]="form.childCourseId" (ngModelChange)="onChildCourseChange()">
+            <option value="">Selecciona un curso</option>
+            <option *ngFor="let option of childCourseOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Seccion</span>
+          <select
+            [(ngModel)]="form.childSectionId"
+            (ngModelChange)="onChildSectionChange()"
+            [disabled]="!form.childCourseId">
+            <option value="">Selecciona una seccion</option>
+            <option *ngFor="let option of childSectionOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Horario</span>
+          <select [(ngModel)]="form.childScheduleId" [disabled]="!form.childSectionId">
+            <option value="">Selecciona un horario</option>
+            <option *ngFor="let item of childScheduleOptions" [value]="item.schedule_id">
+              {{ item.subsection_label }} | {{ item.schedule_label }}
+            </option>
+          </select>
+        </label>
+      </article>
+    </div>
+
+    <div class="form-footer">
+      <label class="field field-notes">
+        <span>Notas</span>
+        <textarea [(ngModel)]="form.notes" rows="3" placeholder="Contexto interno del mapeo"></textarea>
+      </label>
+
+      <label class="checkbox-row">
+        <input type="checkbox" [(ngModel)]="form.isActive" />
+        <span>Herencia activa</span>
+      </label>
+    </div>
+
+    <div class="actions-row">
+      <button
+        type="button"
+        class="btn btn-primary btn-strong"
+        (click)="save()"
+        [disabled]="saving || catalogLoading || !hasSchedules">
+        {{ saving ? 'Guardando herencia...' : (form.id ? 'Guardar herencia Zoom' : 'Crear herencia Zoom') }}
+      </button>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
+        <span class="eyebrow">Matriz actual</span>
+        <h2>Herencias configuradas</h2>
+      </div>
+      <span class="pill">{{ mappings.length }} mapeos</span>
+    </div>
+
+    <div class="mapping-list" *ngIf="mappings.length; else emptyState">
+      <article class="mapping-item" *ngFor="let item of mappings">
+        <div class="mapping-summary">
+          <div>
+            <span class="summary-label">Padre</span>
+            <strong>{{ item.parent?.course_label || item.parent_schedule_id }}</strong>
+            <span>{{ item.parent?.section_label || '--' }} | {{ item.parent?.subsection_label || '--' }}</span>
+            <span>{{ item.parent?.schedule_label || '--' }}</span>
+          </div>
+
+          <div>
+            <span class="summary-label">Hijo</span>
+            <strong>{{ item.child?.course_label || item.child_schedule_id }}</strong>
+            <span>{{ item.child?.section_label || '--' }} | {{ item.child?.subsection_label || '--' }}</span>
+            <span>{{ item.child?.schedule_label || '--' }}</span>
+          </div>
+        </div>
+
+        <div class="mapping-meta">
+          <span class="pill" [class.pill-muted]="!item.is_active">{{ item.is_active ? 'Activa' : 'Inactiva' }}</span>
+          <span class="muted" *ngIf="item.notes">{{ item.notes }}</span>
+        </div>
+
+        <div class="mapping-actions">
+          <button type="button" class="btn btn-secondary btn-sm" (click)="edit(item)">Editar</button>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="toggleActive(item)">
+            {{ item.is_active ? 'Desactivar' : 'Activar' }}
+          </button>
+          <button type="button" class="btn btn-danger btn-sm" (click)="remove(item)">Eliminar</button>
+        </div>
+      </article>
+    </div>
+
+    <ng-template #emptyState>
+      <div class="empty-block">
+        <h3>No hay herencias registradas.</h3>
+        <p>Cuando guardes el primer mapeo, aparecera aqui para poder editarlo o desactivarlo.</p>
+      </div>
+    </ng-template>
+  </section>
+</div>
