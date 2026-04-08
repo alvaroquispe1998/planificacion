@@ -9,6 +9,7 @@
     </div>
 
     <div class="hero-actions">
+      <a class="btn btn-secondary" routerLink="/videoconferences/zoom-config">Configuracion Zoom</a>
       <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="loading || saving">
         Actualizar
       </button>
@@ -20,6 +21,10 @@
 
   <p *ngIf="message" class="flash success">{{ message }}</p>
   <p *ngIf="error" class="flash error">{{ error }}</p>
+  <p *ngIf="!licenseSyncOk" class="flash warning">
+    No se pudo verificar licencias Zoom en tiempo real. {{ licenseSyncError || 'Se mostrara el pool con estado desconocido.' }}
+    <a routerLink="/videoconferences/zoom-config">Abrir configuracion Zoom</a>
+  </p>
 
   <section class="stats-grid">
     <article class="stat-card">
@@ -57,7 +62,7 @@
       </div>
 
       <div *ngIf="loading" class="empty-state">
-        <h3>Cargando usuarios Zoom...</h3>
+        <h3>Cargando y validando licencias de usuarios Zoom...</h3>
       </div>
 
       <div *ngIf="!loading && poolItems.length === 0" class="empty-state">
@@ -74,6 +79,7 @@
           <div class="pool-main">
             <strong>{{ userLabel(item) }}</strong>
             <span>{{ item.zoom_user_id }}</span>
+            <span class="license-badge" [ngClass]="licenseBadgeClass(item)">{{ item.license_label }}</span>
           </div>
 
           <label class="toggle-field">
@@ -116,6 +122,16 @@
         <input type="search" [(ngModel)]="search" placeholder="Nombre, correo o id Zoom" [disabled]="loading || saving" />
       </label>
 
+      <label class="search-field">
+        <span>Filtrar licencia</span>
+        <select [(ngModel)]="availableLicenseFilter" [disabled]="loading || saving">
+          <option value="ALL">Todos</option>
+          <option value="NOT_FOUND">No encontrado en Zoom</option>
+          <option value="BASIC">Basico</option>
+          <option value="LICENSED">Licenciado</option>
+        </select>
+      </label>
+
       <div *ngIf="!loading && !hasUsers" class="empty-state">
         <h3>No hay usuarios Zoom sincronizados</h3>
         <p>Primero sincroniza el recurso de usuarios Zoom y luego vuelve a esta pantalla para armar el pool.</p>
@@ -131,10 +147,11 @@
           <div class="available-main">
             <strong>{{ userLabel(user) }}</strong>
             <span>{{ user.id }}</span>
+            <span class="license-badge" [ngClass]="licenseBadgeClass(user)">{{ user.license_label }}</span>
           </div>
 
-          <button type="button" class="btn btn-primary btn-sm" (click)="addUser(user)" [disabled]="saving">
-            Agregar
+          <button type="button" class="btn btn-primary btn-sm" (click)="addUser(user)" [disabled]="saving || !canAddUser(user)">
+            {{ canAddUser(user) ? 'Agregar' : 'Bloqueado' }}
           </button>
         </article>
       </div>

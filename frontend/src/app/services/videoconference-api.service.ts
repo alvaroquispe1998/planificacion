@@ -78,6 +78,14 @@ export interface VideoconferencePreviewItem {
     override_reason_code: string | null;
     override_notes: string | null;
     selectable: boolean;
+    inheritance: {
+        is_inherited: boolean;
+        mapping_id: string | null;
+        parent_schedule_id: string | null;
+        parent_occurrence_key: string | null;
+        parent_label: string | null;
+        family_owner_schedule_id: string;
+    };
     selected?: boolean;
 }
 
@@ -110,6 +118,9 @@ export interface VideoconferenceGenerationResultItem {
     zoom_user_id: string | null;
     zoom_user_email: string | null;
     zoom_meeting_id: string | null;
+    link_mode: 'OWNED' | 'INHERITED';
+    owner_videoconference_id: string | null;
+    inheritance: VideoconferencePreviewItem['inheritance'];
 }
 
 export interface VideoconferenceGenerationSummary {
@@ -128,6 +139,7 @@ export interface VideoconferenceGenerationResponse {
     message: string;
     summary: VideoconferenceGenerationSummary;
     results: VideoconferenceGenerationResultItem[];
+    pool_warnings?: string[];
 }
 
 export interface VideoconferenceReconcileResponse {
@@ -135,6 +147,75 @@ export interface VideoconferenceReconcileResponse {
     matched: boolean;
     message: string;
     result: VideoconferenceGenerationResultItem;
+}
+
+export type ZoomPoolLicenseStatus = 'LICENSED' | 'BASIC' | 'ON_PREM' | 'UNKNOWN';
+
+export interface ZoomPoolLicenseAwareUser {
+    id?: string;
+    zoom_user_id?: string;
+    name: string | null;
+    email: string | null;
+    in_pool?: boolean;
+    sort_order?: number;
+    is_active?: boolean;
+    license_status: ZoomPoolLicenseStatus;
+    license_label: string;
+    is_licensed: boolean | null;
+}
+
+export interface ZoomPoolResponse {
+    items: ZoomPoolLicenseAwareUser[];
+    users: ZoomPoolLicenseAwareUser[];
+    license_sync_ok: boolean;
+    license_sync_error: string | null;
+}
+
+export interface VideoconferenceInheritanceCatalogSchedule {
+    schedule_id: string;
+    subsection_id: string;
+    section_id: string;
+    course_id: string;
+    course_code: string | null;
+    course_name: string | null;
+    course_label: string;
+    section_label: string;
+    subsection_label: string;
+    day_of_week: string;
+    day_label: string;
+    start_time: string;
+    end_time: string;
+    schedule_label: string;
+    vacancy_label: string;
+    section_projected_vacancies: number | null;
+    subsection_projected_vacancies: number | null;
+    teacher_name: string | null;
+    is_child_inherited: boolean;
+    inherited_from_schedule_id: string | null;
+}
+
+export interface VideoconferenceInheritanceItem {
+    id: string;
+    parent_schedule_id: string;
+    child_schedule_id: string;
+    notes: string | null;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+    parent: {
+        schedule_id: string;
+        course_label: string;
+        section_label: string;
+        subsection_label: string;
+        schedule_label: string;
+    } | null;
+    child: {
+        schedule_id: string;
+        course_label: string;
+        section_label: string;
+        subsection_label: string;
+        schedule_label: string;
+    } | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -171,12 +252,73 @@ export class VideoconferenceApiService {
         return this.http.post<VideoconferenceFilterOptionsResponse>(`${this.baseUrl}/filter-options`, filters);
     }
 
+    getInheritanceCatalog(filters: {
+        semesterId: string;
+        campusId: string;
+        facultyId: string;
+        programId: string;
+    }) {
+        let params = new HttpParams()
+            .set('semesterId', filters.semesterId)
+            .set('campusId', filters.campusId)
+            .set('facultyId', filters.facultyId)
+            .set('programId', filters.programId);
+        return this.http.get<{ schedules: VideoconferenceInheritanceCatalogSchedule[] }>(
+            `${this.baseUrl}/inheritances/catalog`,
+            { params },
+        );
+    }
+
+    listInheritances() {
+        return this.http.get<VideoconferenceInheritanceItem[]>(`${this.baseUrl}/inheritances`);
+    }
+
+    createInheritance(payload: {
+        parentScheduleId: string;
+        childScheduleId: string;
+        notes?: string;
+        isActive?: boolean;
+    }) {
+        return this.http.post<VideoconferenceInheritanceItem>(`${this.baseUrl}/inheritances`, payload);
+    }
+
+    updateInheritance(
+        id: string,
+        payload: {
+            parentScheduleId?: string;
+            childScheduleId?: string;
+            notes?: string;
+            isActive?: boolean;
+        },
+    ) {
+        return this.http.patch<VideoconferenceInheritanceItem>(
+            `${this.baseUrl}/inheritances/${encodeURIComponent(id)}`,
+            payload,
+        );
+    }
+
+    deleteInheritance(id: string) {
+        return this.http.delete<{ success: boolean; id: string }>(
+            `${this.baseUrl}/inheritances/${encodeURIComponent(id)}`,
+        );
+    }
+
     preview(filters: VideoconferencePreviewDto) {
         return this.http.post<VideoconferencePreviewItem[]>(`${this.baseUrl}/preview`, filters);
     }
 
-    generate(payload: { scheduleIds?: string[]; occurrenceKeys?: string[]; startDate: string; endDate: string }) {
+    generate(payload: {
+        scheduleIds?: string[];
+        occurrenceKeys?: string[];
+        startDate: string;
+        endDate: string;
+        allowPoolWarnings?: boolean;
+    }) {
         return this.http.post<VideoconferenceGenerationResponse>(`${this.baseUrl}/generate`, payload);
+    }
+
+    getZoomPool() {
+        return this.http.get<ZoomPoolResponse>(`${API_BASE_URL}/settings/zoom/pool`);
     }
 
     reconcile(id: string) {

@@ -84,6 +84,53 @@
 
   <article class="panel">
     <h2>3) Ejecutar sincronizacion</h2>
+    <section class="planning-readiness" [class.ready]="isDocenteSessionActive"
+      [class.blocked]="!isDocenteSessionActive && !isSourceValidating('DOCENTE')"
+      [class.validating]="isSourceValidating('DOCENTE')">
+      <div class="planning-readiness-head">
+        <div>
+          <p class="mini-eyebrow">Planificacion</p>
+          <h3>{{ planningSyncReadinessLabel }}</h3>
+        </div>
+        <span class="readiness-badge" [class.ok]="isDocenteSessionActive"
+          [class.warn]="!isDocenteSessionActive && !isSourceValidating('DOCENTE')"
+          [class.pending]="isSourceValidating('DOCENTE')">
+          <ng-container *ngIf="isSourceValidating('DOCENTE')">Validando DOCENTE</ng-container>
+          <ng-container *ngIf="!isSourceValidating('DOCENTE')">
+            {{ isDocenteSessionActive ? 'APTO' : 'NO APTO' }}
+          </ng-container>
+        </span>
+      </div>
+      <p>{{ planningSyncReadinessMessage }}</p>
+
+      <div class="planning-base-panel">
+        <div class="planning-base-copy">
+          <h4>Catalogo base para planificacion</h4>
+          <p>
+            Recomendado antes de la carga masiva de Akademic. Esto deja al dia los catalogos que usa la
+            planificacion para resolver sedes, programas, planes, docentes y aulas.
+          </p>
+          <div class="planning-base-tags">
+            <span class="base-tag" *ngFor="let resource of planningBaseResources">
+              {{ resource.label }} ({{ resource.source }})
+            </span>
+          </div>
+        </div>
+
+        <div class="planning-base-actions">
+          <p class="planning-base-count">
+            {{ planningBaseSelectedCount }}/{{ planningBaseResources.length }} recursos base seleccionados
+          </p>
+          <button type="button" class="ghost" (click)="selectPlanningBaseCatalog()">
+            Seleccionar catalogo base
+          </button>
+          <button type="button" class="primary" (click)="runPlanningBaseSync()" [disabled]="isSyncing">
+            Ejecutar catalogo base
+          </button>
+        </div>
+      </div>
+    </section>
+
     <div class="run-controls">
       <label>
         Modo

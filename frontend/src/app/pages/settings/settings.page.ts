@@ -31,6 +31,21 @@ type SyncResourceModule = {
   styleUrl: './settings.page.css',
 })
 export class SettingsPageComponent implements OnInit, OnDestroy {
+  readonly planningBaseResourceCodes = [
+    'semesters',
+    'campuses',
+    'faculties',
+    'academic_programs',
+    'academic_program_campuses',
+    'study_plans',
+    'courses',
+    'teachers',
+    'buildings',
+    'classrooms',
+    'course_sections',
+    'classroom_section_schedules',
+  ] as const;
+
   sources: any[] = [];
   resources: SyncResource[] = [];
   resourceModules: SyncResourceModule[] = [];
@@ -77,6 +92,48 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
 
   get isValidatingAny(): boolean {
     return this.validatingSourceCodes.size > 0;
+  }
+
+  get docenteSource() {
+    return this.sources.find((item) => item.code === 'DOCENTE') ?? null;
+  }
+
+  get isDocenteSessionActive() {
+    return this.docenteSource?.session_status === 'ACTIVE';
+  }
+
+  get planningSyncReadinessLabel() {
+    if (this.isSourceValidating('DOCENTE')) {
+      return 'Validando sesion DOCENTE...';
+    }
+    return this.isDocenteSessionActive ? 'Apto para sincronizar planificacion' : 'No apto para sincronizar planificacion';
+  }
+
+  get planningSyncReadinessMessage() {
+    if (this.isSourceValidating('DOCENTE')) {
+      return 'Estamos comprobando la sesion DOCENTE antes de ejecutar sincronizaciones de planificacion.';
+    }
+    if (this.isDocenteSessionActive) {
+      return 'La sesion DOCENTE esta activa. Ya puedes sincronizar catalogos base y luego ejecutar la carga masiva de Akademic.';
+    }
+    return 'La sesion DOCENTE no esta activa o necesita renovacion. Primero valida o renueva esta sesion antes de sincronizar planificacion.';
+  }
+
+  get planningBaseResources() {
+    return this.planningBaseResourceCodes
+      .map((code) => this.resources.find((item) => item.code === code))
+      .filter((item): item is SyncResource => Boolean(item));
+  }
+
+  get planningBaseSelectedCount() {
+    return this.planningBaseResources.filter((item) => this.selectedResources.has(item.code)).length;
+  }
+
+  get isPlanningBaseSelectionComplete() {
+    return (
+      this.planningBaseResources.length > 0 &&
+      this.planningBaseResources.every((item) => this.selectedResources.has(item.code))
+    );
   }
 
   isSourceValidating(code: string): boolean {
@@ -341,6 +398,24 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
         });
       },
     });
+  }
+
+  selectPlanningBaseCatalog() {
+    this.selectedResources = new Set(this.planningBaseResources.map((item) => item.code));
+    this.feedback = 'Seleccion preparada: Catalogo base para planificacion.';
+    this.errorMessage = '';
+    this.cdr.detectChanges();
+  }
+
+  runPlanningBaseSync() {
+    this.selectPlanningBaseCatalog();
+    if (!this.isDocenteSessionActive) {
+      this.errorMessage = 'La sesion DOCENTE no esta activa. Primero valida o renueva DOCENTE antes de ejecutar el catalogo base.';
+      this.feedback = '';
+      this.cdr.detectChanges();
+      return;
+    }
+    this.runSync();
   }
 
   refreshJobs() {

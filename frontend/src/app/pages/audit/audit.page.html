@@ -1,10 +1,10 @@
 <section class="audit-page">
   <header class="hero">
-    <div>
-      <p class="eyebrow">Videoconferencias creadas</p>
+    <div class="hero-copy-block">
+      <p class="eyebrow">Auditoria operativa</p>
       <h1>Auditoria Zoom</h1>
       <p class="hero-copy">
-        Revisa las reuniones generadas desde planificacion, abre su detalle en otra pestaña y sincroniza
+        Revisa las reuniones generadas desde planificacion, abre su detalle en otra pestana y sincroniza
         participantes, instancias y grabaciones solo cuando lo necesites.
       </p>
     </div>
@@ -17,18 +17,22 @@
     <article class="stat-card">
       <span class="stat-label">Total</span>
       <strong>{{ totals.total }}</strong>
+      <small>Todas las videoconferencias visibles con los filtros actuales</small>
     </article>
     <article class="stat-card">
-      <span class="stat-label">Conciliadas</span>
+      <span class="stat-label">Listas en Zoom</span>
       <strong>{{ totals.matched }}</strong>
+      <small>Ya tienen `zoom_meeting_id` conciliado</small>
     </article>
     <article class="stat-card">
-      <span class="stat-label">Errores</span>
+      <span class="stat-label">Con error</span>
       <strong>{{ totals.errors }}</strong>
+      <small>Fallaron durante la creación o conciliación</small>
     </article>
     <article class="stat-card">
-      <span class="stat-label">Pendientes de sync</span>
+      <span class="stat-label">Sin sincronizar</span>
       <strong>{{ totals.pending_audit }}</strong>
+      <small>Aún no se bajaron instancias, participantes o grabaciones</small>
     </article>
   </section>
 
@@ -37,6 +41,7 @@
       <div>
         <p class="eyebrow">Filtros</p>
         <h2>Listado operativo</h2>
+        <p class="section-copy">Filtra por contexto academico, estado de creacion y estado de auditoria.</p>
       </div>
       <button type="button" class="btn btn-ghost btn-sm" (click)="clearFilters()">Limpiar filtros</button>
     </div>
@@ -77,21 +82,14 @@
       <label>
         <span>Estado de creacion</span>
         <select [(ngModel)]="filters.status">
-          <option value="">Todos</option>
-          <option value="MATCHED">MATCHED</option>
-          <option value="CREATED_UNMATCHED">CREATED_UNMATCHED</option>
-          <option value="CREATING">CREATING</option>
-          <option value="ERROR">ERROR</option>
+          <option *ngFor="let item of creationStatusOptions" [value]="item.value">{{ item.label }}</option>
         </select>
       </label>
 
       <label>
         <span>Estado de auditoria</span>
         <select [(ngModel)]="filters.audit_sync_status">
-          <option value="">Todos</option>
-          <option value="PENDING">Sin sincronizar</option>
-          <option value="SYNCED">Sincronizada</option>
-          <option value="ERROR">Error de sync</option>
+          <option *ngFor="let item of auditStatusOptions" [value]="item.value">{{ item.label }}</option>
         </select>
       </label>
 
@@ -115,10 +113,11 @@
   <section class="panel table-panel">
     <div class="section-head">
       <div>
-        <p class="eyebrow">Auditoria nueva</p>
+        <p class="eyebrow">Reuniones registradas</p>
         <h2>Reuniones creadas</h2>
+        <p class="section-copy">Este listado sale de la generacion de videoconferencias y su seguimiento de auditoria.</p>
       </div>
-      <span class="count">{{ totals.total }} resultados</span>
+      <span class="count">{{ resultBadgeLabel }}</span>
     </div>
 
     <p *ngIf="error" class="feedback error">{{ error }}</p>
@@ -175,15 +174,23 @@
               <div class="cell-stack">
                 <strong>{{ row.zoom_meeting_id || 'Sin conciliacion Zoom' }}</strong>
                 <span>{{ row.zoom_user_name || row.zoom_user_email || 'Sin usuario asignado' }}</span>
+                <span *ngIf="row.link_mode === 'INHERITED'">{{ row.owner_label || 'Usa el Zoom del horario padre' }}</span>
               </div>
             </td>
             <td>
               <div class="status-stack">
-                <span class="pill">{{ statusLabel(row.status) }}</span>
-                <span class="pill" [class.pill-ok]="normalizeAuditSyncStatus(row.audit_sync_status) === 'SYNCED'" [class.pill-error]="normalizeAuditSyncStatus(row.audit_sync_status) === 'ERROR'">
+                <span class="pill" [class.pill-info]="row.link_mode === 'INHERITED'">{{ linkModeLabel(row.link_mode) }}</span>
+                <span class="pill" [ngClass]="statusToneClass(row.status)">{{ statusLabel(row.status) }}</span>
+                <span
+                  class="pill"
+                  [class.pill-ok]="normalizeAuditSyncStatus(row.audit_sync_status) === 'SYNCED'"
+                  [class.pill-error]="normalizeAuditSyncStatus(row.audit_sync_status) === 'ERROR'">
                   {{ auditStatusLabel(row.audit_sync_status) }}
                 </span>
-                <span class="pill" [class.pill-warning]="row.planning_sync_state === 'OUTDATED'" [class.pill-error]="row.planning_sync_state?.includes('REMOVED')">
+                <span
+                  class="pill"
+                  [class.pill-warning]="row.planning_sync_state === 'OUTDATED'"
+                  [class.pill-error]="row.planning_sync_state?.includes('REMOVED')">
                   {{ planningSyncStatusLabel(row.planning_sync_state) }}
                 </span>
               </div>
@@ -226,13 +233,13 @@
     </div>
 
     <ng-template #emptyState>
-      <div class="empty-block">
-        <h3>{{ loading ? 'Cargando reuniones...' : 'No hay videoconferencias para los filtros actuales.' }}</h3>
+      <div class="empty-block" [class.empty-block-loading]="loading">
+        <h3>{{ loading ? 'Cargando reuniones creadas...' : 'No hay videoconferencias para los filtros actuales.' }}</h3>
         <p>
           {{
             loading
-              ? 'Consultando las videoconferencias creadas desde planificacion.'
-              : 'Prueba con otra combinacion de filtros o sincroniza nuevas reuniones.'
+              ? 'Consultando el registro de videoconferencias generadas y su estado de auditoría.'
+              : (hasActiveFilters() ? 'Prueba con otra combinacion de filtros.' : 'Todavia no hay videoconferencias generadas para mostrar.')
           }}
         </p>
       </div>

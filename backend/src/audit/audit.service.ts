@@ -64,6 +64,22 @@ type PlanningAuditListRow = {
   aula_virtual_name: string | null;
   join_url: string | null;
   start_url: string | null;
+  link_mode: 'OWNED' | 'INHERITED';
+  owner_videoconference_id: string | null;
+  inheritance_mapping_id: string | null;
+  sync_owner_videoconference_id: string;
+  sync_owner_topic: string | null;
+  sync_owner_zoom_meeting_id: string | null;
+  sync_owner_join_url: string | null;
+  sync_owner_start_url: string | null;
+  owner_course_code: string | null;
+  owner_course_name: string | null;
+  owner_section_code: string | null;
+  owner_section_external_code: string | null;
+  owner_subsection_code: string | null;
+  owner_schedule_day_of_week: string | null;
+  owner_schedule_start_time: string | null;
+  owner_schedule_end_time: string | null;
   status: string;
   audit_sync_status: string | null;
   audit_synced_at: Date | null;
@@ -349,13 +365,17 @@ export class AuditService {
     }
 
     const recordIds = rows.map((row) => row.id);
+    const ownerIds = Array.from(
+      new Set(rows.map((row) => row.sync_owner_videoconference_id || row.id).filter(Boolean)),
+    );
     const teacherIds = [...new Set(rows.map((row) => row.effective_teacher_id).filter(Boolean))] as string[];
     const [teachers, instanceCounts, participantCounts, recordingCounts] = await Promise.all([
       teacherIds.length ? this.teachersRepo.find({ where: { id: In(teacherIds) } }) : [],
-      this.countInstancesByPlanningVideoconference(recordIds),
-      this.countParticipantsByPlanningVideoconference(recordIds),
-      this.countRecordingsByPlanningVideoconference(recordIds),
+      this.countInstancesByPlanningVideoconference(ownerIds),
+      this.countParticipantsByPlanningVideoconference(ownerIds),
+      this.countRecordingsByPlanningVideoconference(ownerIds),
     ]);
+    const ownerIdMap = new Map(rows.map((row) => [row.id, row.sync_owner_videoconference_id || row.id] as const));
     const teacherMap = new Map(teachers.map((item) => [item.id, item] as const));
     const instanceCountMap = new Map(instanceCounts.map((item) => [item.id, item.count] as const));
     const participantCountMap = new Map(participantCounts.map((item) => [item.id, item.count] as const));
@@ -383,6 +403,21 @@ export class AuditService {
         aula_virtual_name: row.aula_virtual_name,
         join_url: row.join_url,
         start_url: row.start_url,
+        link_mode: row.link_mode,
+        owner_videoconference_id: row.owner_videoconference_id,
+        inheritance_mapping_id: row.inheritance_mapping_id,
+        owner_label:
+          row.link_mode === 'INHERITED'
+            ? this.buildOwnerLabel({
+                course_code: row.owner_course_code,
+                course_name: row.owner_course_name,
+                section_code: row.owner_section_external_code || row.owner_section_code,
+                subsection_code: row.owner_subsection_code,
+                day_of_week: row.owner_schedule_day_of_week,
+                start_time: row.owner_schedule_start_time,
+                end_time: row.owner_schedule_end_time,
+              })
+            : null,
         status: row.status,
         audit_sync_status: this.normalizeAuditSyncStatus(row.audit_sync_status),
         audit_synced_at: row.audit_synced_at,
@@ -409,10 +444,12 @@ export class AuditService {
         teacher_id: teacher?.id ?? row.effective_teacher_id,
         teacher_name: teacher?.full_name ?? teacher?.name ?? null,
         teacher_dni: teacher?.dni ?? null,
-        instance_count: instanceCountMap.get(row.id) ?? 0,
-        participant_count: participantCountMap.get(row.id) ?? 0,
-        recording_count: recordingCountMap.get(row.id) ?? 0,
-        can_sync: Boolean(row.zoom_meeting_id),
+        instance_count: instanceCountMap.get(ownerIdMap.get(row.id) ?? row.id) ?? 0,
+        participant_count: participantCountMap.get(ownerIdMap.get(row.id) ?? row.id) ?? 0,
+        recording_count: recordingCountMap.get(ownerIdMap.get(row.id) ?? row.id) ?? 0,
+        can_sync: Boolean((row.sync_owner_zoom_meeting_id ?? row.zoom_meeting_id) && (row.sync_owner_videoconference_id ?? row.id)),
+        is_sync_owner: row.link_mode !== 'INHERITED',
+        sync_owner_videoconference_id: row.sync_owner_videoconference_id,
       };
     });
 
@@ -442,11 +479,12 @@ export class AuditService {
       throw new NotFoundException(`No existe la videoconferencia ${id}.`);
     }
 
+    const syncOwnerId = row.sync_owner_videoconference_id || row.id;
     const teacher = row.effective_teacher_id
       ? await this.teachersRepo.findOne({ where: { id: row.effective_teacher_id } })
       : null;
     const instances = await this.meetingInstancesRepo.find({
-      where: { planning_subsection_videoconference_id: id },
+      where: { planning_subsection_videoconference_id: syncOwnerId },
       order: { actual_start: 'DESC', created_at: 'DESC' },
     });
     const bundles = await this.loadInstanceBundles(instances);
@@ -472,6 +510,21 @@ export class AuditService {
         aula_virtual_name: row.aula_virtual_name,
         join_url: row.join_url,
         start_url: row.start_url,
+        link_mode: row.link_mode,
+        owner_videoconference_id: row.owner_videoconference_id,
+        inheritance_mapping_id: row.inheritance_mapping_id,
+        owner_label:
+          row.link_mode === 'INHERITED'
+            ? this.buildOwnerLabel({
+                course_code: row.owner_course_code,
+                course_name: row.owner_course_name,
+                section_code: row.owner_section_external_code || row.owner_section_code,
+                subsection_code: row.owner_subsection_code,
+                day_of_week: row.owner_schedule_day_of_week,
+                start_time: row.owner_schedule_start_time,
+                end_time: row.owner_schedule_end_time,
+              })
+            : null,
         status: row.status,
         audit_sync_status: this.normalizeAuditSyncStatus(row.audit_sync_status),
         audit_synced_at: row.audit_synced_at,
@@ -498,7 +551,9 @@ export class AuditService {
         teacher_id: teacher?.id ?? row.effective_teacher_id,
         teacher_name: teacher?.full_name ?? teacher?.name ?? null,
         teacher_dni: teacher?.dni ?? null,
-        can_sync: Boolean(row.zoom_meeting_id),
+        can_sync: Boolean((row.sync_owner_zoom_meeting_id ?? row.zoom_meeting_id) && syncOwnerId),
+        is_sync_owner: row.link_mode !== 'INHERITED',
+        sync_owner_videoconference_id: syncOwnerId,
       },
       selected_instance_id: bundles[0]?.instance.id ?? null,
       instances: bundles.map((bundle) => ({
@@ -512,9 +567,20 @@ export class AuditService {
   }
 
   async syncPlanningVideoconference(id: string) {
-    const record = await this.planningVideoconferencesRepo.findOne({ where: { id } });
-    if (!record) {
+    const requestedRecord = await this.planningVideoconferencesRepo.findOne({ where: { id } });
+    if (!requestedRecord) {
       throw new NotFoundException(`No existe la videoconferencia ${id}.`);
+    }
+    const syncOwnerId =
+      requestedRecord.link_mode === 'INHERITED' && requestedRecord.owner_videoconference_id
+        ? requestedRecord.owner_videoconference_id
+        : requestedRecord.id;
+    const record =
+      syncOwnerId === requestedRecord.id
+        ? requestedRecord
+        : await this.planningVideoconferencesRepo.findOne({ where: { id: syncOwnerId } });
+    if (!record) {
+      throw new NotFoundException(`No existe la videoconferencia owner ${syncOwnerId}.`);
     }
     if (!record.zoom_meeting_id) {
       throw new BadRequestException('La videoconferencia no tiene zoom_meeting_id conciliado.');
@@ -560,13 +626,15 @@ export class AuditService {
       record.audit_sync_error = null;
       record.updated_at = new Date();
       await this.planningVideoconferencesRepo.save(record);
-      return this.getPlanningVideoconferenceAuditDetail(record.id);
+      await this.syncInheritedAuditState(record.id);
+      return this.getPlanningVideoconferenceAuditDetail(requestedRecord.id);
     } catch (error) {
       record.audit_sync_status = 'ERROR';
       record.audit_synced_at = new Date();
       record.audit_sync_error = this.toErrorMessage(error);
       record.updated_at = new Date();
       await this.planningVideoconferencesRepo.save(record);
+      await this.syncInheritedAuditState(record.id);
       throw error;
     }
   }
@@ -592,6 +660,22 @@ export class AuditService {
       .addSelect('vc.aula_virtual_name', 'aula_virtual_name')
       .addSelect('vc.join_url', 'join_url')
       .addSelect('vc.start_url', 'start_url')
+      .addSelect('vc.link_mode', 'link_mode')
+      .addSelect('vc.owner_videoconference_id', 'owner_videoconference_id')
+      .addSelect('vc.inheritance_mapping_id', 'inheritance_mapping_id')
+      .addSelect('owner_vc.id', 'sync_owner_videoconference_id')
+      .addSelect('owner_vc.topic', 'sync_owner_topic')
+      .addSelect('owner_vc.zoom_meeting_id', 'sync_owner_zoom_meeting_id')
+      .addSelect('owner_vc.join_url', 'sync_owner_join_url')
+      .addSelect('owner_vc.start_url', 'sync_owner_start_url')
+      .addSelect('owner_offer.course_code', 'owner_course_code')
+      .addSelect('owner_offer.course_name', 'owner_course_name')
+      .addSelect('owner_section.code', 'owner_section_code')
+      .addSelect('owner_section.external_code', 'owner_section_external_code')
+      .addSelect('owner_subsection.code', 'owner_subsection_code')
+      .addSelect('owner_schedule.day_of_week', 'owner_schedule_day_of_week')
+      .addSelect('owner_schedule.start_time', 'owner_schedule_start_time')
+      .addSelect('owner_schedule.end_time', 'owner_schedule_end_time')
       .addSelect('vc.status', 'status')
       .addSelect('vc.audit_sync_status', 'audit_sync_status')
       .addSelect('vc.audit_synced_at', 'audit_synced_at')
@@ -637,6 +721,23 @@ export class AuditService {
         PlanningSubsectionScheduleEntity,
         'schedule',
         'schedule.id = vc.planning_subsection_schedule_id',
+      )
+      .leftJoin(
+        PlanningSubsectionVideoconferenceEntity,
+        'owner_vc',
+        'owner_vc.id = COALESCE(vc.owner_videoconference_id, vc.id)',
+      )
+      .leftJoin(PlanningOfferEntity, 'owner_offer', 'owner_offer.id = owner_vc.planning_offer_id')
+      .leftJoin(PlanningSectionEntity, 'owner_section', 'owner_section.id = owner_vc.planning_section_id')
+      .leftJoin(
+        PlanningSubsectionEntity,
+        'owner_subsection',
+        'owner_subsection.id = owner_vc.planning_subsection_id',
+      )
+      .leftJoin(
+        PlanningSubsectionScheduleEntity,
+        'owner_schedule',
+        'owner_schedule.id = owner_vc.planning_subsection_schedule_id',
       )
       .leftJoin(SemesterEntity, 'semester', 'semester.id = offer.semester_id')
       .leftJoin(CampusEntity, 'campus', 'campus.id = offer.campus_id')
@@ -868,9 +969,10 @@ export class AuditService {
       return;
     }
 
+    const uniqueParticipants = dedupeParticipants(participants);
     const now = new Date();
     await this.participantsRepo.save(
-      participants.map((participant) =>
+      uniqueParticipants.map((participant) =>
         this.participantsRepo.create({
           id: newId(),
           meeting_instance_id: instance.id,
@@ -949,6 +1051,57 @@ export class AuditService {
     await this.recordingsRepo.delete({ meeting_instance_id: In(instanceIds) });
     await this.participantsRepo.delete({ meeting_instance_id: In(instanceIds) });
     await this.meetingInstancesRepo.delete({ id: In(instanceIds) });
+  }
+
+  private async syncInheritedAuditState(ownerId: string) {
+    const children = await this.planningVideoconferencesRepo.find({
+      where: { owner_videoconference_id: ownerId, link_mode: 'INHERITED' },
+    });
+    if (!children.length) {
+      return;
+    }
+    const owner = await this.planningVideoconferencesRepo.findOne({ where: { id: ownerId } });
+    if (!owner) {
+      return;
+    }
+    const now = new Date();
+    await this.planningVideoconferencesRepo.save(
+      children.map((child) =>
+        this.planningVideoconferencesRepo.merge(child, {
+          zoom_user_id: owner.zoom_user_id,
+          zoom_user_email: owner.zoom_user_email,
+          zoom_user_name: owner.zoom_user_name,
+          zoom_meeting_id: owner.zoom_meeting_id,
+          topic: owner.topic,
+          join_url: owner.join_url,
+          start_url: owner.start_url,
+          status: owner.status,
+          audit_sync_status: owner.audit_sync_status,
+          audit_synced_at: owner.audit_synced_at,
+          audit_sync_error: owner.audit_sync_error,
+          updated_at: now,
+        }),
+      ),
+    );
+  }
+
+  private buildOwnerLabel(input: {
+    course_code: string | null;
+    course_name: string | null;
+    section_code: string | null;
+    subsection_code: string | null;
+    day_of_week: string | null;
+    start_time: string | null;
+    end_time: string | null;
+  }) {
+    const course = [input.course_code, input.course_name].filter(Boolean).join(' - ') || 'Sin curso';
+    const section = input.section_code ? `Seccion ${input.section_code}` : 'Seccion sin codigo';
+    const group = input.subsection_code ? `Grupo ${input.subsection_code}` : 'Grupo sin codigo';
+    const schedule =
+      input.day_of_week && input.start_time && input.end_time
+        ? `${input.day_of_week} ${shortTime(input.start_time)}-${shortTime(input.end_time)}`
+        : 'Horario sin definir';
+    return `${course} | ${section} | ${group} | ${schedule}`;
   }
 
   private normalizeAuditSyncStatus(value: string | null | undefined) {
@@ -1153,6 +1306,40 @@ function groupBy<T>(items: T[], keySelector: (item: T) => string) {
     grouped.set(key, bucket);
   }
   return grouped;
+}
+
+function dedupeParticipants(
+  participants: Array<{
+    zoom_participant_id: string | null;
+    zoom_user_id: string | null;
+    display_name: string;
+    email: string | null;
+    role: string | null;
+  }>,
+) {
+  const seen = new Set<string>();
+  const unique: typeof participants = [];
+
+  for (const participant of participants) {
+    const displayName = `${participant.display_name ?? ''}`.trim().toUpperCase();
+    const email = `${participant.email ?? ''}`.trim().toLowerCase();
+    const zoomParticipantId = `${participant.zoom_participant_id ?? ''}`.trim();
+    const zoomUserId = `${participant.zoom_user_id ?? ''}`.trim();
+    const role = `${participant.role ?? ''}`.trim().toUpperCase();
+    const key =
+      [displayName, email, role].filter((value) => value !== '').join('|') ||
+      zoomParticipantId ||
+      zoomUserId;
+
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    unique.push(participant);
+  }
+
+  return unique;
 }
 
 function recordString(row: Record<string, unknown>, key: string) {

@@ -16,6 +16,19 @@ type ZoomTokenResponse = {
 
 type ZoomUsersResponse = {
     users?: unknown[];
+    next_page_token?: string;
+};
+
+export type ZoomAccountUserLicenseStatus = 'LICENSED' | 'BASIC' | 'ON_PREM' | 'UNKNOWN';
+
+export type ZoomAccountUserSummary = {
+    id: string;
+    name: string | null;
+    email: string | null;
+    type_code: number | null;
+    license_status: ZoomAccountUserLicenseStatus;
+    is_licensed: boolean;
+    status: string | null;
 };
 
 type ZoomMeetingsResponse = {
@@ -168,6 +181,36 @@ export class ZoomAccountService {
                 reason: this.toErrorMessage(error),
             };
         }
+    }
+
+    async listAccountUsers() {
+        const config = await this.requireConfiguredConfig();
+        const pageSize = Math.max(1, Math.min(300, config.pageSize || 20));
+        const users: ZoomAccountUserSummary[] = [];
+        let nextPageToken = '';
+
+        do {
+            const query = new URLSearchParams({
+                page_size: String(pageSize),
+                status: 'active',
+            });
+            if (nextPageToken) {
+                query.set('next_page_token', nextPageToken);
+            }
+
+            const response = await this.fetchZoomJson<ZoomUsersResponse>(`/users?${query.toString()}`);
+            const rows = Array.isArray(response.users) ? response.users : [];
+            for (const row of rows) {
+                const user = this.mapAccountUser(row);
+                if (user) {
+                    users.push(user);
+                }
+            }
+            nextPageToken =
+                typeof response.next_page_token === 'string' ? response.next_page_token : '';
+        } while (nextPageToken);
+
+        return users;
     }
 
     async requireConfiguredConfig() {
@@ -402,6 +445,35 @@ export class ZoomAccountService {
         };
     }
 
+    private mapAccountUser(value: unknown): ZoomAccountUserSummary | null {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+
+        const record = value as Record<string, unknown>;
+        const id = record.id !== undefined && record.id !== null ? String(record.id).trim() : '';
+        if (!id) {
+            return null;
+        }
+
+        const firstName = typeof record.first_name === 'string' ? record.first_name.trim() : '';
+        const lastName = typeof record.last_name === 'string' ? record.last_name.trim() : '';
+        const displayName = typeof record.display_name === 'string' ? record.display_name.trim() : '';
+        const name = displayName || [firstName, lastName].filter(Boolean).join(' ') || null;
+        const typeCode = Number.isFinite(Number(record.type)) ? Number(record.type) : null;
+        const licenseStatus = mapZoomLicenseStatus(typeCode);
+
+        return {
+            id,
+            name,
+            email: typeof record.email === 'string' ? record.email.trim() || null : null,
+            type_code: typeCode,
+            license_status: licenseStatus,
+            is_licensed: licenseStatus === 'LICENSED' || licenseStatus === 'ON_PREM',
+            status: typeof record.status === 'string' ? record.status : null,
+        };
+    }
+
     private mapPastMeetingInstance(value: unknown): ZoomPastMeetingInstanceSummary | null {
         if (!value || typeof value !== 'object') {
             return null;
@@ -532,5 +604,18 @@ export class ZoomAccountService {
             return error;
         }
         return 'Error no identificado';
+    }
+}
+
+function mapZoomLicenseStatus(typeCode: number | null): ZoomAccountUserLicenseStatus {
+    switch (typeCode) {
+        case 2:
+            return 'LICENSED';
+        case 3:
+            return 'ON_PREM';
+        case 1:
+            return 'BASIC';
+        default:
+            return 'UNKNOWN';
     }
 }

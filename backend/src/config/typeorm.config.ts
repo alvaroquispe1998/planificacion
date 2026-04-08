@@ -85,6 +85,7 @@ import {
   VcCourseEntity,
   VcSectionEntity,
   VideoconferenceZoomPoolUserEntity,
+  PlanningSubsectionScheduleVcInheritanceEntity,
   ZoomConfigEntity,
 } from '../videoconference/videoconference.entity';
 
@@ -100,6 +101,7 @@ export const appEntities = [
   VideoconferenceGenerationBatchResultEntity,
   ZoomConfigEntity,
   VideoconferenceZoomPoolUserEntity,
+  PlanningSubsectionScheduleVcInheritanceEntity,
   PlanningSubsectionVideoconferenceEntity,
   VcPeriodEntity,
   VcFacultyEntity,

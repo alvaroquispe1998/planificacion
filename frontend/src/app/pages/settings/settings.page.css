@@ -260,6 +260,124 @@ textarea {
   flex-wrap: wrap;
 }
 
+.planning-readiness {
+  margin-bottom: 1rem;
+  border: 1px solid #d6e0ef;
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  background: linear-gradient(180deg, #fbfdff 0%, #f6fbff 100%);
+}
+
+.planning-readiness.ready {
+  border-color: #9fd7b3;
+  background: linear-gradient(180deg, #f6fff8 0%, #eefcf2 100%);
+}
+
+.planning-readiness.blocked {
+  border-color: #e9c389;
+  background: linear-gradient(180deg, #fffaf3 0%, #fff6e8 100%);
+}
+
+.planning-readiness.validating {
+  border-color: #9ec2e8;
+  background: linear-gradient(180deg, #f7fbff 0%, #eef5ff 100%);
+}
+
+.planning-readiness-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.mini-eyebrow {
+  margin: 0 0 0.18rem;
+  color: #5d7188;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+}
+
+.planning-readiness h3,
+.planning-base-panel h4 {
+  margin: 0;
+}
+
+.planning-readiness > p {
+  margin: 0.45rem 0 0;
+}
+
+.readiness-badge {
+  border: 1px solid #bfd3ea;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+}
+
+.readiness-badge.ok {
+  border-color: #78c892;
+  background: #e8f8ee;
+  color: #166534;
+}
+
+.readiness-badge.warn {
+  border-color: #e1b46d;
+  background: #fff1db;
+  color: #8a4d00;
+}
+
+.readiness-badge.pending {
+  border-color: #90b8e0;
+  background: #e8f4fd;
+  color: #1a5276;
+}
+
+.planning-base-panel {
+  margin-top: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border-top: 1px dashed #d6e0ef;
+  padding-top: 0.9rem;
+}
+
+.planning-base-copy {
+  flex: 1 1 420px;
+}
+
+.planning-base-copy p,
+.planning-base-count {
+  margin: 0.35rem 0 0;
+}
+
+.planning-base-tags {
+  margin-top: 0.7rem;
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.base-tag {
+  border: 1px solid #d6e0ef;
+  border-radius: 999px;
+  padding: 0.28rem 0.55rem;
+  background: #fff;
+  font-size: 0.78rem;
+  color: #30506f;
+}
+
+.planning-base-actions {
+  flex: 0 1 300px;
+  display: grid;
+  gap: 0.55rem;
+  justify-items: stretch;
+}
+
 button {
   cursor: pointer;
   background: #f8fbff;

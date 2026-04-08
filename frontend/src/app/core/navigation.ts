@@ -105,12 +105,32 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         icon: 'camera',
         children: [
           {
+            label: 'Configuracion Zoom',
+            path: '/videoconferences/zoom-config',
+            icon: 'key',
+            window: 'window.settings',
+            permission: 'action.settings.manage',
+            match: {
+              exact: ['/videoconferences/zoom-config'],
+            },
+          },
+          {
             label: 'Gestion',
             path: '/videoconferences',
             icon: 'spark',
             window: 'window.videoconferences',
             match: {
               exact: ['/videoconferences'],
+            },
+          },
+          {
+            label: 'Herencias Zoom',
+            path: '/videoconferences/inheritances',
+            icon: 'link',
+            window: 'window.settings',
+            permission: 'action.settings.manage',
+            match: {
+              exact: ['/videoconferences/inheritances'],
             },
           },
           {

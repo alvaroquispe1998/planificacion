@@ -458,6 +458,25 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/settings/zoom/pool`);
   }
 
+  getZoomConfig() {
+    return this.http.get<any>(`${this.baseUrl}/settings/zoom/config`);
+  }
+
+  updateZoomConfig(payload: {
+    accountId?: string;
+    clientId?: string;
+    clientSecret?: string;
+    maxConcurrent?: number;
+    pageSize?: number;
+    timezone?: string;
+  }) {
+    return this.http.put<any>(`${this.baseUrl}/settings/zoom/config`, payload);
+  }
+
+  testZoomConfig() {
+    return this.http.post<any>(`${this.baseUrl}/settings/zoom/config/test`, {});
+  }
+
   updateZoomPool(payload: {
     items: Array<{
       zoom_user_id: string;
