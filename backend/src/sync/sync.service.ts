@@ -170,24 +170,29 @@ export class SyncService {
         : [];
     const groupIds = groupRows.map((row) => row.id);
 
-    const deletedConflicts = await conflictsRepo.delete({ semester_id: semesterId });
-    const deletedGroupTeachers =
+    const [
+      deletedConflicts,
+      deletedGroupTeachers,
+      deletedMeetings,
+      deletedClassTeachers,
+      deletedGroups,
+      deletedOfferings,
+    ] = await Promise.all([
+      conflictsRepo.delete({ semester_id: semesterId }),
       groupIds.length > 0
-        ? await groupTeachersRepo.delete({ class_group_id: In(groupIds) })
-        : ({ affected: 0 } as DeleteResult);
-    const deletedMeetings =
+        ? groupTeachersRepo.delete({ class_group_id: In(groupIds) })
+        : Promise.resolve({ affected: 0 } as DeleteResult),
       offeringIds.length > 0
-        ? await meetingsRepo.delete({ class_offering_id: In(offeringIds) })
-        : ({ affected: 0 } as DeleteResult);
-    const deletedClassTeachers =
+        ? meetingsRepo.delete({ class_offering_id: In(offeringIds) })
+        : Promise.resolve({ affected: 0 } as DeleteResult),
       offeringIds.length > 0
-        ? await classTeachersRepo.delete({ class_offering_id: In(offeringIds) })
-        : ({ affected: 0 } as DeleteResult);
-    const deletedGroups =
+        ? classTeachersRepo.delete({ class_offering_id: In(offeringIds) })
+        : Promise.resolve({ affected: 0 } as DeleteResult),
       offeringIds.length > 0
-        ? await groupsRepo.delete({ class_offering_id: In(offeringIds) })
-        : ({ affected: 0 } as DeleteResult);
-    const deletedOfferings = await offeringsRepo.delete({ semester_id: semesterId });
+        ? groupsRepo.delete({ class_offering_id: In(offeringIds) })
+        : Promise.resolve({ affected: 0 } as DeleteResult),
+      offeringsRepo.delete({ semester_id: semesterId }),
+    ]);
 
     return {
       applied: true,

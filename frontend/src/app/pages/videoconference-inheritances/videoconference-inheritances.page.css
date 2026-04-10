@@ -86,6 +86,27 @@
   padding: 12px 14px;
   background: #fff;
   color: #1e355d;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.field select:disabled,
+.field input:disabled,
+.field textarea:disabled,
+.search-select-trigger:disabled,
+.cascade-select:disabled {
+  background: linear-gradient(180deg, rgba(244, 247, 252, 0.98), rgba(236, 242, 249, 0.98));
+  border-color: rgba(124, 160, 213, 0.24);
+  color: #8a9ab0;
+  cursor: not-allowed;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+}
+
+.field select:disabled option,
+.cascade-select:disabled option {
+  color: #8a9ab0;
 }
 
 .search-select {
@@ -105,6 +126,10 @@
   background: #fff;
   color: #1e355d;
   text-align: left;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .search-select-trigger .placeholder {
@@ -196,6 +221,32 @@
 
 .btn-strong {
   min-width: 220px;
+}
+
+.btn-create-heritage {
+  min-width: 240px;
+  min-height: 50px;
+  padding: 0 22px;
+  border-radius: 16px;
+  border: 1px solid rgba(26, 98, 173, 0.2);
+  background: linear-gradient(135deg, #1d6fd0, #1553ac);
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: 0 16px 30px rgba(26, 92, 170, 0.22);
+}
+
+.btn-create-heritage:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 34px rgba(26, 92, 170, 0.28);
+}
+
+.btn-create-heritage:disabled {
+  border-color: rgba(124, 160, 213, 0.2);
+  background: linear-gradient(135deg, rgba(208, 220, 238, 0.9), rgba(188, 204, 227, 0.92));
+  color: #6f819d;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 .mapping-list {

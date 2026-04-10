@@ -62,18 +62,18 @@
     <p class="context-note">{{ catalogHint }}</p>
   </section>
 
-  <section class="panel" *ngIf="canLoadCatalog">
+  <section class="panel">
     <div class="panel-head">
       <div>
         <span class="eyebrow">Nueva herencia</span>
-        <h2>{{ form.id ? 'Editar mapeo' : 'Crear mapeo' }}</h2>
+        <h2>{{ form.id ? 'Editar herencia' : 'Crear herencia' }}</h2>
       </div>
       <button
         *ngIf="form.id"
         type="button"
         class="btn btn-secondary"
         (click)="startNewMapping()">
-        Nuevo mapeo
+        Nueva herencia
       </button>
     </div>
 
@@ -122,10 +122,11 @@
         <label class="field">
           <span>Seccion</span>
           <select
+            class="cascade-select"
             [(ngModel)]="form.parentSectionId"
             (ngModelChange)="onParentSectionChange()"
             [disabled]="!form.parentCourseId">
-            <option value="">Selecciona una seccion</option>
+            <option value="">{{ form.parentCourseId ? 'Selecciona una seccion' : 'Primero selecciona un curso' }}</option>
             <option *ngFor="let option of parentSectionOptions" [value]="option.id">{{ option.label }}</option>
           </select>
         </label>
@@ -133,10 +134,11 @@
         <label class="field">
           <span>Horario</span>
           <select
+            class="cascade-select"
             [(ngModel)]="form.parentScheduleId"
             (ngModelChange)="onParentScheduleChange()"
             [disabled]="!form.parentSectionId">
-            <option value="">Selecciona un horario</option>
+            <option value="">{{ form.parentSectionId ? 'Selecciona un horario' : 'Primero selecciona una seccion' }}</option>
             <option *ngFor="let item of parentScheduleOptions" [value]="item.schedule_id">
               {{ item.subsection_label }} | {{ item.schedule_label }}
             </option>
@@ -158,18 +160,19 @@
         <label class="field">
           <span>Seccion</span>
           <select
+            class="cascade-select"
             [(ngModel)]="form.childSectionId"
             (ngModelChange)="onChildSectionChange()"
             [disabled]="!form.childCourseId">
-            <option value="">Selecciona una seccion</option>
+            <option value="">{{ form.childCourseId ? 'Selecciona una seccion' : 'Primero selecciona un curso' }}</option>
             <option *ngFor="let option of childSectionOptions" [value]="option.id">{{ option.label }}</option>
           </select>
         </label>
 
         <label class="field">
           <span>Horario</span>
-          <select [(ngModel)]="form.childScheduleId" [disabled]="!form.childSectionId">
-            <option value="">Selecciona un horario</option>
+          <select class="cascade-select" [(ngModel)]="form.childScheduleId" [disabled]="!form.childSectionId">
+            <option value="">{{ form.childSectionId ? 'Selecciona un horario' : 'Primero selecciona una seccion' }}</option>
             <option *ngFor="let item of childScheduleOptions" [value]="item.schedule_id">
               {{ item.subsection_label }} | {{ item.schedule_label }}
             </option>
@@ -193,10 +196,10 @@
     <div class="actions-row">
       <button
         type="button"
-        class="btn btn-primary btn-strong"
+        class="btn btn-primary btn-strong btn-create-heritage"
         (click)="save()"
-        [disabled]="saving || catalogLoading || !hasSchedules">
-        {{ saving ? 'Guardando herencia...' : (form.id ? 'Guardar herencia Zoom' : 'Crear herencia Zoom') }}
+        [disabled]="saving || catalogLoading || !canLoadCatalog || !hasSchedules">
+        {{ saving ? 'Guardando herencia...' : (form.id ? 'Guardar herencia' : 'Crear herencia') }}
       </button>
     </div>
   </section>
@@ -207,7 +210,7 @@
         <span class="eyebrow">Matriz actual</span>
         <h2>Herencias configuradas</h2>
       </div>
-      <span class="pill">{{ mappings.length }} mapeos</span>
+      <span class="pill">{{ mappings.length }} herencias</span>
     </div>
 
     <div class="mapping-list" *ngIf="mappings.length; else emptyState">
@@ -246,7 +249,7 @@
     <ng-template #emptyState>
       <div class="empty-block">
         <h3>No hay herencias registradas.</h3>
-        <p>Cuando guardes el primer mapeo, aparecera aqui para poder editarlo o desactivarlo.</p>
+        <p>Cuando guardes la primera herencia, aparecera aqui para poder editarla o desactivarla.</p>
       </div>
     </ng-template>
   </section>
