@@ -1,0 +1,268 @@
+2838:        workflow_status: 'DRAFT',
+2839:        submitted_at: null,
+2840:        submitted_by_user_id: null,
+2841:        submitted_by: null,
+2842:        reviewed_at: null,
+2843:        reviewed_by_user_id: null,
+2844:        reviewed_by: null,
+2845:        review_comment: null,
+2846:        created_at: now,
+2847:        updated_at: now,
+2848:      });
+2849:      await manager.save(PlanningCyclePlanRuleEntity, planRule);
+2850:      await this.logChange(
+2851:        'planning_cycle_plan_rule',
+2852:        planRule.id,
+2853:        'CREATE',
+2854:        null,
+2855:        planRule,
+2856:        this.buildPlanRuleLogContext(planRule),
+2857:        actor,
+2858:      );
+2859:      result.plan_rules += 1;
+2860:
+2861:      for (const offerRows of rowsByOffer.values()) {
+2862:        const representative = offerRows.map((row) => asRecord(row.resolution_json)).find(Boolean);
+2863:        if (!representative) {
+2864:          continue;
+2865:        }
+2866:        const offerKey = `${recordString(representative, 'study_plan_course_id')}::${recordString(
+2867:          representative,
+2868:          'offer_course_code',
+2869:        )}`;
+2870:        const offerResolutions = offerRows.map((row) => asRecord(row.resolution_json));
+2871:        const sourceSystem =
+2872:          (firstNonEmpty(
+2873:            offerResolutions.map((row) => recordString(row, 'source_system')),
+2874:          ) as PlanningSourceSystem | null) ?? 'EXCEL';
+2875:        const firstOfferSource = asRecord(offerRows[0]?.source_json);
+2876:        const offer = manager.create(PlanningOfferEntity, {
+2877:          id: newId(),
+2878:          semester_id: scope.semester_id,
+2879:          vc_period_id: scope.vc_period_id,
+2880:          campus_id: scope.campus_id,
+2881:          faculty_id: scope.faculty_id,
+2882:          academic_program_id: scope.academic_program_id,
+2883:          study_plan_id: scope.study_plan_id,
+2884:          cycle: scope.cycle,
+2885:          study_plan_course_id: recordString(representative, 'study_plan_course_id')!,
+2886:          vc_faculty_id: effectiveVcFacultyId,
+2887:          vc_academic_program_id: effectiveVcAcademicProgramId,
+2888:          vc_course_id: vcCourseIdByOfferKey.get(offerKey) ?? null,
+2889:          course_code: recordString(representative, 'offer_course_code'),
+2890:          course_name: recordString(representative, 'offer_course_name'),
+2891:          study_type_id: catalog.defaultStudyTypeId,
+2892:          course_type: recordString(representative, 'offer_course_type') ?? 'TEORICO_PRACTICO',
+2893:          source_system: sourceSystem,
+2894:          source_course_id: firstNonEmpty(
+2895:            offerResolutions.map((row) => recordString(row, 'source_course_id')),
+2896:          ),
+2897:          source_term_id: firstNonEmpty(
+2898:            offerResolutions.map((row) => recordString(row, 'source_term_id')),
+2899:          ),
+2900:          last_synced_at: sourceSystem === 'AKADEMIC' ? now : null,
+2901:          source_payload_json:
+2902:            asRecord(recordValue(firstOfferSource, 'course')) ??
+2903:            firstOfferSource ??
+2904:            null,
+2905:          theoretical_hours:
+2906:            maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_theoretical_hours'))) ?? 0,
+2907:          practical_hours:
+2908:            maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_practical_hours'))) ?? 0,
+2909:          total_hours:
+2910:            maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_total_hours'))) ?? 0,
+2911:          status: 'DRAFT',
+2912:          created_at: now,
+2913:          updated_at: now,
+2914:        });
+2915:        await manager.save(PlanningOfferEntity, offer);
+2916:        await this.logChange(
+2917:          'planning_offer',
+2918:          offer.id,
+2919:          'CREATE',
+2920:          null,
+2921:          offer,
+2922:          this.buildOfferLogContext(offer),
+2923:          actor,
+2924:        );
+2925:        result.offers += 1;
+2926:
+2927:        const rowsBySection = groupBy(offerRows, (row) => {
+2928:          const resolution = asRecord(row.resolution_json);
+2929:          return recordString(resolution, 'import_section_code') ?? '__NO_SECTION__';
+2930:        });
+2931:
+2932:        for (const [sectionCode, sectionRows] of rowsBySection.entries()) {
+2933:          if (sectionCode === '__NO_SECTION__') {
+2934:            continue;
+2935:          }
+2936:          const sectionResolutions = sectionRows.map((row) => asRecord(row.resolution_json));
+2937:          const section = manager.create(PlanningSectionEntity, {
+2938:            id: newId(),
+2939:            planning_offer_id: offer.id,
+2940:            code: sectionCode,
+2941:            external_code: firstNonEmpty(
+2942:              sectionResolutions.map((row) => recordString(row, 'external_section_code')),
+2943:            ),
+2944:            source_section_id: firstNonEmpty(
+2945:              sectionResolutions.map((row) => recordString(row, 'source_section_id')),
+2946:            ),
+2947:            source_payload_json:
+2948:              asRecord(recordValue(asRecord(sectionRows[0]?.source_json), 'section')) ??
+2949:              asRecord(sectionRows[0]?.source_json) ??
+2950:              null,
+2951:            teacher_id: firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'teacher_id'))),
+2952:            course_modality_id: firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'course_modality_id'))),
+2953:            projected_vacancies: maxNumber(sectionResolutions.map((row) => recordNumberOrNull(row, 'projected_vacancies'))),
+2954:            is_cepea: sectionResolutions.some((row) => Boolean(recordBoolean(row, 'is_cepea'))),
+2955:            has_subsections:
+2956:              new Set(
+2957:                sectionResolutions
+2958:                  .map((row) => recordString(row, 'import_subsection_code'))
+2959:                  .filter(Boolean),
+2960:              ).size > 1,
+2961:            default_theoretical_hours: offer.theoretical_hours,
+2962:            default_practical_hours: offer.practical_hours,
+2963:            default_virtual_hours: 0,
+2964:            default_seminar_hours: 0,
+2965:            default_total_hours: offer.total_hours,
+2966:            status: 'DRAFT',
+2967:            created_at: now,
+2968:            updated_at: now,
+2969:          });
+2970:          await manager.save(PlanningSectionEntity, section);
+2971:          await this.logChange(
+2972:            'planning_section',
+2973:            section.id,
+2974:            'CREATE',
+2975:            null,
+2976:            section,
+2977:            this.buildSectionLogContext(section, offer),
+2978:            actor,
+2979:          );
+2980:          result.sections += 1;
+2981:          const rowsBySubsection = groupBy(sectionRows, (row) => {
+2982:            const resolution = asRecord(row.resolution_json);
+2983:            return recordString(resolution, 'import_subsection_code') ?? '__NO_SUBSECTION__';
+2984:          });
+2985:
+2986:          for (const [subsectionCode, subsectionRows] of rowsBySubsection.entries()) {
+2987:            if (subsectionCode === '__NO_SUBSECTION__') {
+2988:              continue;
+2989:            }
+2990:            const subsectionResolutions = subsectionRows.map((row) => asRecord(row.resolution_json));
+2991:            const assignedTheoretical = maxNumber(
+2992:              subsectionResolutions.map((row) => recordNumberOrNull(row, 'assigned_theoretical_hours')),
+2993:            ) ?? 0;
+2994:            const assignedPractical = maxNumber(
+2995:              subsectionResolutions.map((row) => recordNumberOrNull(row, 'assigned_practical_hours')),
+2996:            ) ?? 0;
+2997:            const assignedTotal = maxNumber(
+2998:              subsectionResolutions.map((row) => recordNumberOrNull(row, 'assigned_total_hours')),
+2999:            ) ?? assignedTheoretical + assignedPractical;
+3000:            const schedulePayloads = subsectionResolutions
+3001:              .map((row) => asRecord(recordValue(row, 'schedule')))
+3002:              .filter((item) => Object.keys(item).length > 0);
+3003:            const uniqueScheduleTeacherIds = uniqueIds(
+3004:              schedulePayloads.map((row) => recordString(row, 'teacher_id')),
+3005:            );
+3006:            const uniqueScheduleBuildingIds = uniqueIds(
+3007:              schedulePayloads.map((row) => recordString(row, 'building_id')),
+3008:            );
+3009:            const uniqueScheduleClassroomIds = uniqueIds(
+3010:              schedulePayloads.map((row) => recordString(row, 'classroom_id')),
+3011:            );
+3012:            const subsectionKind = (
+3013:              firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'subsection_kind'))) ??
+3014:              deriveSubsectionKind(assignedTheoretical, assignedPractical)
+3015:            ) as PlanningSubsectionKind;
+3016:            const subsection = manager.create(PlanningSubsectionEntity, {
+3017:              id: newId(),
+3018:              planning_section_id: section.id,
+3019:              code: subsectionCode,
+3020:              kind: subsectionKind,
+3021:              responsible_teacher_id:
+3022:                uniqueScheduleTeacherIds.length === 1
+3023:                  ? uniqueScheduleTeacherIds[0]
+3024:                  : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'teacher_id'))),
+3025:              course_modality_id: firstNonEmpty(
+3026:                subsectionResolutions.map((row) => recordString(row, 'course_modality_id')),
+3027:              ),
+3028:              building_id:
+3029:                uniqueScheduleBuildingIds.length === 1
+3030:                  ? uniqueScheduleBuildingIds[0]
+3031:                  : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'building_id'))),
+3032:              classroom_id:
+3033:                uniqueScheduleClassroomIds.length === 1
+3034:                  ? uniqueScheduleClassroomIds[0]
+3035:                  : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'classroom_id'))),
+3036:              capacity_snapshot: maxNumber(
+3037:                subsectionResolutions.map((row) => recordNumberOrNull(row, 'capacity_snapshot')),
+3038:              ),
+3039:              shift: firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'shift'))),
+3040:              projected_vacancies: maxNumber(
+3041:                subsectionResolutions.map((row) => recordNumberOrNull(row, 'projected_vacancies')),
+3042:              ),
+3043:              course_type: offer.course_type,
+3044:              assigned_theoretical_hours: assignedTheoretical,
+3045:              assigned_practical_hours: assignedPractical,
+3046:              assigned_virtual_hours: 0,
+3047:              assigned_seminar_hours: 0,
+3048:              assigned_total_hours: assignedTotal,
+3049:              denomination:
+3050:                firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'denomination'))) ??
+3051:                buildDenomination(offer.course_code, offer.course_name, section.code, subsectionCode, offer.campus_id),
+3052:              vc_section_id:
+3053:                firstNonEmpty(
+3054:                  subsectionResolutions.map((row) => recordString(row, 'source_vc_section_id')),
+3055:                ) ?? null,
+3056:              status: 'DRAFT',
+3057:              created_at: now,
+3058:              updated_at: now,
+3059:            });
+3060:            await manager.save(PlanningSubsectionEntity, subsection);
+3061:            await this.logChange(
+3062:              'planning_subsection',
+3063:              subsection.id,
+3064:              'CREATE',
+3065:              null,
+3066:              subsection,
+3067:              this.buildSubsectionLogContext(subsection, section, offer),
+3068:              actor,
+3069:            );
+3070:            result.subsections += 1;
+3071:
+3072:            const uniqueSchedules = dedupeImportedSchedules(schedulePayloads);
+3073:            for (const selectedSchedule of uniqueSchedules) {
+3074:              const schedule = manager.create(PlanningSubsectionScheduleEntity, {
+3075:                id: newId(),
+3076:                planning_subsection_id: subsection.id,
+3077:                day_of_week: recordString(selectedSchedule, 'day_of_week') as (typeof DayOfWeekValues)[number],
+3078:                start_time: recordString(selectedSchedule, 'start_time')!,
+3079:                end_time: recordString(selectedSchedule, 'end_time')!,
+3080:                session_type:
+3081:                  (recordString(selectedSchedule, 'session_type') as PlanningSessionType | null) ?? 'OTHER',
+3082:                source_session_type_code: recordString(selectedSchedule, 'source_session_type_code'),
+3083:                teacher_id: recordString(selectedSchedule, 'teacher_id'),
+3084:                building_id: recordString(selectedSchedule, 'building_id'),
+3085:                classroom_id: recordString(selectedSchedule, 'classroom_id'),
+3086:                source_schedule_id: recordString(selectedSchedule, 'source_schedule_id'),
+3087:                source_payload_json:
+3088:                  asRecord(recordValue(selectedSchedule, 'source_payload_json')) ??
+3089:                  null,
+3090:                duration_minutes: recordNumber(selectedSchedule, 'duration_minutes'),
+3091:                academic_hours: recordNumber(selectedSchedule, 'academic_hours'),
+3092:                created_at: now,
+3093:                updated_at: now,
+3094:              });
+3095:              await manager.save(PlanningSubsectionScheduleEntity, schedule);
+3096:              await this.logChange(
+3097:                'planning_subsection_schedule',
+3098:                schedule.id,
+3099:                'CREATE',
+3100:                null,
+3101:                schedule,
+3102:                this.buildScheduleLogContext(schedule, subsection, section, offer),
+3103:                actor,
+3104:              );
+3105:              result.schedules += 1;

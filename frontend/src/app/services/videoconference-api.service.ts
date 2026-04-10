@@ -175,6 +175,7 @@ export interface VideoconferenceInheritanceCatalogSchedule {
     schedule_id: string;
     subsection_id: string;
     section_id: string;
+    section_code: string;
     course_id: string;
     course_code: string | null;
     course_name: string | null;

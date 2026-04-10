@@ -652,35 +652,53 @@ export class SettingsSyncService {
     dto: RunSettingsSyncDto,
   ) {
     const sourceProbeCache = new Map<SourceCode, SourceProbeResult>();
+    const jobsBySource = new Map<SourceCode, typeof jobs>();
 
-    for (const { job, resource, sourceCode } of jobs) {
-      try {
-        const sourceResult = sourceProbeCache.has(sourceCode)
-          ? (sourceProbeCache.get(sourceCode) as SourceProbeResult)
-          : await this.probeSourceSession(sourceCode);
-        sourceProbeCache.set(sourceCode, sourceResult);
-
-        if (!sourceResult.ok || !sourceResult.cookie) {
-          await this.failJob(job, sourceResult.reason ?? 'Sesion no valida.');
-          continue;
-        }
-
-        await this.updateJobStatus(job, 'RUNNING');
-        await this.log(job.id, 'INFO', `Iniciando sync de ${resource}`, {
-          source: sourceCode,
-          mode: dto.mode ?? 'FULL',
-        });
-
-        const rows = await this.fetchResourceRows(resource, sourceResult.source, sourceResult.cookie, dto);
-        const persisted = await this.persistResourceRows(resource, rows);
-        await this.log(job.id, 'INFO', `Sync de ${resource} completado`, persisted);
-        await this.completeJob(job);
-      } catch (error) {
-        const message = this.toErrorMessage(error);
-        await this.failJob(job, message);
-        await this.log(job.id, 'ERROR', `Error en sync de ${resource}`, { error: message });
-      }
+    for (const jobItem of jobs) {
+      const bucket = jobsBySource.get(jobItem.sourceCode) ?? [];
+      bucket.push(jobItem);
+      jobsBySource.set(jobItem.sourceCode, bucket);
     }
+
+    const sourceCodes = [...jobsBySource.keys()];
+
+    // Process sources in parallel
+    await Promise.all(
+      sourceCodes.map(async (sourceCode) => {
+        const sourceJobs = jobsBySource.get(sourceCode) || [];
+
+        // Within each source, run jobs with controlled concurrency
+        await runWithConcurrency(sourceJobs, 2, async ({ job, resource }) => {
+          try {
+            const sourceResult = sourceProbeCache.get(sourceCode) ?? (await this.probeSourceSession(sourceCode));
+
+            if (sourceResult.ok) {
+              sourceProbeCache.set(sourceCode, sourceResult);
+            }
+
+            if (!sourceResult.ok || !sourceResult.cookie) {
+              await this.failJob(job, sourceResult.reason ?? 'Sesion no valida.');
+              return;
+            }
+
+            await this.updateJobStatus(job, 'RUNNING');
+            await this.log(job.id, 'INFO', `Iniciando sync de ${resource}`, {
+              source: sourceCode,
+              mode: dto.mode ?? 'FULL',
+            });
+
+            const rows = await this.fetchResourceRows(resource, sourceResult.source, sourceResult.cookie, dto);
+            const persisted = await this.persistResourceRows(resource, rows);
+            await this.log(job.id, 'INFO', `Sync de ${resource} completado`, persisted);
+            await this.completeJob(job);
+          } catch (error) {
+            const message = this.toErrorMessage(error);
+            await this.failJob(job, message);
+            await this.log(job.id, 'ERROR', `Error en sync de ${resource}`, { error: message });
+          }
+        });
+      }),
+    );
   }
 
   async listJobs(limit = 20) {
@@ -734,17 +752,14 @@ export class SettingsSyncService {
     }
     if (resource === 'courses') {
       const programIds = await this.resolveProgramIds();
-      const rows: Record<string, unknown>[] = [];
-      for (const careerId of programIds) {
+      const results = await runWithConcurrency(programIds, 4, async (careerId) => {
         const partial = await this.fetchRows(source, cookie, '/cursos/get', { careerId, length: '500' });
-        rows.push(
-          ...partial.map((item) => ({
-            ...(item as Record<string, unknown>),
-            career_id: careerId,
-          })),
-        );
-      }
-      return rows;
+        return partial.map((item) => ({
+          ...(item as Record<string, unknown>),
+          career_id: careerId,
+        }));
+      });
+      return results.flat();
     }
     if (resource === 'classroom_types') {
       return this.fetchRows(source, cookie, '/admin/aulas/categorias/get', { length: '500' });
@@ -767,8 +782,7 @@ export class SettingsSyncService {
     if (resource === 'classroom_section_schedules') {
       const classroomIds = await this.resolveClassroomIds(dto.classroom_ids);
       const scheduleWindow = await this.resolveScheduleWindow(dto);
-      const rows: Record<string, unknown>[] = [];
-      for (const classroomId of classroomIds) {
+      const results = await runWithConcurrency(classroomIds, 6, async (classroomId) => {
         const partial = await this.fetchRows(
           source,
           cookie,
@@ -779,64 +793,53 @@ export class SettingsSyncService {
             _: `${Date.now()}`,
           },
         );
-        rows.push(
-          ...partial.map((item) => ({
-            ...(item as Record<string, unknown>),
-            __classroom_id: classroomId,
-          })),
-        );
-      }
-      return rows;
+        return partial.map((item) => ({
+          ...(item as Record<string, unknown>),
+          __classroom_id: classroomId,
+        }));
+      });
+      return results.flat();
     }
     if (resource === 'buildings') {
       const campusIds = await this.resolveCampusIds(dto.campus_ids);
-      const rows: Record<string, unknown>[] = [];
-      for (const campusId of campusIds) {
+      const results = await runWithConcurrency(campusIds, 4, async (campusId) => {
         const partial = await this.fetchRows(source, cookie, '/admin/campus/pabellones/get', {
           length: '500',
           campus: campusId,
         });
-        rows.push(
-          ...partial.map((item) => ({
-            ...(item as Record<string, unknown>),
-            __campus_id: campusId,
-          })),
-        );
-      }
-      return rows;
+        return partial.map((item) => ({
+          ...(item as Record<string, unknown>),
+          __campus_id: campusId,
+        }));
+      });
+      return results.flat();
     }
     if (resource === 'academic_program_campuses') {
       const campusIds = await this.resolveCampusIds(dto.campus_ids);
-      const rows: Record<string, unknown>[] = [];
-      for (const campusId of campusIds) {
+      const results = await runWithConcurrency(campusIds, 4, async (campusId) => {
         const partial = await this.fetchRows(source, cookie, '/admin/campus/carreras/get', {
           length: '500',
           campus: campusId,
         });
-        rows.push(
-          ...partial.map((item) => ({
-            ...(item as Record<string, unknown>),
-            __campus_id: campusId,
-          })),
-        );
-      }
-      return rows;
+        return partial.map((item) => ({
+          ...(item as Record<string, unknown>),
+          __campus_id: campusId,
+        }));
+      });
+      return results.flat();
     }
     if (resource === 'course_sections') {
       const courseIds = await this.resolveCourseIds(dto.course_ids);
-      const rows: Record<string, unknown>[] = [];
-      for (const courseId of courseIds) {
+      const results = await runWithConcurrency(courseIds, 6, async (courseId) => {
         const partial = await this.fetchRows(source, cookie, '/secciones/get', {
           courseId,
         });
-        rows.push(
-          ...partial.map((item) => ({
-            ...(item as Record<string, unknown>),
-            __course_id: courseId,
-          })),
-        );
-      }
-      return rows;
+        return partial.map((item) => ({
+          ...(item as Record<string, unknown>),
+          __course_id: courseId,
+        }));
+      });
+      return results.flat();
     }
 
     // --- NUEVOS RECURSOS VC ---
@@ -851,53 +854,39 @@ export class SettingsSyncService {
     }
 
     if (resource === 'vc_academic_programs') {
-      // https://aulavirtual2.autonomadeica.edu.pe/carreras/get?facultyId=...
-      // Iteramos sobre TODAS las facultades que tengamos, o resolvemos IDs
       const facultyIds = await this.resolveVcFacultyIds();
-      const rows: Record<string, unknown>[] = [];
-      for (const facultyId of facultyIds) {
+      const results = await runWithConcurrency(facultyIds, 4, async (facultyId) => {
         const partial = await this.fetchRows(source, cookie, '/carreras/get', { facultyId });
-        rows.push(
-          ...partial.map((item) => ({
-            ...(item as Record<string, unknown>),
-            __faculty_id: facultyId,
-          })),
-        );
-      }
-      return rows;
+        return partial.map((item) => ({
+          ...(item as Record<string, unknown>),
+          __faculty_id: facultyId,
+        }));
+      });
+      return results.flat();
     }
 
     if (resource === 'vc_courses') {
-      // https://aulavirtual2.autonomadeica.edu.pe/cursos/get?careerId=...
       const programIds = await this.resolveVcProgramIds();
-      const rows: Record<string, unknown>[] = [];
-      for (const careerId of programIds) {
+      const results = await runWithConcurrency(programIds, 6, async (careerId) => {
         const partial = await this.fetchRows(source, cookie, '/cursos/get', { careerId, length: '1000' });
-        rows.push(
-          ...partial.map((item) => ({
-            ...(item as Record<string, unknown>),
-            __program_id: careerId,
-          })),
-        );
-      }
-      return rows;
+        return partial.map((item) => ({
+          ...(item as Record<string, unknown>),
+          __program_id: careerId,
+        }));
+      });
+      return results.flat();
     }
 
     if (resource === 'vc_sections') {
-      // https://aulavirtual2.autonomadeica.edu.pe/secciones/get?courseId=...
       const courseIds = await this.resolveVcCourseIds();
-      const rows: Record<string, unknown>[] = [];
-      // Lógica por lotes o 1 a 1. Si son muchos cursos, demora.
-      for (const courseId of courseIds) {
+      const results = await runWithConcurrency(courseIds, 8, async (courseId) => {
         const partial = await this.fetchRows(source, cookie, '/secciones/get', { courseId });
-        rows.push(
-          ...partial.map((item) => ({
-            ...(item as Record<string, unknown>),
-            __course_id: courseId,
-          })),
-        );
-      }
-      return rows;
+        return partial.map((item) => ({
+          ...(item as Record<string, unknown>),
+          __course_id: courseId,
+        }));
+      });
+      return results.flat();
     }
 
     return [];
@@ -1200,7 +1189,7 @@ export class SettingsSyncService {
       });
     }
 
-    const planCourses = await runWithConcurrency(validPlans, 4, async ({ study_plan_id, plan }) => {
+    const planCourses = await runWithConcurrency(validPlans, 8, async ({ study_plan_id, plan }) => {
       const courses = await this.fetchRows(
         source,
         cookie,

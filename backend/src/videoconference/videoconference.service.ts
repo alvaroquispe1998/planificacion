@@ -454,6 +454,7 @@ export class VideoconferenceService {
                     schedule_id: row.schedule_id,
                     subsection_id: row.subsection_id,
                     section_id: row.section_id,
+                    section_code: row.section_code,
                     course_id: row.course_id,
                     course_code: row.course_code,
                     course_name: row.course_name,

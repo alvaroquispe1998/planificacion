@@ -3,10 +3,12 @@ import { ChangeDetectorRef, Component, ElementRef, HostListener, OnInit } from '
 import { FormsModule } from '@angular/forms';
 import {
   FilterCatalogOption,
+  FilterOptionsDto,
   VideoconferenceApiService,
   VideoconferenceInheritanceCatalogSchedule,
   VideoconferenceInheritanceItem,
 } from '../../services/videoconference-api.service';
+import { forkJoin } from 'rxjs';
 
 @Component({
   selector: 'app-videoconference-inheritances-page',
@@ -187,22 +189,21 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   refreshFilters(initialLoad = false) {
     const requestId = ++this.filterRequestId;
     this.filtersLoading = true;
-    this.api
-      .getFilterOptions({
-        semesterId: this.filters.semesterId || undefined,
-        campusIds: this.filters.campusId ? [this.filters.campusId] : undefined,
-        facultyIds: this.filters.facultyId ? [this.filters.facultyId] : undefined,
-        programIds: this.filters.programId ? [this.filters.programId] : undefined,
-      })
+    forkJoin({
+      periods: this.api.getFilterOptions({}),
+      campuses: this.api.getFilterOptions(this.buildCampusFilterRequest()),
+      faculties: this.api.getFilterOptions(this.buildFacultyFilterRequest()),
+      programs: this.api.getFilterOptions(this.buildProgramFilterRequest()),
+    })
       .subscribe({
       next: (result) => {
         if (requestId !== this.filterRequestId) {
           return;
         }
-        this.periodOptions = result.periods ?? [];
-        this.campusOptions = result.campuses ?? [];
-        this.facultyOptions = result.faculties ?? [];
-        this.programOptions = result.programs ?? [];
+        this.periodOptions = result.periods?.periods ?? [];
+        this.campusOptions = result.campuses?.campuses ?? [];
+        this.facultyOptions = result.faculties?.faculties ?? [];
+        this.programOptions = result.programs?.programs ?? [];
         this.retainContextSelections();
         this.filtersLoading = false;
         this.loading = false;
@@ -274,6 +275,27 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
           this.cdr.detectChanges();
         },
       });
+  }
+
+  private buildCampusFilterRequest(): FilterOptionsDto {
+    return {
+      semesterId: this.filters.semesterId || undefined,
+    };
+  }
+
+  private buildFacultyFilterRequest(): FilterOptionsDto {
+    return {
+      semesterId: this.filters.semesterId || undefined,
+      campusIds: this.filters.campusId ? [this.filters.campusId] : undefined,
+    };
+  }
+
+  private buildProgramFilterRequest(): FilterOptionsDto {
+    return {
+      semesterId: this.filters.semesterId || undefined,
+      campusIds: this.filters.campusId ? [this.filters.campusId] : undefined,
+      facultyIds: this.filters.facultyId ? [this.filters.facultyId] : undefined,
+    };
   }
 
   onParentCourseChange() {
@@ -483,12 +505,22 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     for (const item of items) {
       map.set(
         item.section_id,
-        `${item.section_label} | Vacantes: ${item.section_projected_vacancies ?? 0}`,
+        `${this.formatSectionOnlyLabel(item)} | Vacantes: ${item.section_projected_vacancies ?? 0}`,
       );
     }
     return Array.from(map.entries())
       .map(([id, label]) => ({ id, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  private formatSectionOnlyLabel(item: Pick<VideoconferenceInheritanceCatalogSchedule, 'section_code' | 'section_label'>) {
+    const sectionCode = String(item.section_code ?? '').trim();
+    if (sectionCode) {
+      return sectionCode;
+    }
+    const value = String(item.section_label ?? '').trim();
+    const parts = value.split('|').map((item) => item.trim()).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : value;
   }
 
   private normalizeSearch(value: string) {
