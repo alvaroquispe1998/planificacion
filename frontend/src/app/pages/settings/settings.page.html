@@ -162,17 +162,29 @@
       <div class="planning-reset-summary" *ngIf="planningResetPreview as preview">
         <div class="planning-reset-summary-head">
           <strong>{{ preview.mode === 'AFTER_RESET' ? 'Resultado despues del reinicio' : 'Analisis del reinicio' }}</strong>
-          <span>{{ preview.wipe_config ? 'Limpieza total de configuracion' : 'Limpieza operativa' }}</span>
+          <span>
+            {{ preview.wipe_config ? 'Limpieza total de configuracion' : 'Limpieza operativa' }}
+            ·
+            {{ preview.row_count_mode === 'exact' ? 'conteo exacto' : 'conteo estimado' }}
+          </span>
         </div>
 
         <div class="planning-reset-metrics">
           <article>
             <strong>{{ preview.runtime_tables?.total_rows ?? 0 }}</strong>
-            <span>Filas runtime afectadas</span>
+            <span>
+              {{ preview.row_count_mode === 'exact' ? 'Filas runtime afectadas' : 'Filas runtime estimadas' }}
+            </span>
           </article>
           <article *ngIf="preview.config_tables !== 'preserved'">
             <strong>{{ preview.config_tables?.total_rows ?? 0 }}</strong>
-            <span>Filas de configuracion afectadas</span>
+            <span>
+              {{
+                preview.row_count_mode === 'exact'
+                  ? 'Filas de configuracion afectadas'
+                  : 'Filas de configuracion estimadas'
+              }}
+            </span>
           </article>
         </div>
 

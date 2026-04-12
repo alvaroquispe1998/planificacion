@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, QueryRunner, Repository } from 'typeorm';
 import { newId } from '../common';
 import { ZoomUserEntity } from '../entities/audit.entities';
 import {
@@ -757,7 +757,7 @@ export class SettingsSyncService {
   }
 
   async previewPlanningWorkspaceReset(wipeConfig = false) {
-    const summary = await this.buildPlanningWorkspaceResetSummary(wipeConfig);
+    const summary = await this.buildPlanningWorkspaceResetSummary(wipeConfig, 'estimate');
     return {
       mode: 'DRY_RUN',
       wipe_config: wipeConfig,
@@ -771,33 +771,34 @@ export class SettingsSyncService {
       throw new BadRequestException('Token de confirmacion invalido para reiniciar el workspace.');
     }
     const wipeConfig = Boolean(input.wipeConfig);
-    const summaryBefore = await this.buildPlanningWorkspaceResetSummary(wipeConfig);
+    const summaryBefore = await this.buildPlanningWorkspaceResetSummary(wipeConfig, 'estimate');
     const tables = this.resolvePlanningWorkspaceResetTables(wipeConfig);
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     try {
-      await queryRunner.startTransaction();
       await queryRunner.query('SET FOREIGN_KEY_CHECKS = 0');
       for (const table of tables) {
         if (!(await this.tableExists(table))) {
           continue;
         }
-        await queryRunner.query(`DELETE FROM ${table}`);
+        await this.clearTableFast(queryRunner, table);
       }
-      await queryRunner.query('SET FOREIGN_KEY_CHECKS = 1');
-      await queryRunner.commitTransaction();
     } catch (error) {
       try {
         await queryRunner.query('SET FOREIGN_KEY_CHECKS = 1');
       } catch {
         // no-op
       }
-      await queryRunner.rollbackTransaction();
       throw error;
     } finally {
+      try {
+        await queryRunner.query('SET FOREIGN_KEY_CHECKS = 1');
+      } catch {
+        // no-op
+      }
       await queryRunner.release();
     }
-    const summaryAfter = await this.buildPlanningWorkspaceResetSummary(wipeConfig);
+    const summaryAfter = await this.buildPlanningWorkspaceResetSummary(wipeConfig, 'exact');
     return {
       mode: 'APPLY',
       wipe_config: wipeConfig,
@@ -813,53 +814,95 @@ export class SettingsSyncService {
       : [...RESET_PLANNING_RUNTIME_TABLES];
   }
 
-  private async buildPlanningWorkspaceResetSummary(wipeConfig: boolean) {
+  private async buildPlanningWorkspaceResetSummary(
+    wipeConfig: boolean,
+    rowCountMode: 'estimate' | 'exact',
+  ) {
     const tables = this.resolvePlanningWorkspaceResetTables(wipeConfig);
-    const runtime = await this.collectPlanningWorkspaceTableCounts(RESET_PLANNING_RUNTIME_TABLES);
+    const runtime = await this.collectPlanningWorkspaceTableCounts(
+      RESET_PLANNING_RUNTIME_TABLES,
+      rowCountMode,
+    );
     const config = wipeConfig
-      ? await this.collectPlanningWorkspaceTableCounts(RESET_PLANNING_CONFIG_TABLES)
+      ? await this.collectPlanningWorkspaceTableCounts(
+          RESET_PLANNING_CONFIG_TABLES,
+          rowCountMode,
+        )
       : 'preserved';
     return {
       tables_considered: tables.length,
+      row_count_mode: rowCountMode,
       runtime_tables: runtime,
       config_tables: config,
     };
   }
 
-  private async collectPlanningWorkspaceTableCounts(tables: readonly string[]) {
-    const rows = await Promise.all(
-      tables.map(async (table) => ({
-        table,
-        exists: await this.tableExists(table),
-      })),
-    );
+  private async collectPlanningWorkspaceTableCounts(
+    tables: readonly string[],
+    rowCountMode: 'estimate' | 'exact',
+  ) {
+    const metadata = await this.getTableMetadata(tables);
     const detailed = await Promise.all(
-      rows.map(async (item) => ({
-        table: item.table,
-        exists: item.exists,
-        rows: item.exists ? await this.countRows(item.table) : -1,
-      })),
+      tables.map(async (table) => {
+        const meta = metadata.get(table) ?? null;
+        const exists = Boolean(meta);
+        const rows = !exists
+          ? -1
+          : rowCountMode === 'exact'
+            ? await this.countRows(table)
+            : Number(meta?.approximateRows ?? 0);
+        return {
+          table,
+          exists,
+          rows,
+        };
+      }),
     );
     return {
       total_rows: detailed.reduce((sum, item) => sum + Math.max(item.rows, 0), 0),
+      row_count_mode: rowCountMode,
       tables: detailed,
     };
   }
 
-  private async tableExists(tableName: string) {
+  private async getTableMetadata(tableNames: readonly string[]) {
+    if (tableNames.length === 0) {
+      return new Map<string, { approximateRows: number }>();
+    }
+    const placeholders = tableNames.map(() => '?').join(', ');
     const rows = await this.dataSource.query(
-      `SELECT COUNT(*) AS qty
+      `SELECT table_name AS table_name, table_rows AS table_rows
        FROM information_schema.tables
        WHERE table_schema = DATABASE()
-         AND table_name = ?`,
-      [tableName],
+         AND table_name IN (${placeholders})`,
+      [...tableNames],
     );
-    return Number(rows?.[0]?.qty ?? 0) > 0;
+    return new Map<string, { approximateRows: number }>(
+      (rows as Array<Record<string, unknown>>).map((row) => [
+        String(row.table_name ?? row.TABLE_NAME ?? ''),
+        {
+          approximateRows: Number(row.table_rows ?? row.TABLE_ROWS ?? 0),
+        },
+      ]),
+    );
+  }
+
+  private async tableExists(tableName: string) {
+    const metadata = await this.getTableMetadata([tableName]);
+    return metadata.has(tableName);
   }
 
   private async countRows(tableName: string) {
     const rows = await this.dataSource.query(`SELECT COUNT(*) AS qty FROM ${tableName}`);
     return Number(rows?.[0]?.qty ?? 0);
+  }
+
+  private async clearTableFast(queryRunner: QueryRunner, tableName: string) {
+    try {
+      await queryRunner.query(`TRUNCATE TABLE \`${tableName}\``);
+    } catch {
+      await queryRunner.query(`DELETE FROM \`${tableName}\``);
+    }
   }
 
   private async fetchResourceRows(

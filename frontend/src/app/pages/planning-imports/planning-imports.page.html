@@ -393,11 +393,17 @@
       </div>
     </section>
 
-    <section class="panel" *ngIf="!isAkademicSourceSelected && current.unresolved_mappings?.length">
+    <section class="panel" *ngIf="current.unresolved_mappings?.length">
       <div class="section-head">
         <div>
           <p class="eyebrow">Pendientes</p>
-          <h2>Valores del Excel que aun debes relacionar o confirmar</h2>
+          <h2>
+            {{
+              isAkademicSourceSelected
+                ? 'Valores de la sincronizacion que aun debes relacionar o confirmar'
+                : 'Valores del Excel que aun debes relacionar o confirmar'
+            }}
+          </h2>
         </div>
       </div>
 
