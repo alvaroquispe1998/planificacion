@@ -84,6 +84,14 @@ export class ApiService {
     return this.http.get<any[]>(`${this.baseUrl}/settings/sync/jobs`, { params });
   }
 
+  previewPlanningWorkspaceReset(payload: { wipe_config?: boolean } = {}) {
+    return this.http.post<any>(`${this.baseUrl}/settings/sync/planning-workspace-reset/preview`, payload);
+  }
+
+  executePlanningWorkspaceReset(payload: { wipe_config?: boolean; confirm_token: string }) {
+    return this.http.post<any>(`${this.baseUrl}/settings/sync/planning-workspace-reset/execute`, payload);
+  }
+
   // --- Planning ---
   listClassOfferings(semesterId?: string) {
     const params = semesterId ? new HttpParams().set('semester_id', semesterId) : undefined;

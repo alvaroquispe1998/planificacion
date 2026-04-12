@@ -129,6 +129,75 @@
           </button>
         </div>
       </div>
+
+      <div class="planning-reset-panel">
+        <div class="planning-reset-copy">
+          <h4>Reiniciar workspace de planificacion</h4>
+          <p>
+            Usa esta accion solo cuando quieras dejar la planificacion operativa en cero y volver a alinear el
+            ambiente desde sincronizacion. Primero analiza el impacto; luego ejecuta la limpieza.
+          </p>
+          <label class="planning-reset-check">
+            <input type="checkbox" [(ngModel)]="planningResetWipeConfig" />
+            Borrar tambien reglas, mapeos de locales VC y aliases de importacion
+          </label>
+        </div>
+
+        <div class="planning-reset-actions">
+          <button type="button" class="ghost" (click)="previewPlanningReset()"
+            [disabled]="isPlanningResetPreviewLoading || isPlanningResetExecuting">
+            {{ isPlanningResetPreviewLoading ? 'Analizando...' : 'Analizar reinicio' }}
+          </button>
+          <button type="button" class="danger" (click)="executePlanningReset()"
+            [disabled]="!planningResetPreview || isPlanningResetExecuting || isPlanningResetPreviewLoading">
+            {{ isPlanningResetExecuting ? 'Reiniciando...' : 'Ejecutar reinicio' }}
+          </button>
+          <button type="button" class="ghost" (click)="clearPlanningResetPreview()"
+            [disabled]="!planningResetPreview || isPlanningResetExecuting">
+            Limpiar analisis
+          </button>
+        </div>
+      </div>
+
+      <div class="planning-reset-summary" *ngIf="planningResetPreview as preview">
+        <div class="planning-reset-summary-head">
+          <strong>{{ preview.mode === 'AFTER_RESET' ? 'Resultado despues del reinicio' : 'Analisis del reinicio' }}</strong>
+          <span>{{ preview.wipe_config ? 'Limpieza total de configuracion' : 'Limpieza operativa' }}</span>
+        </div>
+
+        <div class="planning-reset-metrics">
+          <article>
+            <strong>{{ preview.runtime_tables?.total_rows ?? 0 }}</strong>
+            <span>Filas runtime afectadas</span>
+          </article>
+          <article *ngIf="preview.config_tables !== 'preserved'">
+            <strong>{{ preview.config_tables?.total_rows ?? 0 }}</strong>
+            <span>Filas de configuracion afectadas</span>
+          </article>
+        </div>
+
+        <div class="planning-reset-table-list">
+          <div>
+            <p class="mini-eyebrow">Runtime</p>
+            <ul>
+              <li *ngFor="let item of preview.runtime_tables?.tables">
+                {{ item.table }}:
+                <strong>{{ item.exists ? item.rows : 'tabla ausente' }}</strong>
+              </li>
+            </ul>
+          </div>
+
+          <div *ngIf="preview.config_tables !== 'preserved'">
+            <p class="mini-eyebrow">Configuracion</p>
+            <ul>
+              <li *ngFor="let item of preview.config_tables?.tables">
+                {{ item.table }}:
+                <strong>{{ item.exists ? item.rows : 'tabla ausente' }}</strong>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </section>
 
     <div class="run-controls">

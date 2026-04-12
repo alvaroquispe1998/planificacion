@@ -31,6 +31,7 @@ type SyncResourceModule = {
   styleUrl: './settings.page.css',
 })
 export class SettingsPageComponent implements OnInit, OnDestroy {
+  readonly planningWorkspaceResetConfirmationToken = 'RESET_PLANNING_WORKSPACE';
   readonly planningBaseResourceCodes = [
     'semesters',
     'campuses',
@@ -62,9 +63,13 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
   isLoading = false;
   isSavingCookie = false;
   isSyncing = false;
+  isPlanningResetPreviewLoading = false;
+  isPlanningResetExecuting = false;
   feedback = '';
   errorMessage = '';
   syncResult: any | null = null;
+  planningResetPreview: any | null = null;
+  planningResetWipeConfig = true;
 
   /** Tracks which individual sources are currently being validated */
   validatingSourceCodes = new Set<string>();
@@ -416,6 +421,78 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.runSync();
+  }
+
+  previewPlanningReset() {
+    this.isPlanningResetPreviewLoading = true;
+    this.errorMessage = '';
+    this.feedback = '';
+    this.cdr.detectChanges();
+    this.api
+      .previewPlanningWorkspaceReset({ wipe_config: this.planningResetWipeConfig })
+      .subscribe({
+        next: (result) => {
+          this.zone.run(() => {
+            this.planningResetPreview = result;
+            this.isPlanningResetPreviewLoading = false;
+            this.feedback =
+              'Analisis listo. Revisa el impacto estimado antes de ejecutar el reinicio del workspace.';
+            this.cdr.detectChanges();
+          });
+        },
+        error: (err) => {
+          this.zone.run(() => {
+            this.isPlanningResetPreviewLoading = false;
+            this.handleError(err);
+            this.cdr.detectChanges();
+          });
+        },
+      });
+  }
+
+  executePlanningReset() {
+    this.isPlanningResetExecuting = true;
+    this.errorMessage = '';
+    this.feedback = '';
+    this.cdr.detectChanges();
+    this.api
+      .executePlanningWorkspaceReset({
+        wipe_config: this.planningResetWipeConfig,
+        confirm_token: this.planningWorkspaceResetConfirmationToken,
+      })
+      .subscribe({
+        next: (result) => {
+          this.zone.run(() => {
+            this.planningResetPreview = result?.after
+              ? {
+                  mode: 'AFTER_RESET',
+                  wipe_config: this.planningResetWipeConfig,
+                  runtime_tables: result.after?.runtime_tables ?? null,
+                  config_tables: result.after?.config_tables ?? null,
+                }
+              : null;
+            this.isPlanningResetExecuting = false;
+            this.feedback =
+              'Workspace de planificacion reiniciado. Ya puedes resincronizar catalogos y volver a ejecutar la carga.';
+            this.refreshJobs();
+            this.cdr.detectChanges();
+          });
+        },
+        error: (err) => {
+          this.zone.run(() => {
+            this.isPlanningResetExecuting = false;
+            this.handleError(err);
+            this.cdr.detectChanges();
+          });
+        },
+      });
+  }
+
+  clearPlanningResetPreview() {
+    this.planningResetPreview = null;
+    this.feedback = '';
+    this.errorMessage = '';
+    this.cdr.detectChanges();
   }
 
   refreshJobs() {

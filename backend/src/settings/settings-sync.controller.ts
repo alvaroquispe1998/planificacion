@@ -1,7 +1,12 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ACTION_PERMISSIONS, WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { RequirePermissions } from '../auth/permissions.decorator';
-import { RunSettingsSyncDto, UpsertSourceSessionDto } from './dto/settings-sync.dto';
+import {
+  ExecutePlanningWorkspaceResetDto,
+  PreviewPlanningWorkspaceResetDto,
+  RunSettingsSyncDto,
+  UpsertSourceSessionDto,
+} from './dto/settings-sync.dto';
 import { SettingsSyncService } from './settings-sync.service';
 
 @Controller('settings/sync')
@@ -48,5 +53,18 @@ export class SettingsSyncController {
   listJobs(@Query('limit') limit?: string) {
     const parsed = Number(limit);
     return this.settingsSyncService.listJobs(Number.isFinite(parsed) ? parsed : 20);
+  }
+
+  @Post('planning-workspace-reset/preview')
+  previewPlanningWorkspaceReset(@Body() dto: PreviewPlanningWorkspaceResetDto) {
+    return this.settingsSyncService.previewPlanningWorkspaceReset(Boolean(dto.wipe_config));
+  }
+
+  @Post('planning-workspace-reset/execute')
+  executePlanningWorkspaceReset(@Body() dto: ExecutePlanningWorkspaceResetDto) {
+    return this.settingsSyncService.executePlanningWorkspaceReset({
+      wipeConfig: Boolean(dto.wipe_config),
+      confirmToken: dto.confirm_token,
+    });
   }
 }

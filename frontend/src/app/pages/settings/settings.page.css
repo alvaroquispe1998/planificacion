@@ -300,7 +300,8 @@ textarea {
 }
 
 .planning-readiness h3,
-.planning-base-panel h4 {
+.planning-base-panel h4,
+.planning-reset-panel h4 {
   margin: 0;
 }
 
@@ -378,6 +379,110 @@ textarea {
   justify-items: stretch;
 }
 
+.planning-reset-panel {
+  margin-top: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border-top: 1px dashed #d6e0ef;
+  padding-top: 0.9rem;
+}
+
+.planning-reset-copy {
+  flex: 1 1 420px;
+}
+
+.planning-reset-copy p {
+  margin: 0.35rem 0 0;
+}
+
+.planning-reset-check {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.planning-reset-check input {
+  margin: 0;
+}
+
+.planning-reset-actions {
+  flex: 0 1 320px;
+  display: grid;
+  gap: 0.55rem;
+  justify-items: stretch;
+}
+
+.planning-reset-summary {
+  margin-top: 0.9rem;
+  border: 1px solid #f0d4a8;
+  border-radius: 12px;
+  background: #fffaf1;
+  padding: 0.9rem 1rem;
+}
+
+.planning-reset-summary-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.planning-reset-summary-head span {
+  border: 1px solid #efcf9c;
+  border-radius: 999px;
+  padding: 0.16rem 0.55rem;
+  font-size: 0.75rem;
+  color: #8a4d00;
+  background: #fff3dc;
+}
+
+.planning-reset-metrics {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.planning-reset-metrics article {
+  border: 1px solid #efdcb9;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.75rem;
+}
+
+.planning-reset-metrics strong {
+  display: block;
+  font-size: 1.25rem;
+  color: #7c2d12;
+}
+
+.planning-reset-metrics span {
+  font-size: 0.82rem;
+  color: #6b7280;
+}
+
+.planning-reset-table-list {
+  margin-top: 0.9rem;
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.planning-reset-table-list ul {
+  margin: 0.45rem 0 0;
+  padding-left: 1rem;
+}
+
+.planning-reset-table-list li {
+  margin: 0.2rem 0;
+  font-size: 0.84rem;
+}
+
 button {
   cursor: pointer;
   background: #f8fbff;
@@ -388,6 +493,13 @@ button.primary {
   border-color: transparent;
   color: #fff;
   font-weight: 600;
+}
+
+button.danger {
+  background: linear-gradient(125deg, #8f1d1d, #c2410c);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 700;
 }
 
 button.ghost {
