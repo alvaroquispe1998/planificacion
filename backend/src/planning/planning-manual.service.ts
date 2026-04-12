@@ -2081,7 +2081,11 @@ export class PlanningManualService {
       return [];
     }
 
-    const context = await this.buildContext(offers.map((item) => item.id));
+    const context = await this.buildContext(offers.map((item) => item.id), {
+      skipChangeLogs: true,
+      skipConflicts: true,
+      preloadedOffers: offers,
+    });
     const [semesters, campuses, faculties, academicPrograms, studyPlans, candidateVcSections] =
       await Promise.all([
         this.findManyByIds(this.semestersRepo, uniqueIds(offers.map((item) => item.semester_id))),

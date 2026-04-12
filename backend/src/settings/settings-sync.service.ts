@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { newId } from '../common';
 import { ZoomUserEntity } from '../entities/audit.entities';
 import {
@@ -336,6 +336,29 @@ const RESOURCE_DEFINITIONS: Array<{
 
 const RESOURCE_CODES = RESOURCE_DEFINITIONS.map((item) => item.code);
 const RESOURCE_BY_CODE = new Map(RESOURCE_DEFINITIONS.map((item) => [item.code, item]));
+const RESET_PLANNING_CONFIRMATION_TOKEN = 'RESET_PLANNING_WORKSPACE';
+const RESET_PLANNING_RUNTIME_TABLES = [
+  'videoconference_generation_batch_results',
+  'videoconference_generation_batches',
+  'planning_subsection_videoconference_overrides',
+  'planning_subsection_videoconferences',
+  'planning_subsection_schedule_vc_inheritances',
+  'planning_schedule_conflicts_v2',
+  'planning_change_logs',
+  'planning_subsection_schedules',
+  'planning_subsections',
+  'planning_sections',
+  'planning_offers',
+  'planning_import_row_issues',
+  'planning_import_scope_decisions',
+  'planning_import_rows',
+  'planning_import_batches',
+] as const;
+const RESET_PLANNING_CONFIG_TABLES = [
+  'planning_cycle_plan_rules',
+  'planning_campus_vc_location_mappings',
+  'planning_import_alias_mappings',
+] as const;
 
 @Injectable()
 export class SettingsSyncService {
@@ -344,6 +367,7 @@ export class SettingsSyncService {
 
   constructor(
     private readonly configService: ConfigService,
+    private readonly dataSource: DataSource,
     @InjectRepository(SemesterEntity)
     private readonly semestersRepo: Repository<SemesterEntity>,
     @InjectRepository(CampusEntity)
@@ -730,6 +754,112 @@ export class SettingsSyncService {
       ...job,
       logs: logsByJob.get(job.id) ?? [],
     }));
+  }
+
+  async previewPlanningWorkspaceReset(wipeConfig = false) {
+    const summary = await this.buildPlanningWorkspaceResetSummary(wipeConfig);
+    return {
+      mode: 'DRY_RUN',
+      wipe_config: wipeConfig,
+      confirm_token_required: RESET_PLANNING_CONFIRMATION_TOKEN,
+      ...summary,
+    };
+  }
+
+  async executePlanningWorkspaceReset(input: { wipeConfig?: boolean; confirmToken: string }) {
+    if (input.confirmToken !== RESET_PLANNING_CONFIRMATION_TOKEN) {
+      throw new BadRequestException('Token de confirmacion invalido para reiniciar el workspace.');
+    }
+    const wipeConfig = Boolean(input.wipeConfig);
+    const summaryBefore = await this.buildPlanningWorkspaceResetSummary(wipeConfig);
+    const tables = this.resolvePlanningWorkspaceResetTables(wipeConfig);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    try {
+      await queryRunner.startTransaction();
+      await queryRunner.query('SET FOREIGN_KEY_CHECKS = 0');
+      for (const table of tables) {
+        if (!(await this.tableExists(table))) {
+          continue;
+        }
+        await queryRunner.query(`DELETE FROM ${table}`);
+      }
+      await queryRunner.query('SET FOREIGN_KEY_CHECKS = 1');
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      try {
+        await queryRunner.query('SET FOREIGN_KEY_CHECKS = 1');
+      } catch {
+        // no-op
+      }
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+    const summaryAfter = await this.buildPlanningWorkspaceResetSummary(wipeConfig);
+    return {
+      mode: 'APPLY',
+      wipe_config: wipeConfig,
+      confirm_token_required: RESET_PLANNING_CONFIRMATION_TOKEN,
+      before: summaryBefore,
+      after: summaryAfter,
+    };
+  }
+
+  private resolvePlanningWorkspaceResetTables(wipeConfig: boolean) {
+    return wipeConfig
+      ? [...RESET_PLANNING_RUNTIME_TABLES, ...RESET_PLANNING_CONFIG_TABLES]
+      : [...RESET_PLANNING_RUNTIME_TABLES];
+  }
+
+  private async buildPlanningWorkspaceResetSummary(wipeConfig: boolean) {
+    const tables = this.resolvePlanningWorkspaceResetTables(wipeConfig);
+    const runtime = await this.collectPlanningWorkspaceTableCounts(RESET_PLANNING_RUNTIME_TABLES);
+    const config = wipeConfig
+      ? await this.collectPlanningWorkspaceTableCounts(RESET_PLANNING_CONFIG_TABLES)
+      : 'preserved';
+    return {
+      tables_considered: tables.length,
+      runtime_tables: runtime,
+      config_tables: config,
+    };
+  }
+
+  private async collectPlanningWorkspaceTableCounts(tables: readonly string[]) {
+    const rows = await Promise.all(
+      tables.map(async (table) => ({
+        table,
+        exists: await this.tableExists(table),
+      })),
+    );
+    const detailed = await Promise.all(
+      rows.map(async (item) => ({
+        table: item.table,
+        exists: item.exists,
+        rows: item.exists ? await this.countRows(item.table) : -1,
+      })),
+    );
+    return {
+      total_rows: detailed.reduce((sum, item) => sum + Math.max(item.rows, 0), 0),
+      tables: detailed,
+    };
+  }
+
+  private async tableExists(tableName: string) {
+    const rows = await this.dataSource.query(
+      `SELECT COUNT(*) AS qty
+       FROM information_schema.tables
+       WHERE table_schema = DATABASE()
+         AND table_name = ?`,
+      [tableName],
+    );
+    return Number(rows?.[0]?.qty ?? 0) > 0;
+  }
+
+  private async countRows(tableName: string) {
+    const rows = await this.dataSource.query(`SELECT COUNT(*) AS qty FROM ${tableName}`);
+    return Number(rows?.[0]?.qty ?? 0);
   }
 
   private async fetchResourceRows(

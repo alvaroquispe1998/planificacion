@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsOptional,
@@ -56,4 +57,17 @@ export class RunSettingsSyncDto {
   @IsOptional()
   @Type(() => Number)
   limit?: number;
+}
+
+export class PreviewPlanningWorkspaceResetDto {
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  wipe_config?: boolean;
+}
+
+export class ExecutePlanningWorkspaceResetDto extends PreviewPlanningWorkspaceResetDto {
+  @IsString()
+  @IsNotEmpty()
+  confirm_token!: string;
 }
