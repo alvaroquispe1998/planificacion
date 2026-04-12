@@ -86,25 +86,26 @@ async function bootstrap() {
     const queryRunner = dataSource.createQueryRunner();
     await queryRunner.connect();
     try {
-      await queryRunner.startTransaction();
       await queryRunner.query('SET FOREIGN_KEY_CHECKS = 0');
       for (const table of tables) {
         if (!(await tableExists(dataSource, table.name))) {
           continue;
         }
-        await queryRunner.query(`DELETE FROM ${table.name}`);
+        await clearTableFast(queryRunner, table.name);
       }
-      await queryRunner.query('SET FOREIGN_KEY_CHECKS = 1');
-      await queryRunner.commitTransaction();
     } catch (error) {
       try {
         await queryRunner.query('SET FOREIGN_KEY_CHECKS = 1');
       } catch {
         // no-op
       }
-      await queryRunner.rollbackTransaction();
       throw error;
     } finally {
+      try {
+        await queryRunner.query('SET FOREIGN_KEY_CHECKS = 1');
+      } catch {
+        // no-op
+      }
       await queryRunner.release();
     }
 
@@ -193,6 +194,17 @@ async function tableExists(dataSource: DataSource, tableName: string) {
     [tableName],
   );
   return Number(rows?.[0]?.qty ?? 0) > 0;
+}
+
+async function clearTableFast(
+  queryRunner: { query: (sql: string) => Promise<unknown> },
+  tableName: string,
+) {
+  try {
+    await queryRunner.query(`TRUNCATE TABLE \`${tableName}\``);
+  } catch {
+    await queryRunner.query(`DELETE FROM \`${tableName}\``);
+  }
 }
 
 function loadDotEnv() {
