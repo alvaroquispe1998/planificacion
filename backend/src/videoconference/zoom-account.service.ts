@@ -8,6 +8,7 @@ import { ZoomConfigEntity } from './videoconference.entity';
 const ZOOM_TOKEN_URL = 'https://zoom.us/oauth/token';
 const ZOOM_API_BASE_URL = 'https://api.zoom.us/v2';
 const TOKEN_EXPIRY_SAFETY_MS = 30_000;
+const ZOOM_REQUEST_TIMEOUT_MS = 15_000;
 
 type ZoomTokenResponse = {
     access_token?: string;
@@ -350,14 +351,18 @@ export class ZoomAccountService {
             config.accountId,
         )}`;
 
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                authorization: `Basic ${authorization}`,
-                'content-type': 'application/x-www-form-urlencoded',
+        const response = await this.fetchWithDiagnostics(
+            url,
+            {
+                method: 'POST',
+                headers: {
+                    authorization: `Basic ${authorization}`,
+                    'content-type': 'application/x-www-form-urlencoded',
+                },
+                body: '',
             },
-            body: '',
-        });
+            'Zoom OAuth',
+        );
 
         const bodyText = await response.text();
         const parsed = this.parseJson<ZoomTokenResponse>(bodyText);
@@ -382,13 +387,17 @@ export class ZoomAccountService {
 
     private async fetchZoomJson<T>(path: string, retryOnUnauthorized = true): Promise<T> {
         const token = await this.getAccessToken();
-        const response = await fetch(`${ZOOM_API_BASE_URL}${path}`, {
-            method: 'GET',
-            headers: {
-                authorization: `Bearer ${token}`,
-                accept: 'application/json',
+        const response = await this.fetchWithDiagnostics(
+            `${ZOOM_API_BASE_URL}${path}`,
+            {
+                method: 'GET',
+                headers: {
+                    authorization: `Bearer ${token}`,
+                    accept: 'application/json',
+                },
             },
-        });
+            'Zoom API',
+        );
 
         if (response.status === 401 && retryOnUnauthorized) {
             this.cachedAccessToken = null;
@@ -414,6 +423,17 @@ export class ZoomAccountService {
                 return null;
             }
             throw error;
+        }
+    }
+
+    private async fetchWithDiagnostics(url: string, init: RequestInit, label: string) {
+        try {
+            return await fetch(url, {
+                ...init,
+                signal: AbortSignal.timeout(ZOOM_REQUEST_TIMEOUT_MS),
+            });
+        } catch (error) {
+            throw new BadRequestException(this.describeFetchError(label, url, error));
         }
     }
 
@@ -604,6 +624,44 @@ export class ZoomAccountService {
             return error;
         }
         return 'Error no identificado';
+    }
+
+    private describeFetchError(label: string, url: string, error: unknown) {
+        if (!(error instanceof Error)) {
+            return `${label} no pudo conectarse a ${url}: error no identificado.`;
+        }
+
+        const cause = this.readErrorCause(error);
+        const code = `${cause?.code ?? ''}`.trim().toUpperCase();
+        const causeMessage = `${cause?.message ?? ''}`.trim();
+        const baseMessage = `${error.message ?? ''}`.trim();
+        const detail = causeMessage || baseMessage || 'sin detalle';
+
+        if (error.name === 'TimeoutError' || code.includes('TIMEOUT') || code === 'ETIMEDOUT') {
+            return `${label} no respondio antes del timeout de ${Math.round(ZOOM_REQUEST_TIMEOUT_MS / 1000)}s al conectar con ${url}.`;
+        }
+        if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+            return `${label} no pudo resolver DNS para ${url}: ${detail}.`;
+        }
+        if (code === 'ECONNREFUSED') {
+            return `${label} rechazo la conexion hacia ${url}: ${detail}.`;
+        }
+        if (code.startsWith('CERT_') || baseMessage.toLowerCase().includes('certificate')) {
+            return `${label} fallo por TLS/certificado al conectar con ${url}: ${detail}.`;
+        }
+        return `${label} no pudo conectarse a ${url}: ${detail}.`;
+    }
+
+    private readErrorCause(error: Error) {
+        const cause = (error as Error & { cause?: unknown }).cause;
+        if (!cause || typeof cause !== 'object') {
+            return null;
+        }
+        const record = cause as Record<string, unknown>;
+        return {
+            code: typeof record.code === 'string' ? record.code : null,
+            message: typeof record.message === 'string' ? record.message : null,
+        };
     }
 }
 
