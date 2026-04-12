@@ -3,6 +3,7 @@ import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { VideoconferenceService } from './videoconference.service';
 import {
+    AssignmentPreviewVideoconferenceDto,
     CreateVideoconferenceInheritanceDto,
     FilterOptionsDto,
     GenerateVideoconferenceDto,
@@ -76,6 +77,11 @@ export class VideoconferenceController {
     @Post('preview')
     async preview(@Body() filters: PreviewVideoconferenceDto) {
         return this.service.preview(filters);
+    }
+
+    @Post('assignment-preview')
+    async assignmentPreview(@Body() payload: AssignmentPreviewVideoconferenceDto) {
+        return this.service.assignmentPreview(payload);
     }
 
     @Post('generate')

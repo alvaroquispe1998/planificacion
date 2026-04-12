@@ -5,6 +5,9 @@ import { Router } from '@angular/router';
 import { MultiSelectComponent, MultiSelectOption } from '../../components/multi-select/multi-select.component';
 import { DialogService } from '../../core/dialog.service';
 import {
+  VideoconferenceAssignmentPreviewDaySummary,
+  VideoconferenceAssignmentPreviewItem,
+  VideoconferenceAssignmentPreviewResponse,
   FilterOptionsDto,
   VideoconferenceGenerationResponse,
   VideoconferenceGenerationResultItem,
@@ -23,6 +26,20 @@ type ResolvedGenerationResultItem = VideoconferenceGenerationResultItem & {
   preview: PreviewSelectionItem | null;
 };
 
+type ResolvedAssignmentPreviewItem = VideoconferenceAssignmentPreviewItem & {
+  preview: PreviewSelectionItem | null;
+};
+
+type AssignmentUserUsageSummary = {
+  host_key: string;
+  host_label: string;
+  total_sessions: number;
+  inherited_rows: number;
+  license_label: string | null;
+  is_licensed: boolean | null;
+  session_lines: string[];
+};
+
 @Component({
   selector: 'app-videoconferences-page',
   standalone: true,
@@ -38,7 +55,7 @@ export class VideoconferencesPageComponent implements OnInit {
   selectedPrograms: string[] = [];
   selectedCourses: string[] = [];
   selectedPeriod = '';
-  selectedModality = '';
+  selectedModalities: string[] = [];
   selectedDays: string[] = [];
 
   periodOptions: MultiSelectOption[] = [];
@@ -52,10 +69,13 @@ export class VideoconferencesPageComponent implements OnInit {
   previewData: PreviewSelectionItem[] = [];
   startDate = '';
   endDate = '';
+  assignmentPreview: VideoconferenceAssignmentPreviewResponse | null = null;
   generationResult: VideoconferenceGenerationResponse | null = null;
   loading = false;
   filterOptionsLoading = false;
   overrideSaving = false;
+  assignmentUsersModalOpen = false;
+  expandedAssignmentHostKey = '';
   hasSearched = false;
   retryingRecordId = '';
 
@@ -121,7 +141,7 @@ export class VideoconferencesPageComponent implements OnInit {
       this.buildSelectionLabel('Facultades', this.selectedFaculties, this.facultyOptions),
       this.buildSelectionLabel('Programas', this.selectedPrograms, this.programOptions),
       this.buildSelectionLabel('Cursos', this.selectedCourses, this.courseOptions),
-      this.buildSingleSelectionLabel('Modalidad', this.selectedModality, this.modalityOptions),
+      this.buildSelectionLabel('Modalidades', this.selectedModalities, this.modalityOptions),
       this.buildSelectionLabel('Dias', this.selectedDays, this.dayOptions),
     ].filter((label): label is string => Boolean(label));
   }
@@ -189,8 +209,8 @@ export class VideoconferencesPageComponent implements OnInit {
     this.handleFilterChange();
   }
 
-  onModalityChange(selectedModality: string) {
-    this.selectedModality = selectedModality;
+  onModalityChange(selectedIds: string[]) {
+    this.selectedModalities = selectedIds;
     this.handleFilterChange();
   }
 
@@ -205,7 +225,7 @@ export class VideoconferencesPageComponent implements OnInit {
     this.selectedPrograms = [];
     this.selectedCourses = [];
     this.selectedPeriod = '';
-    this.selectedModality = '';
+    this.selectedModalities = [];
     this.selectedDays = [];
     this.closeOverrideEditor();
     this.resetPreviewState();
@@ -255,6 +275,96 @@ export class VideoconferencesPageComponent implements OnInit {
     });
   }
 
+  get assignmentPreviewRows(): ResolvedAssignmentPreviewItem[] {
+    const rows = this.assignmentPreview?.items ?? [];
+    return rows.map((item) => ({
+      ...item,
+      preview: this.findPreviewItemForAssignment(item),
+    }));
+  }
+
+  get assignmentSummary() {
+    return this.assignmentPreview?.summary ?? null;
+  }
+
+  get assignmentDaySummaries(): VideoconferenceAssignmentPreviewDaySummary[] {
+    return this.assignmentPreview?.summary?.licenses_by_day ?? [];
+  }
+
+  get assignmentUserSummaries(): AssignmentUserUsageSummary[] {
+    const usageMap = new Map<string, AssignmentUserUsageSummary>();
+    for (const item of this.assignmentPreviewRows) {
+      const hostKey = `${item.zoom_user_id || item.zoom_user_email || item.zoom_user_name || ''}`.trim();
+      if (!hostKey) {
+        continue;
+      }
+
+      const current = usageMap.get(hostKey) ?? {
+        host_key: hostKey,
+        host_label: item.zoom_user_email || item.zoom_user_name || item.zoom_user_id || hostKey,
+        total_sessions: 0,
+        inherited_rows: 0,
+        license_label: item.license_label,
+        is_licensed: item.is_licensed,
+        session_lines: [],
+      };
+
+      if (item.preview_status === 'INHERITED') {
+        current.inherited_rows += 1;
+      }
+
+      current.session_lines.push(this.buildAssignmentSessionLine(item));
+
+      if (item.consumes_capacity || item.preview_status === 'BLOCKED_EXISTING') {
+        current.total_sessions += 1;
+      }
+
+      usageMap.set(hostKey, current);
+    }
+
+    return [...usageMap.values()]
+      .filter((item) => item.total_sessions > 0 || item.inherited_rows > 0)
+      .sort((left, right) => {
+        const bySessions = right.total_sessions - left.total_sessions;
+        if (bySessions !== 0) {
+          return bySessions;
+        }
+        const byInherited = right.inherited_rows - left.inherited_rows;
+        if (byInherited !== 0) {
+          return byInherited;
+        }
+        return left.host_label.localeCompare(right.host_label);
+      });
+  }
+
+  openAssignmentUsersModal() {
+    if (!this.assignmentUserSummaries.length) {
+      return;
+    }
+    this.expandedAssignmentHostKey = '';
+    this.assignmentUsersModalOpen = true;
+  }
+
+  closeAssignmentUsersModal() {
+    this.assignmentUsersModalOpen = false;
+    this.expandedAssignmentHostKey = '';
+  }
+
+  toggleAssignmentUserDetails(hostKey: string) {
+    this.expandedAssignmentHostKey = this.expandedAssignmentHostKey === hostKey ? '' : hostKey;
+  }
+
+  isAssignmentUserExpanded(hostKey: string) {
+    return this.expandedAssignmentHostKey === hostKey;
+  }
+
+  togglePreviewSelection(item: PreviewSelectionItem) {
+    if (!item.selectable) {
+      return;
+    }
+    item.selected = !item.selected;
+  }
+
   getSectionDisplay(item: VideoconferencePreviewItem) {
     const section = item.section_code?.trim();
     return section ? `Seccion ${section}` : 'Seccion sin codigo';
@@ -286,8 +396,34 @@ export class VideoconferencesPageComponent implements OnInit {
       .join(' | ');
   }
 
+  getAvContextPrimary(item: VideoconferencePreviewItem) {
+    return item.vc_faculty_name || 'Sin facultad AV';
+  }
+
+  getAvContextSecondary(item: VideoconferencePreviewItem) {
+    return [
+      item.vc_academic_program_name || 'Sin programa AV',
+      item.vc_course_name || item.course_name || 'Sin curso AV',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+  }
+
   getVcContext(item: VideoconferencePreviewItem) {
     return item.vc_section_name ? `VC: ${item.vc_section_name}` : 'VC sin seccion';
+  }
+
+  getVcSourceLabel(item: VideoconferencePreviewItem) {
+    switch (item.vc_source) {
+      case 'sync_source':
+        return 'AV sincronizado';
+      case 'manual_override':
+        return 'AV manual';
+      case 'fallback_match':
+        return 'AV fallback';
+      default:
+        return '';
+    }
   }
 
   inheritanceLabel(item: VideoconferencePreviewItem) {
@@ -509,6 +645,121 @@ export class VideoconferencesPageComponent implements OnInit {
     this.executeGeneration(payload, false);
   }
 
+  async previewAssignments() {
+    const selected = this.previewData.filter((item) => item.selectable && item.selected);
+    if (!selected.length) {
+      await this.dialog.alert({
+        title: 'Seleccion requerida',
+        message: 'Selecciona al menos un horario u ocurrencia para previsualizar la asignacion.',
+      });
+      return;
+    }
+
+    const payload = this.usesOccurrenceRows
+      ? selected.length === this.selectableRows.length
+        ? {
+            selectAllVisible: true,
+            ...this.buildCatalogFilters(),
+            startDate: this.startDate,
+            endDate: this.endDate,
+          }
+        : {
+            occurrenceKeys: selected.map((item) => item.occurrence_key),
+            startDate: this.startDate,
+            endDate: this.endDate,
+          }
+      : selected.length === this.selectableRows.length
+        ? {
+            selectAllVisible: true,
+            ...this.buildCatalogFilters(),
+          }
+        : {
+            scheduleIds: selected.map((item) => item.schedule_id),
+          };
+
+    this.loading = true;
+    this.api.assignmentPreview(payload).subscribe({
+      next: (response) => {
+        this.assignmentPreview = response;
+        this.loading = false;
+        this.cdr.detectChanges();
+      },
+      error: async (error) => {
+        this.loading = false;
+        this.cdr.detectChanges();
+        await this.dialog.alert({
+          title: 'No se pudo calcular la asignacion Zoom',
+          message: error?.error?.message ?? 'Intenta nuevamente en unos segundos.',
+          tone: 'danger',
+        });
+      },
+    });
+  }
+
+  getAssignmentPreview(preview: PreviewSelectionItem) {
+    return (
+      this.assignmentPreview?.items.find((item) => item.id === preview.occurrence_key)
+      ?? null
+    );
+  }
+
+  assignmentStatusLabel(item: VideoconferenceAssignmentPreviewItem | null) {
+    switch (item?.preview_status) {
+      case 'ASSIGNED_LICENSED':
+        return 'Asignado';
+      case 'ASSIGNED_RISK':
+        return 'Asignado con riesgo';
+      case 'INHERITED':
+        return 'Heredado';
+      case 'BLOCKED_EXISTING':
+        return 'Ya existente';
+      case 'VALIDATION_ERROR':
+        return 'Validacion pendiente';
+      case 'NO_AVAILABLE_ZOOM_USER':
+        return 'Sin host';
+      default:
+        return 'Sin preview';
+    }
+  }
+
+  assignmentStatusClass(item: VideoconferenceAssignmentPreviewItem | null) {
+    switch (item?.preview_status) {
+      case 'ASSIGNED_LICENSED':
+      case 'INHERITED':
+        return 'assignment-pill assignment-pill-success';
+      case 'ASSIGNED_RISK':
+        return 'assignment-pill assignment-pill-warning';
+      case 'BLOCKED_EXISTING':
+        return 'assignment-pill assignment-pill-neutral';
+      case 'VALIDATION_ERROR':
+      case 'NO_AVAILABLE_ZOOM_USER':
+        return 'assignment-pill assignment-pill-danger';
+      default:
+        return 'assignment-pill';
+    }
+  }
+
+  assignmentLicenseClass(item: VideoconferenceAssignmentPreviewItem | null) {
+    switch (item?.license_status) {
+      case 'LICENSED':
+      case 'ON_PREM':
+        return 'assignment-license assignment-license-ok';
+      case 'BASIC':
+        return 'assignment-license assignment-license-warning';
+      case 'UNKNOWN':
+        return 'assignment-license assignment-license-neutral';
+      default:
+        return 'assignment-license';
+    }
+  }
+
+  assignmentHostLabel(item: VideoconferenceAssignmentPreviewItem | null) {
+    if (!item) {
+      return 'Sin simulacion';
+    }
+    return item.zoom_user_email || item.zoom_user_name || 'Sin host sugerido';
+  }
+
   resultStatusLabel(item: VideoconferenceGenerationResultItem) {
     if (item.link_mode === 'INHERITED' && item.status === 'MATCHED') {
       return 'Heredada';
@@ -667,7 +918,7 @@ export class VideoconferencesPageComponent implements OnInit {
       this.retainAvailableSelections('selectedFaculties', this.facultyOptions),
       this.retainAvailableSelections('selectedPrograms', this.programOptions),
       this.retainAvailableSelections('selectedCourses', this.courseOptions),
-      this.retainAvailableSingleSelection('selectedModality', this.modalityOptions),
+      this.retainAvailableSelections('selectedModalities', this.modalityOptions),
       this.retainAvailableSelections('selectedDays', this.dayOptions),
     ];
 
@@ -680,6 +931,7 @@ export class VideoconferencesPageComponent implements OnInit {
       | 'selectedFaculties'
       | 'selectedPrograms'
       | 'selectedCourses'
+      | 'selectedModalities'
       | 'selectedDays',
     options: MultiSelectOption[],
   ) {
@@ -694,7 +946,7 @@ export class VideoconferencesPageComponent implements OnInit {
   }
 
   private retainAvailableSingleSelection(
-    property: 'selectedPeriod' | 'selectedModality',
+    property: 'selectedPeriod',
     options: MultiSelectOption[],
   ) {
     const current = this[property];
@@ -713,6 +965,8 @@ export class VideoconferencesPageComponent implements OnInit {
 
   private resetPreviewState() {
     this.previewData = [];
+    this.assignmentPreview = null;
+    this.assignmentUsersModalOpen = false;
     this.generationResult = null;
     this.hasSearched = false;
     this.retryingRecordId = '';
@@ -725,7 +979,7 @@ export class VideoconferencesPageComponent implements OnInit {
       facultyIds: this.selectedFaculties.length ? this.selectedFaculties : undefined,
       programIds: this.selectedPrograms.length ? this.selectedPrograms : undefined,
       courseIds: this.selectedCourses.length ? this.selectedCourses : undefined,
-      modality: this.selectedModality || undefined,
+      modalities: this.selectedModalities.length ? this.selectedModalities : undefined,
       days: this.selectedDays.length ? this.selectedDays : undefined,
     };
   }
@@ -746,6 +1000,7 @@ export class VideoconferencesPageComponent implements OnInit {
     const selectedKeys = new Set(
       this.previewData.filter((item) => item.selectable && item.selected).map((item) => item.occurrence_key),
     );
+    this.assignmentPreview = null;
     await this.loadPreview(selectedKeys, this.usesOccurrenceRows);
   }
 
@@ -759,6 +1014,7 @@ export class VideoconferencesPageComponent implements OnInit {
           ...item,
           selected: item.selectable && (selectedKeys.size ? selectedKeys.has(item.occurrence_key) : false),
         }));
+        this.assignmentPreview = null;
         this.loading = false;
         this.cdr.detectChanges();
       },
@@ -816,6 +1072,45 @@ export class VideoconferencesPageComponent implements OnInit {
         || preview.base_conference_date === item.conference_date
       );
     }) ?? null;
+  }
+
+  private findPreviewItemForAssignment(item: VideoconferenceAssignmentPreviewItem) {
+    const occurrenceKey = item.occurrence_key?.trim();
+    if (occurrenceKey) {
+      const byOccurrence = this.previewData.find((preview) => preview.occurrence_key === occurrenceKey);
+      if (byOccurrence) {
+        return byOccurrence;
+      }
+    }
+
+    return this.previewData.find((preview) => preview.occurrence_key === item.id) ?? null;
+  }
+
+  private buildAssignmentSessionLine(item: ResolvedAssignmentPreviewItem) {
+    const preview = item.preview;
+    const courseLabel = preview?.course_label || `Horario ${item.schedule_id}`;
+    const sectionLabel = preview ? this.getSectionDisplay(preview) : '';
+    const subsectionLabel = preview ? this.getSubsectionDisplay(preview) : '';
+    const whenLabel =
+      item.mode === 'OCCURRENCE'
+        ? item.conference_date || preview?.effective_conference_date || preview?.base_conference_date || item.day_label
+        : item.day_label || preview?.day_label || '';
+    const startTime = preview?.effective_start_time || preview?.start_time || item.start_time;
+    const endTime = preview?.effective_end_time || preview?.end_time || item.end_time;
+    const statusPrefix =
+      item.preview_status === 'INHERITED'
+        ? '[Heredada] '
+        : item.preview_status === 'BLOCKED_EXISTING'
+          ? '[Existente] '
+          : '';
+
+    return [
+      `${statusPrefix}${courseLabel}`,
+      [sectionLabel, subsectionLabel].filter(Boolean).join(' / '),
+      [whenLabel, startTime && endTime ? `${startTime}-${endTime}` : ''].filter(Boolean).join(' '),
+    ]
+      .filter(Boolean)
+      .join(' | ');
   }
 
   private replaceGenerationResultItem(nextItem: VideoconferenceGenerationResultItem) {

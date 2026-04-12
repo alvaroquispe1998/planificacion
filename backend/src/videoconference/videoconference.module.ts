@@ -19,6 +19,9 @@ import { SettingsModule } from '../settings/settings.module';
 import { VideoconferenceController } from './videoconference.controller';
 import { VideoconferenceService } from './videoconference.service';
 import {
+    VcAcademicProgramEntity,
+    VcCourseEntity,
+    VcFacultyEntity,
     VcSectionEntity,
     PlanningSubsectionScheduleVcInheritanceEntity,
     VideoconferenceZoomPoolUserEntity,
@@ -35,6 +38,9 @@ import { ZoomAccountService } from './zoom-account.service';
     imports: [
         SettingsModule,
         TypeOrmModule.forFeature([
+            VcFacultyEntity,
+            VcAcademicProgramEntity,
+            VcCourseEntity,
             VcSectionEntity,
             ZoomConfigEntity,
             VideoconferenceZoomPoolUserEntity,

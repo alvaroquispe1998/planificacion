@@ -89,14 +89,13 @@
 
         <div class="filter-group filter-modality" [class.is-disabled]="!modalityOptions.length">
           <label>Modalidad</label>
-          <select
-            [(ngModel)]="selectedModality"
-            (ngModelChange)="onModalityChange($event)"
-            class="form-control"
-            [disabled]="!modalityOptions.length">
-            <option value="">Todas</option>
-            <option *ngFor="let option of modalityOptions" [value]="option.id">{{ option.label }}</option>
-          </select>
+          <app-multi-select
+            [options]="modalityOptions"
+            [(selectedIds)]="selectedModalities"
+            [disabled]="!modalityOptions.length"
+            (selectionChange)="onModalityChange($event)"
+            placeholder="Todas las modalidades">
+          </app-multi-select>
         </div>
 
         <div class="filter-group filter-days" [class.is-disabled]="!dayOptions.length">
@@ -173,6 +172,9 @@
         <button class="btn btn-secondary" type="button" (click)="applyOperationalRange()" [disabled]="loading || !previewData.length">
           Ver ocurrencias
         </button>
+        <button class="btn btn-secondary" type="button" (click)="previewAssignments()" [disabled]="loading || !selectedCount">
+          Previsualizar asignacion Zoom
+        </button>
         <button class="btn btn-success" (click)="generate()" [disabled]="loading || !selectedCount">
           Generar videoconferencias
         </button>
@@ -232,6 +234,121 @@
         <span>Errores reales</span>
       </div>
     </div>
+
+    <section class="assignment-summary-card" *ngIf="assignmentSummary as summary">
+      <div class="assignment-summary-head">
+        <div>
+          <span class="eyebrow eyebrow-soft">Preview Zoom</span>
+          <h3>{{ assignmentPreview?.mode === 'OCCURRENCE' ? 'Simulacion por ocurrencia' : 'Simulacion semanal por dia y hora' }}</h3>
+          <p>
+            {{ summary.requested_rows }} filas analizadas | {{ summary.licenses_required_global }} licencia(s) requeridas en total
+          </p>
+        </div>
+        <button
+          *ngIf="assignmentUserSummaries.length"
+          class="btn btn-secondary btn-sm"
+          type="button"
+          (click)="openAssignmentUsersModal()">
+          Ver detalle por usuario
+        </button>
+      </div>
+
+      <div class="assignment-metrics">
+        <div class="summary-metric">
+          <strong>{{ summary.assigned_rows }}</strong>
+          <span>Asignadas</span>
+        </div>
+        <div class="summary-metric">
+          <strong>{{ summary.verified_hosts_used }}</strong>
+          <span>Hosts licenciados usados</span>
+        </div>
+        <div class="summary-metric">
+          <strong>{{ summary.risk_hosts_used }}</strong>
+          <span>Hosts sin licencia usada</span>
+        </div>
+        <div class="summary-metric">
+          <strong>{{ summary.no_available_zoom_user }}</strong>
+          <span>Sin host</span>
+        </div>
+        <div class="summary-metric">
+          <strong>{{ summary.validation_errors }}</strong>
+          <span>Validacion pendiente</span>
+        </div>
+        <div class="summary-metric">
+          <strong>{{ summary.additional_licenses_needed ?? '-' }}</strong>
+          <span>Licencias faltantes</span>
+        </div>
+      </div>
+
+      <div class="assignment-day-grid" *ngIf="assignmentDaySummaries.length">
+        <div class="assignment-day-card" *ngFor="let day of assignmentDaySummaries">
+          <strong>{{ day.required_hosts }}</strong>
+          <span>{{ day.day_label }}</span>
+        </div>
+      </div>
+
+      <div class="assignment-warning-list" *ngIf="assignmentPreview?.pool_warnings?.length || assignmentPreview?.license_sync_error">
+        <p *ngFor="let warning of assignmentPreview?.pool_warnings">{{ warning }}</p>
+        <p *ngIf="assignmentPreview?.license_sync_error">
+          Licencias Zoom no verificadas en tiempo real: {{ assignmentPreview?.license_sync_error }}
+        </p>
+      </div>
+    </section>
+
+    <section class="modal-backdrop" *ngIf="assignmentUsersModalOpen" (click)="closeAssignmentUsersModal()">
+      <article class="modal-card assignment-users-modal" (click)="$event.stopPropagation()">
+        <button
+          class="modal-close-corner"
+          type="button"
+          aria-label="Cerrar detalle de Zoom"
+          (click)="closeAssignmentUsersModal()">
+          ×
+        </button>
+
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Detalle Zoom</p>
+            <h2>Sesiones por usuario</h2>
+            <p class="assignment-users-help">Ver sesiones abre el listado rapido de horarios donde se usaria ese host.</p>
+          </div>
+        </div>
+
+        <div class="assignment-users-list">
+          <div class="assignment-users-row" *ngFor="let user of assignmentUserSummaries">
+            <div class="assignment-user-top">
+              <strong>{{ user.host_label }}</strong>
+              <span>{{ user.total_sessions }} sesiones</span>
+              <span *ngIf="user.inherited_rows" class="assignment-user-inline">
+                + {{ user.inherited_rows }} heredadas
+              </span>
+              <span
+                *ngIf="user.license_label"
+                class="assignment-license"
+                [class.assignment-license-ok]="user.is_licensed === true"
+                [class.assignment-license-warning]="user.is_licensed === false"
+                [class.assignment-license-neutral]="user.is_licensed === null">
+                {{ user.license_label }}
+              </span>
+            </div>
+
+            <button
+              *ngIf="user.session_lines.length"
+              class="assignment-user-toggle"
+              type="button"
+              (click)="toggleAssignmentUserDetails(user.host_key)">
+              {{ isAssignmentUserExpanded(user.host_key) ? 'Ocultar sesiones' : 'Ver sesiones' }} ({{ user.session_lines.length }})
+            </button>
+
+            <div class="assignment-user-details" *ngIf="user.session_lines.length && isAssignmentUserExpanded(user.host_key)">
+              <p class="assignment-user-details-title">Sesiones previstas para {{ user.host_label }}</p>
+              <ul class="assignment-user-session-list">
+                <li *ngFor="let line of user.session_lines">{{ line }}</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
 
     <section class="generation-results-board" *ngIf="generationRows.length > 0">
       <article class="result-column" *ngIf="validationResultRows.length > 0">
@@ -343,6 +460,7 @@
         <span>Fecha / Horario</span>
         <span>Docente</span>
         <span>Contexto</span>
+        <span>Host Zoom</span>
         <span>Acciones</span>
       </div>
 
@@ -351,32 +469,37 @@
           class="schedule-line schedule-line-actions"
           [class.selected]="item.selected"
           [class.is-disabled]="!item.selectable"
+          (click)="togglePreviewSelection(item)"
           *ngFor="let item of previewData; trackBy: trackPreviewItem">
           <div class="check-cell">
-            <input type="checkbox" [(ngModel)]="item.selected" [disabled]="!item.selectable" />
+            <input
+              type="checkbox"
+              [(ngModel)]="item.selected"
+              [disabled]="!item.selectable"
+              (click)="$event.stopPropagation()" />
           </div>
-
           <div class="course-cell">
             <strong>{{ item.course_label }}</strong>
             <div class="course-meta-row">
               <span class="course-meta-chip">{{ getSectionDisplay(item) }}</span>
               <span class="course-meta-chip">{{ getSubsectionDisplay(item) }}</span>
+              <span *ngIf="!item.vc_section_id" class="course-meta-chip chip-warning">Match pendiente</span>
             </div>
           </div>
 
           <div class="time-cell">
-          <div class="time-meta">
-            <span class="day-pill">{{ item.day_label }}</span>
-            <span class="duration-pill">{{ item.duration_minutes }} min</span>
-            <span
-              *ngIf="item.effective_conference_date"
-              class="duration-pill"
-              [ngClass]="getOccurrenceBadgeClass(item)">
-              {{ getOccurrenceBadgeLabel(item) }}
-            </span>
-          </div>
-          <strong>{{ item.effective_start_time }} - {{ item.effective_end_time }}</strong>
-          <span class="meta-inline">{{ getOccurrenceDateLabel(item) }}</span>
+            <div class="time-meta">
+              <span class="day-pill">{{ item.day_label }}</span>
+              <span class="duration-pill">{{ item.duration_minutes }} min</span>
+              <span
+                *ngIf="item.effective_conference_date"
+                class="duration-pill"
+                [ngClass]="getOccurrenceBadgeClass(item)">
+                {{ getOccurrenceBadgeLabel(item) }}
+              </span>
+            </div>
+            <strong>{{ item.effective_start_time }} - {{ item.effective_end_time }}</strong>
+            <span class="meta-inline">{{ getOccurrenceDateLabel(item) }}</span>
           </div>
 
           <div class="teacher-cell">
@@ -385,16 +508,39 @@
           </div>
 
           <div class="context-cell">
-            <strong>{{ getContextPrimary(item) }}</strong>
-            <span class="meta-inline">{{ getContextSecondary(item) }}</span>
+            <strong>{{ getAvContextPrimary(item) }}</strong>
+            <span class="meta-inline">{{ getAvContextSecondary(item) }}</span>
             <span class="meta-inline">{{ getVcContext(item) }}</span>
+            <span *ngIf="getVcSourceLabel(item)" class="meta-inline meta-inline-accent">
+              {{ getVcSourceLabel(item) }}
+            </span>
+            <span *ngIf="item.vc_context_message" class="meta-inline">{{ item.vc_context_message }}</span>
             <span class="meta-inline" [class.meta-inline-accent]="item.inheritance.is_inherited">
               {{ inheritanceLabel(item) }}
             </span>
           </div>
 
+          <div class="zoom-host-cell">
+            <strong>{{ assignmentHostLabel(getAssignmentPreview(item)) }}</strong>
+            <span [class]="assignmentStatusClass(getAssignmentPreview(item))">
+              {{ assignmentStatusLabel(getAssignmentPreview(item)) }}
+            </span>
+            <span
+              *ngIf="getAssignmentPreview(item)?.license_label"
+              [class]="assignmentLicenseClass(getAssignmentPreview(item))">
+              {{ getAssignmentPreview(item)?.license_label }}
+            </span>
+            <span *ngIf="getAssignmentPreview(item)?.message" class="meta-inline">
+              {{ getAssignmentPreview(item)?.message }}
+            </span>
+          </div>
+
           <div class="actions-cell">
-            <button class="btn btn-secondary btn-sm" type="button" (click)="openOverrideEditor(item)" [disabled]="loading || !canManageOccurrence(item)">
+            <button
+              class="btn btn-secondary btn-sm"
+              type="button"
+              (click)="$event.stopPropagation(); openOverrideEditor(item)"
+              [disabled]="loading || !canManageOccurrence(item)">
               Reprogramar
             </button>
             <span *ngIf="item.inheritance.is_inherited" class="meta-inline meta-inline-accent">Override en el padre</span>

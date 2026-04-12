@@ -124,6 +124,8 @@ type ImportExecutionCaches = {
     }
   >;
   vcCoursesByProgramId: Map<string, VcCourseEntity[]>;
+  vcFaculties?: VcFacultyEntity[] | null;
+  vcAcademicPrograms?: VcAcademicProgramEntity[] | null;
 };
 
 type NormalizedImportRow = {
@@ -662,6 +664,8 @@ export class PlanningImportService {
       const executionCaches: ImportExecutionCaches = {
         vcContextByScopeKey: new Map(),
         vcCoursesByProgramId: new Map(),
+        vcFaculties: null,
+        vcAcademicPrograms: null,
       };
 
       for (let index = 0; index < scopeEntries.length; index += 1) {
@@ -2783,32 +2787,93 @@ export class PlanningImportService {
       const resolution = asRecord(row.resolution_json);
       return `${recordString(resolution, 'study_plan_course_id')}::${recordString(resolution, 'offer_course_code')}`;
     });
-    const vcContext = await this.resolveVcContextForScope(scope, caches);
     const directScopeVcFacultyId = firstNonEmpty(
       rows.map((row) => recordString(asRecord(row.resolution_json), 'source_vc_faculty_id')),
     );
     const directScopeVcAcademicProgramId = firstNonEmpty(
       rows.map((row) => recordString(asRecord(row.resolution_json), 'source_vc_academic_program_id')),
     );
-    const effectiveVcFacultyId = directScopeVcFacultyId ?? vcContext.vcFacultyId;
-    const effectiveVcAcademicProgramId =
-      directScopeVcAcademicProgramId ?? vcContext.vcAcademicProgramId;
+    const firstScopeSource = rows
+      .map((row) => asRecord(row.source_json))
+      .find((item) => Object.keys(item).length > 0);
+    const scopeCourseSource =
+      asRecord(recordValue(firstScopeSource ?? {}, 'course')) ?? firstScopeSource ?? null;
+    const scopeDetailSource = asRecord(recordValue(firstScopeSource ?? {}, 'detail')) ?? null;
+    const sourceScopeVcContext = await this.resolveVcContextFromSourceInput(
+      {
+        source_vc_faculty_id: directScopeVcFacultyId,
+        source_vc_academic_program_id: directScopeVcAcademicProgramId,
+        faculty_name: extractAkademicFacultyNameFromSource(scopeCourseSource, scopeDetailSource),
+        academic_program_name: extractAkademicProgramNameFromSource(
+          scopeCourseSource,
+          scopeDetailSource,
+        ),
+      },
+      caches,
+    );
+    const effectiveVcFacultyId = sourceScopeVcContext.vcFacultyId;
+    const effectiveVcAcademicProgramId = sourceScopeVcContext.vcAcademicProgramId;
+    const sourceVcFacultyIdByOfferKey = new Map<string, string | null>();
+    const sourceVcAcademicProgramIdByOfferKey = new Map<string, string | null>();
+    const vcFacultyIdByOfferKey = new Map<string, string | null>();
+    const vcAcademicProgramIdByOfferKey = new Map<string, string | null>();
     const vcCourseIdByOfferKey = new Map<string, string | null>();
     for (const [offerKey, offerRows] of rowsByOffer.entries()) {
       const representative = offerRows.map((row) => asRecord(row.resolution_json)).find(Boolean);
       if (!representative) {
+        sourceVcFacultyIdByOfferKey.set(offerKey, null);
+        sourceVcAcademicProgramIdByOfferKey.set(offerKey, null);
+        vcFacultyIdByOfferKey.set(offerKey, null);
+        vcAcademicProgramIdByOfferKey.set(offerKey, null);
         vcCourseIdByOfferKey.set(offerKey, null);
         continue;
       }
+      const firstOfferSource = asRecord(offerRows[0]?.source_json);
+      const offerCourseSource =
+        asRecord(recordValue(firstOfferSource, 'course')) ?? firstOfferSource ?? null;
+      const offerDetailSource = asRecord(recordValue(firstOfferSource, 'detail')) ?? null;
       const sourceVcCourseId = recordString(representative, 'source_vc_course_id');
+      const sourceVcCourse = sourceVcCourseId
+        ? await this.vcCoursesRepo.findOne({ where: { id: sourceVcCourseId } })
+        : null;
+      const sourceNamedVcContext = await this.resolveVcContextFromSourceInput(
+        {
+          source_vc_faculty_id: recordString(representative, 'source_vc_faculty_id'),
+          source_vc_academic_program_id: recordString(representative, 'source_vc_academic_program_id'),
+          faculty_name: extractAkademicFacultyNameFromSource(offerCourseSource, offerDetailSource),
+          academic_program_name: extractAkademicProgramNameFromSource(
+            offerCourseSource,
+            offerDetailSource,
+          ),
+        },
+        caches,
+      );
+      const sourceResolvedVcAcademicProgramId =
+        sourceVcCourse?.program_id ??
+        sourceNamedVcContext.vcAcademicProgramId ??
+        null;
+      const sourceVcAcademicProgram = sourceResolvedVcAcademicProgramId
+        ? await this.vcAcademicProgramsRepo.findOne({ where: { id: sourceResolvedVcAcademicProgramId } })
+        : null;
+      const sourceResolvedVcFacultyId =
+        sourceVcAcademicProgram?.faculty_id ??
+        sourceNamedVcContext.vcFacultyId ??
+        null;
+      const offerVcAcademicProgramId =
+        sourceResolvedVcAcademicProgramId ?? null;
+      const offerVcFacultyId = sourceResolvedVcFacultyId ?? null;
+      sourceVcFacultyIdByOfferKey.set(offerKey, sourceResolvedVcFacultyId);
+      sourceVcAcademicProgramIdByOfferKey.set(offerKey, sourceResolvedVcAcademicProgramId);
       const vcCourseId =
-        sourceVcCourseId ??
+        sourceVcCourse?.id ??
         (await this.resolveVcCourseIdForImport({
           course_code: recordString(representative, 'offer_course_code'),
           course_name: recordString(representative, 'offer_course_name'),
           study_plan_year: scope.study_plan_year,
-          vc_academic_program_id: effectiveVcAcademicProgramId,
+          vc_academic_program_id: offerVcAcademicProgramId,
         }, caches));
+      vcFacultyIdByOfferKey.set(offerKey, offerVcFacultyId);
+      vcAcademicProgramIdByOfferKey.set(offerKey, offerVcAcademicProgramId);
       vcCourseIdByOfferKey.set(offerKey, vcCourseId);
     }
 
@@ -2874,11 +2939,25 @@ export class PlanningImportService {
         'offer_course_code',
       )}`;
       const offerResolutions = offerRows.map((row) => asRecord(row.resolution_json));
+      const sourceVcCourseId = recordString(representative, 'source_vc_course_id');
+      const sourceResolvedVcFacultyId = sourceVcFacultyIdByOfferKey.get(offerKey) ?? null;
+      const sourceResolvedVcAcademicProgramId =
+        sourceVcAcademicProgramIdByOfferKey.get(offerKey) ?? null;
+      const offerVcFacultyId = vcFacultyIdByOfferKey.get(offerKey) ?? effectiveVcFacultyId;
+      const offerVcAcademicProgramId =
+        vcAcademicProgramIdByOfferKey.get(offerKey) ?? effectiveVcAcademicProgramId;
+      const resolvedVcCourseId = vcCourseIdByOfferKey.get(offerKey) ?? null;
       const sourceSystem =
         (firstNonEmpty(
           offerResolutions.map((row) => recordString(row, 'source_system')),
         ) as PlanningSourceSystem | null) ?? 'EXCEL';
       const firstOfferSource = asRecord(offerRows[0]?.source_json);
+      const offerVcSource =
+        sourceResolvedVcFacultyId || sourceResolvedVcAcademicProgramId || sourceVcCourseId
+          ? 'sync_source'
+          : resolvedVcCourseId
+            ? 'fallback_match'
+            : 'fallback_match';
       const offer = this.offersRepo.create({
         id: newId(),
         semester_id: scope.semester_id,
@@ -2889,9 +2968,9 @@ export class PlanningImportService {
         study_plan_id: scope.study_plan_id,
         cycle: scope.cycle,
         study_plan_course_id: recordString(representative, 'study_plan_course_id')!,
-        vc_faculty_id: effectiveVcFacultyId,
-        vc_academic_program_id: effectiveVcAcademicProgramId,
-        vc_course_id: vcCourseIdByOfferKey.get(offerKey) ?? null,
+        vc_faculty_id: offerVcFacultyId,
+        vc_academic_program_id: offerVcAcademicProgramId,
+        vc_course_id: resolvedVcCourseId,
         course_code: recordString(representative, 'offer_course_code'),
         course_name: recordString(representative, 'offer_course_name'),
         study_type_id: catalog.defaultStudyTypeId,
@@ -2904,10 +2983,21 @@ export class PlanningImportService {
           offerResolutions.map((row) => recordString(row, 'source_term_id')),
         ),
         last_synced_at: sourceSystem === 'AKADEMIC' ? now : null,
-        source_payload_json:
+        source_payload_json: attachVcContextMetadata(
           asRecord(recordValue(firstOfferSource, 'course')) ??
-          firstOfferSource ??
-          null,
+            firstOfferSource ??
+            null,
+          {
+            vc_source: offerVcSource,
+            source_vc_faculty_id: sourceResolvedVcFacultyId,
+            source_vc_academic_program_id: sourceResolvedVcAcademicProgramId,
+            source_vc_course_id: sourceVcCourseId,
+            vc_context_message:
+              offerVcSource === 'sync_source'
+                ? 'Contexto AV preservado desde la sincronizacion.'
+                : 'Contexto AV resuelto por nombre/codigo del origen.',
+          },
+        ),
         theoretical_hours:
           maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_theoretical_hours'))) ?? 0,
         practical_hours:
@@ -2942,6 +3032,9 @@ export class PlanningImportService {
           continue;
         }
         const sectionResolutions = sectionRows.map((row) => asRecord(row.resolution_json));
+        const sourceVcSectionId = firstNonEmpty(
+          sectionResolutions.map((row) => recordString(row, 'source_vc_section_id')),
+        );
         const section = this.sectionsRepo.create({
           id: newId(),
           planning_offer_id: offer.id,
@@ -2952,10 +3045,18 @@ export class PlanningImportService {
           source_section_id: firstNonEmpty(
             sectionResolutions.map((row) => recordString(row, 'source_section_id')),
           ),
-          source_payload_json:
+          source_payload_json: attachVcContextMetadata(
             asRecord(recordValue(asRecord(sectionRows[0]?.source_json), 'section')) ??
-            asRecord(sectionRows[0]?.source_json) ??
-            null,
+              asRecord(sectionRows[0]?.source_json) ??
+              null,
+            {
+              vc_source: sourceVcSectionId ? 'sync_source' : 'fallback_match',
+              source_vc_section_id: sourceVcSectionId,
+              vc_context_message: sourceVcSectionId
+                ? 'Seccion VC preservada desde la sincronizacion.'
+                : 'Seccion VC pendiente de resolver por fallback.',
+            },
+          ),
           teacher_id: firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'teacher_id'))),
           course_modality_id: firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'course_modality_id'))),
           projected_vacancies: maxNumber(sectionResolutions.map((row) => recordNumberOrNull(row, 'projected_vacancies'))),
@@ -3136,6 +3237,10 @@ export class PlanningImportService {
       await this.saveChangeLogsBulk(changeLogs, manager);
     });
 
+    for (const offer of offersToInsert) {
+      await this.planningManualService.recalculateVcMatches(actor as any, { offer_id: offer.id });
+    }
+
     return result;
   }
 
@@ -3177,23 +3282,103 @@ export class PlanningImportService {
     return resolved;
   }
 
-  private matchVcFaculty(scope: ImportScope, vcFaculties: VcFacultyEntity[]) {
-    if (scope.faculty_id) {
-      const byId = vcFaculties.find((item) => item.id === scope.faculty_id) ?? null;
+  private async resolveVcContextFromSourceInput(
+    input: {
+      source_vc_faculty_id?: string | null;
+      source_vc_academic_program_id?: string | null;
+      faculty_name?: string | null;
+      academic_program_name?: string | null;
+    },
+    caches?: ImportExecutionCaches,
+  ) {
+    const [vcFaculties, vcPrograms] = await this.loadVcContextCatalogs(caches);
+    const vcFaculty = this.findVcFacultyByIdOrName(
+      input.source_vc_faculty_id ?? null,
+      input.faculty_name ?? null,
+      vcFaculties,
+    );
+    const vcAcademicProgram = this.findVcAcademicProgramByIdOrName(
+      input.source_vc_academic_program_id ?? null,
+      input.academic_program_name ?? null,
+      vcFaculty?.id ?? null,
+      vcPrograms,
+    );
+    const effectiveFaculty =
+      vcAcademicProgram
+        ? vcFaculties.find((item) => item.id === vcAcademicProgram.faculty_id) ?? vcFaculty
+        : vcFaculty;
+
+    return {
+      vcFacultyId: effectiveFaculty?.id ?? null,
+      vcAcademicProgramId: vcAcademicProgram?.id ?? null,
+    };
+  }
+
+  private async loadVcContextCatalogs(caches?: ImportExecutionCaches) {
+    if (!caches?.vcFaculties) {
+      const vcFaculties = await this.vcFacultiesRepo.find({ order: { name: 'ASC' } });
+      if (caches) {
+        caches.vcFaculties = vcFaculties;
+      } else {
+        return [vcFaculties, await this.vcAcademicProgramsRepo.find({ order: { name: 'ASC' } })] as const;
+      }
+    }
+    if (!caches?.vcAcademicPrograms) {
+      const vcPrograms = await this.vcAcademicProgramsRepo.find({ order: { name: 'ASC' } });
+      if (caches) {
+        caches.vcAcademicPrograms = vcPrograms;
+      } else {
+        return [await this.vcFacultiesRepo.find({ order: { name: 'ASC' } }), vcPrograms] as const;
+      }
+    }
+    return [caches?.vcFaculties ?? [], caches?.vcAcademicPrograms ?? []] as const;
+  }
+
+  private findVcFacultyByIdOrName(
+    facultyId: string | null,
+    facultyName: string | null,
+    vcFaculties: VcFacultyEntity[],
+  ) {
+    if (facultyId) {
+      const byId = vcFaculties.find((item) => item.id === facultyId) ?? null;
       if (byId) {
         return byId;
       }
     }
-
-    const normalizedFacultyName = normalizeLoose(scope.faculty_name);
-    if (!normalizedFacultyName) {
+    const nameVariants = buildCatalogNameMatchVariants(facultyName);
+    if (nameVariants.length === 0) {
       return null;
     }
+    const matches = vcFaculties.filter((item) => catalogNameMatches(item.name, nameVariants));
+    return matches.length === 1 ? matches[0] : null;
+  }
 
-    const matches = vcFaculties.filter(
-      (item) => normalizeLoose(item.name) === normalizedFacultyName,
+  private findVcAcademicProgramByIdOrName(
+    programId: string | null,
+    programName: string | null,
+    facultyId: string | null,
+    vcPrograms: VcAcademicProgramEntity[],
+  ) {
+    if (programId) {
+      const byId = vcPrograms.find((item) => item.id === programId) ?? null;
+      if (byId && (!facultyId || byId.faculty_id === facultyId)) {
+        return byId;
+      }
+    }
+    const nameVariants = buildCatalogNameMatchVariants(programName);
+    if (nameVariants.length === 0) {
+      return null;
+    }
+    const matches = vcPrograms.filter(
+      (item) =>
+        (!facultyId || item.faculty_id === facultyId) &&
+        catalogNameMatches(item.name, nameVariants),
     );
     return matches.length === 1 ? matches[0] : null;
+  }
+
+  private matchVcFaculty(scope: ImportScope, vcFaculties: VcFacultyEntity[]) {
+    return this.findVcFacultyByIdOrName(scope.faculty_id ?? null, scope.faculty_name ?? null, vcFaculties);
   }
 
   private matchVcAcademicProgram(
@@ -3201,26 +3386,12 @@ export class PlanningImportService {
     vcFacultyId: string | null,
     vcPrograms: VcAcademicProgramEntity[],
   ) {
-    if (scope.academic_program_id) {
-      const byId = vcPrograms.find((item) => item.id === scope.academic_program_id) ?? null;
-      if (byId && (!vcFacultyId || byId.faculty_id === vcFacultyId)) {
-        return byId;
-      }
-    }
-
-    const normalizedProgramName = normalizeLoose(scope.academic_program_name);
-    if (!normalizedProgramName) {
-      return null;
-    }
-
-    const nameMatches = vcPrograms.filter(
-      (item) => normalizeLoose(item.name) === normalizedProgramName,
+    return this.findVcAcademicProgramByIdOrName(
+      scope.academic_program_id ?? null,
+      scope.academic_program_name ?? null,
+      vcFacultyId,
+      vcPrograms,
     );
-    const scopedMatches = vcFacultyId
-      ? nameMatches.filter((item) => item.faculty_id === vcFacultyId)
-      : nameMatches;
-
-    return scopedMatches.length === 1 ? scopedMatches[0] : null;
   }
 
   private async resolveVcCourseIdForImport(input: {
@@ -5834,6 +6005,9 @@ export class PlanningImportService {
 
       const now = new Date();
       const sectionResolutions = previewRows.map((row) => asRecord(row.resolution_json));
+      const sourceVcSectionId = firstNonEmpty(
+        sectionResolutions.map((row) => recordString(row, 'source_vc_section_id')),
+      );
       const nextSection = this.sectionsRepo.create({
         ...currentSection,
         external_code: firstNonEmpty(
@@ -5842,10 +6016,19 @@ export class PlanningImportService {
         source_section_id: firstNonEmpty(
           sectionResolutions.map((row) => recordString(row, 'source_section_id')),
         ),
-        source_payload_json:
+        source_payload_json: attachVcContextMetadata(
           asRecord(recordValue(asRecord(previewRows[0]?.source_json), 'section')) ??
-          asRecord(previewRows[0]?.source_json) ??
-          null,
+            asRecord(previewRows[0]?.source_json) ??
+            null,
+          {
+            ...(readVcContextMetadata(currentSection.source_payload_json) ?? {}),
+            vc_source: sourceVcSectionId ? 'sync_source' : 'fallback_match',
+            source_vc_section_id: sourceVcSectionId,
+            vc_context_message: sourceVcSectionId
+              ? 'Seccion VC preservada desde la sincronizacion.'
+              : 'Seccion VC pendiente de resolver por fallback.',
+          },
+        ),
         teacher_id: firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'teacher_id'))),
         course_modality_id: firstNonEmpty(
           sectionResolutions.map((row) => recordString(row, 'course_modality_id')),
@@ -6209,6 +6392,7 @@ export class PlanningImportService {
     });
 
     await this.planningManualService.rebuildOfferConflictsAndStatus(offer.id, actor as any);
+    await this.planningManualService.recalculateVcMatches(actor as any, { offer_id: offer.id });
     return sectionSummary;
   }
 
@@ -7413,6 +7597,116 @@ function extractAkademicFacultyIdFromSource(
       ),
     )
   );
+}
+
+function extractAkademicProgramNameFromSource(
+  courseRaw: Record<string, unknown> | null | undefined,
+  sectionDetail: Record<string, unknown> | null | undefined,
+) {
+  return (
+    asNullableString(
+      pick(
+        sectionDetail ?? {},
+        'career.name',
+        'careerName',
+        'program.name',
+        'programName',
+        'course.career.name',
+        'course.careerName',
+      ),
+    ) ??
+    asNullableString(
+      pick(
+        courseRaw ?? {},
+        'career.name',
+        'careerName',
+        'program.name',
+        'programName',
+        'detail.career.name',
+        'detail.careerName',
+      ),
+    )
+  );
+}
+
+function extractAkademicFacultyNameFromSource(
+  courseRaw: Record<string, unknown> | null | undefined,
+  sectionDetail: Record<string, unknown> | null | undefined,
+) {
+  return (
+    asNullableString(
+      pick(
+        sectionDetail ?? {},
+        'career.faculty.name',
+        'career.facultyName',
+        'faculty.name',
+        'facultyName',
+        'course.career.faculty.name',
+        'course.career.facultyName',
+      ),
+    ) ??
+    asNullableString(
+      pick(
+        courseRaw ?? {},
+        'career.faculty.name',
+        'career.facultyName',
+        'faculty.name',
+        'facultyName',
+        'detail.career.faculty.name',
+        'detail.career.facultyName',
+      ),
+    )
+  );
+}
+
+function buildCatalogNameMatchVariants(value: string | null | undefined) {
+  const raw = `${value ?? ''}`.replace(/\s+/g, ' ').trim();
+  if (!raw) {
+    return [];
+  }
+  const variants = new Set<string>([normalizeLoose(raw)]);
+  const parts = raw.split(/\s-\s/);
+  if (parts.length > 1) {
+    const head = normalizeLoose(parts[0]);
+    if (/^[A-Z0-9/_-]+$/.test(head)) {
+      variants.add(normalizeLoose(parts.slice(1).join(' - ')));
+    }
+  }
+  return [...variants].filter(Boolean);
+}
+
+function catalogNameMatches(value: string | null | undefined, variants: string[]) {
+  if (!variants.length) {
+    return false;
+  }
+  return buildCatalogNameMatchVariants(value).some((item) => variants.includes(item));
+}
+
+function readVcContextMetadata(sourcePayload: Record<string, unknown> | null | undefined) {
+  const payload = asRecord(sourcePayload);
+  const rawContext = payload.__vc_context;
+  if (!rawContext || typeof rawContext !== 'object' || Array.isArray(rawContext)) {
+    return null;
+  }
+  return rawContext as Record<string, unknown>;
+}
+
+function attachVcContextMetadata(
+  sourcePayload: Record<string, unknown> | null | undefined,
+  metadata: Record<string, unknown>,
+) {
+  const payload = asRecord(sourcePayload);
+  const current = readVcContextMetadata(payload) ?? {};
+  const nextContext = Object.fromEntries(
+    Object.entries({
+      ...current,
+      ...metadata,
+    }).filter(([, value]) => value !== undefined),
+  );
+  return {
+    ...payload,
+    __vc_context: nextContext,
+  };
 }
 
 function parseDayOfWeek(value: string | null | undefined) {

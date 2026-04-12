@@ -43,10 +43,42 @@ export class FilterOptionsDto {
     @IsOptional()
     @IsArray()
     @IsString({ each: true })
+    modalities?: string[];
+
+    @IsOptional()
+    @IsArray()
+    @IsString({ each: true })
     days?: string[];
 }
 
 export class PreviewVideoconferenceDto extends FilterOptionsDto {
+    @IsOptional()
+    @IsDateString()
+    startDate?: string;
+
+    @IsOptional()
+    @IsDateString()
+    endDate?: string;
+}
+
+export class AssignmentPreviewVideoconferenceDto extends FilterOptionsDto {
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    selectAllVisible?: boolean;
+
+    @IsOptional()
+    @IsArray()
+    @ArrayUnique()
+    @IsString({ each: true })
+    scheduleIds?: string[];
+
+    @IsOptional()
+    @IsArray()
+    @ArrayUnique()
+    @IsString({ each: true })
+    occurrenceKeys?: string[];
+
     @IsOptional()
     @IsDateString()
     startDate?: string;

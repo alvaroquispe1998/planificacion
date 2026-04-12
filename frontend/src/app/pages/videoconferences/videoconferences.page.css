@@ -655,7 +655,7 @@ h1 {
 }
 
 .rows-header-actions {
-  grid-template-columns: 44px minmax(280px, 1.35fr) minmax(220px, 0.9fr) minmax(240px, 1fr) minmax(260px, 1fr) minmax(210px, 0.85fr);
+  grid-template-columns: 44px minmax(250px, 1.2fr) minmax(200px, 0.85fr) minmax(220px, 0.9fr) minmax(240px, 1fr) minmax(230px, 0.9fr) minmax(170px, 0.7fr);
 }
 
 .schedule-rows {
@@ -676,7 +676,7 @@ h1 {
 }
 
 .schedule-line-actions {
-  grid-template-columns: 44px minmax(280px, 1.35fr) minmax(220px, 0.9fr) minmax(240px, 1fr) minmax(260px, 1fr) minmax(210px, 0.85fr);
+  grid-template-columns: 44px minmax(250px, 1.2fr) minmax(200px, 0.85fr) minmax(220px, 0.9fr) minmax(240px, 1fr) minmax(230px, 0.9fr) minmax(170px, 0.7fr);
 }
 
 .schedule-line:last-child {
@@ -694,6 +694,7 @@ h1 {
 
 .schedule-line.is-disabled {
   opacity: 0.72;
+  cursor: not-allowed;
 }
 
 .check-cell {
@@ -701,10 +702,15 @@ h1 {
   justify-content: center;
 }
 
+.check-cell input {
+  cursor: pointer;
+}
+
 .course-cell,
 .time-cell,
 .teacher-cell,
 .context-cell,
+.zoom-host-cell,
 .actions-cell {
   display: flex;
   flex-direction: column;
@@ -719,10 +725,225 @@ h1 {
 
 .course-cell strong,
 .teacher-cell strong,
-.context-cell strong {
+.context-cell strong,
+.zoom-host-cell strong {
   color: #253d5b;
   font-size: 0.9rem;
   line-height: 1.3;
+}
+
+.assignment-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+  padding: 1rem 1.05rem;
+  border-radius: 16px;
+  border: 1px solid #d8e7f5;
+  background: linear-gradient(180deg, rgba(244, 249, 255, 0.95), rgba(252, 254, 255, 0.98));
+}
+
+.assignment-summary-head h3 {
+  margin: 0.28rem 0 0.2rem;
+  color: #29405f;
+}
+
+.assignment-summary-head p {
+  margin: 0;
+  color: #607287;
+}
+
+.assignment-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.7rem;
+}
+
+.assignment-day-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.65rem;
+}
+
+.assignment-day-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.72rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid #d6e5f4;
+  background: #fff;
+}
+
+.assignment-day-card strong {
+  color: #25527f;
+  font-size: 1.05rem;
+}
+
+.assignment-day-card span {
+  color: #637c95;
+  font-size: 0.82rem;
+}
+
+.assignment-warning-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid #f5d7a7;
+  background: #fff8ea;
+}
+
+.assignment-warning-list p {
+  margin: 0;
+  color: #8a6423;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.assignment-pill,
+.assignment-license {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 24px;
+  padding: 0.18rem 0.52rem;
+  border-radius: 999px;
+  border: 1px solid #d7e6f3;
+  background: #f7fbff;
+  color: #4f6a85;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.assignment-pill-success {
+  background: #ecfdf3;
+  border-color: #b7ebc9;
+  color: #157347;
+}
+
+.assignment-pill-warning,
+.assignment-license-warning {
+  background: #fff8e8;
+  border-color: #f4d48d;
+  color: #946200;
+}
+
+.assignment-pill-neutral,
+.assignment-license-neutral {
+  background: #f4f6f8;
+  border-color: #d8dee5;
+  color: #58697c;
+}
+
+.assignment-pill-danger {
+  background: #fff1f2;
+  border-color: #f4b5bd;
+  color: #b42318;
+}
+
+.assignment-license-ok {
+  background: #eef7ff;
+  border-color: #c7ddf5;
+  color: #245f97;
+}
+
+.assignment-users-modal {
+  position: relative;
+  width: min(720px, calc(100vw - 2rem));
+}
+
+.assignment-users-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 0.9rem;
+}
+
+.assignment-users-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.55rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid #d6e5f4;
+  background: #fff;
+}
+
+.assignment-user-top {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.assignment-users-row strong {
+  flex: 1 1 280px;
+  min-width: 0;
+  color: #24466c;
+  font-size: 0.92rem;
+  word-break: break-all;
+}
+
+.assignment-users-row span {
+  color: #637c95;
+  font-size: 0.84rem;
+}
+
+.assignment-user-inline {
+  color: #7b8795;
+}
+
+.assignment-users-help {
+  margin: 0.35rem 0 0;
+  color: #6d8095;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.assignment-user-toggle {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #275f97;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.assignment-user-toggle:hover {
+  text-decoration: underline;
+}
+
+.assignment-user-details {
+  width: 100%;
+  padding: 0.2rem 0 0;
+}
+
+.assignment-user-details-title {
+  margin: 0 0 0.45rem;
+  color: #264c72;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.assignment-user-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.26rem;
+  margin: 0.55rem 0 0;
+  padding-left: 1rem;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.assignment-user-session-list li {
+  color: #536b84;
+  font-size: 0.81rem;
+  line-height: 1.35;
 }
 
 .time-cell strong {
@@ -838,6 +1059,28 @@ h1 {
   box-shadow: 0 20px 44px rgba(20, 43, 70, 0.22);
 }
 
+.modal-close-corner {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #d2e2f1;
+  border-radius: 999px;
+  background: #f4f9ff;
+  color: #2b557e;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-close-corner:hover {
+  background: #eaf3fc;
+}
+
 .modal-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -925,6 +1168,7 @@ h1 {
 
   .teacher-cell,
   .context-cell,
+  .zoom-host-cell,
   .actions-cell {
     grid-column: 2 / -1;
   }
@@ -968,6 +1212,7 @@ h1 {
   .time-cell,
   .teacher-cell,
   .context-cell,
+  .zoom-host-cell,
   .actions-cell {
     grid-column: 2;
   }
@@ -989,3 +1234,4 @@ h1 {
     flex-direction: column;
   }
 }
+.chip-warning { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }

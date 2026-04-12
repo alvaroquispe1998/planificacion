@@ -961,6 +961,10 @@ export class RecalculatePlanningVcMatchesDto {
   offer_id?: string;
 
   @IsOptional()
+  @IsString()
+  query?: string;
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   subsection_ids?: string[];
