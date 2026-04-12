@@ -658,7 +658,7 @@ export class PlanningController {
     @Query('academic_program_id') academicProgramId?: string,
     @Query('cycle') cycle?: string,
     @Query('study_plan_id') studyPlanId?: string,
-    @Query('offer_id') offerId?: string,
+    @Query('query') query?: string,
   ) {
     if (facultyId || academicProgramId) {
       this.authService.assertScopeAccess(authUser, facultyId, academicProgramId);
@@ -671,7 +671,7 @@ export class PlanningController {
         academic_program_id: academicProgramId,
         cycle: cycle ? Number(cycle) : undefined,
         study_plan_id: studyPlanId,
-        offer_id: offerId,
+        query,
       })
       .then((rows) =>
         this.authService.filterByScope(authUser, rows, (item: any) => ({

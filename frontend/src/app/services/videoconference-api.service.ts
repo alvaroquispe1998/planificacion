@@ -9,6 +9,7 @@ export interface FilterOptionsDto {
     programIds?: string[];
     courseIds?: string[];
     modality?: string;
+    modalities?: string[];
     days?: string[];
 }
 
@@ -65,10 +66,15 @@ export interface VideoconferencePreviewItem {
     duration_minutes: number;
     vc_period_id: string | null;
     vc_faculty_id: string | null;
+    vc_faculty_name: string | null;
     vc_academic_program_id: string | null;
+    vc_academic_program_name: string | null;
     vc_course_id: string | null;
+    vc_course_name: string | null;
     vc_section_id: string | null;
     vc_section_name: string | null;
+    vc_source: string | null;
+    vc_context_message: string | null;
     occurrence_type: 'BASE' | 'RESCHEDULED' | 'SKIPPED';
     base_conference_date: string;
     effective_conference_date: string;
@@ -87,6 +93,70 @@ export interface VideoconferencePreviewItem {
         family_owner_schedule_id: string;
     };
     selected?: boolean;
+}
+
+export type VideoconferenceAssignmentPreviewMode = 'BASE' | 'OCCURRENCE';
+
+export type VideoconferenceAssignmentPreviewStatus =
+    | 'ASSIGNED_LICENSED'
+    | 'ASSIGNED_RISK'
+    | 'INHERITED'
+    | 'BLOCKED_EXISTING'
+    | 'NO_AVAILABLE_ZOOM_USER'
+    | 'VALIDATION_ERROR';
+
+export interface VideoconferenceAssignmentPreviewDaySummary {
+    day_of_week: string;
+    day_label: string;
+    required_hosts: number;
+}
+
+export interface VideoconferenceAssignmentPreviewSummary {
+    requested_rows: number;
+    assigned_rows: number;
+    hosts_used: number;
+    verified_hosts_used: number;
+    risk_hosts_used: number;
+    no_available_zoom_user: number;
+    validation_errors: number;
+    blocked_existing: number;
+    virtual_hosts_needed: number;
+    licenses_required_global: number;
+    additional_licenses_needed: number | null;
+    licenses_by_day: VideoconferenceAssignmentPreviewDaySummary[];
+}
+
+export interface VideoconferenceAssignmentPreviewItem {
+    id: string;
+    mode: VideoconferenceAssignmentPreviewMode;
+    occurrence_key: string | null;
+    schedule_id: string;
+    conference_date: string | null;
+    day_of_week: string;
+    day_label: string;
+    start_time: string;
+    end_time: string;
+    preview_status: VideoconferenceAssignmentPreviewStatus;
+    message: string;
+    zoom_user_id: string | null;
+    zoom_user_email: string | null;
+    zoom_user_name: string | null;
+    license_status: ZoomPoolLicenseStatus | null;
+    license_label: string | null;
+    is_licensed: boolean | null;
+    depends_on_unverified_license: boolean;
+    consumes_capacity: boolean;
+    inheritance: VideoconferencePreviewItem['inheritance'];
+    owner_occurrence_key: string | null;
+}
+
+export interface VideoconferenceAssignmentPreviewResponse {
+    mode: VideoconferenceAssignmentPreviewMode;
+    summary: VideoconferenceAssignmentPreviewSummary;
+    items: VideoconferenceAssignmentPreviewItem[];
+    pool_warnings?: string[];
+    license_sync_ok: boolean;
+    license_sync_error: string | null;
 }
 
 export interface VideoconferenceOverridePayload {
@@ -306,6 +376,24 @@ export class VideoconferenceApiService {
 
     preview(filters: VideoconferencePreviewDto) {
         return this.http.post<VideoconferencePreviewItem[]>(`${this.baseUrl}/preview`, filters);
+    }
+
+    assignmentPreview(payload: {
+        selectAllVisible?: boolean;
+        semesterId?: string;
+        campusIds?: string[];
+        facultyIds?: string[];
+        programIds?: string[];
+        courseIds?: string[];
+        modality?: string;
+        modalities?: string[];
+        days?: string[];
+        scheduleIds?: string[];
+        occurrenceKeys?: string[];
+        startDate?: string;
+        endDate?: string;
+    }) {
+        return this.http.post<VideoconferenceAssignmentPreviewResponse>(`${this.baseUrl}/assignment-preview`, payload);
     }
 
     generate(payload: {

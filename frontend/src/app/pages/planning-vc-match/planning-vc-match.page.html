@@ -36,9 +36,9 @@
     </select>
     <input
       type="text"
-      [(ngModel)]="filters.offer_id"
-      (change)="loadRows()"
-      placeholder="Offer ID (opcional)" />
+      [(ngModel)]="filters.query"
+      (ngModelChange)="loadRows()"
+      placeholder="Buscar curso o docente..." />
   </section>
 
   <p *ngIf="message" class="flash success">{{ message }}</p>
@@ -50,10 +50,15 @@
         <p class="eyebrow">Configuracion base</p>
         <h2>Mapa de locales VC</h2>
       </div>
-      <span class="count">{{ catalog.campuses?.length || 0 }} locales</span>
+      <div class="head-actions">
+        <span class="count">{{ catalog.campuses?.length || 0 }} locales</span>
+        <button class="btn btn-secondary btn-sm" (click)="toggleMappingPanel()">
+          {{ isMappingPanelOpen ? 'Ocultar mapa' : 'Configurar locales' }}
+        </button>
+      </div>
     </div>
 
-    <div class="mapping-grid">
+    <div class="mapping-grid" *ngIf="isMappingPanelOpen">
       <article class="mapping-card" *ngFor="let campus of catalog.campuses">
         <div>
           <strong>{{ campus.name }}</strong>
@@ -85,7 +90,8 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>Contexto</th>
+            <th>Contexto local</th>
+            <th>Contexto AV</th>
             <th>Curso VC</th>
             <th>Nombre esperado</th>
             <th>Estado</th>
@@ -101,6 +107,13 @@
                 <strong>{{ row.offer?.course_code || '---' }} - {{ row.offer?.course_name || 'Curso' }}</strong>
                 <span>{{ row.campus?.name || 'Sin local' }} · {{ row.academic_program?.name || 'Sin programa' }}</span>
                 <span>{{ row.section?.code }} / {{ row.subsection?.code }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="context-stack">
+                <strong>{{ row.offer?.vc_faculty?.name || 'Sin facultad AV' }}</strong>
+                <span>{{ row.offer?.vc_academic_program?.name || 'Sin programa AV' }}</span>
+                <span>{{ vcSourceLabel(row.offer?.vc_source) }}</span>
               </div>
             </td>
             <td>{{ row.offer?.vc_course?.name || 'Sin vc_course_id' }}</td>

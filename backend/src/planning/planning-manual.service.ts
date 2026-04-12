@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, ObjectLiteral, Repository } from 'typeorm';
+import { ILike, In, ObjectLiteral, Repository } from 'typeorm';
 import { newId } from '../common';
 import {
   AcademicProgramEntity,
@@ -96,7 +96,7 @@ type PlanningVcMatchFilters = {
   academic_program_id?: string;
   cycle?: number;
   study_plan_id?: string;
-  offer_id?: string;
+  query?: string;
 };
 
 type ChangeLogActor = {
@@ -110,11 +110,12 @@ type ChangeLogFilters = {
   entity_type?: string;
   entity_id?: string;
   action?: string;
-  offer_id?: string;
+  query?: string;
   changed_by?: string;
   from?: string;
   to?: string;
   limit?: number;
+  offer_id?: string;
 };
 
 type ChangeLogReferenceMaps = {
@@ -1238,11 +1239,22 @@ export class PlanningManualService {
   async updateOffer(actor: ChangeLogActor | null | undefined, id: string, dto: UpdatePlanningOfferDto) {
     const current = await this.requireEntity(this.offersRepo, id, 'planning_offer');
     await this.assertOfferPlanEditable(current);
+    const nextSourcePayloadJson =
+      dto.vc_course_id !== undefined
+        ? upsertOfferVcContextMetadata(current.source_payload_json, {
+            vc_source: emptyToNull(dto.vc_course_id) ? 'manual_override' : 'sync_source',
+            manual_vc_course_id: emptyToNull(dto.vc_course_id),
+            vc_context_message: emptyToNull(dto.vc_course_id)
+              ? 'Curso VC ajustado manualmente.'
+              : 'Curso VC restablecido al contexto sincronizado.',
+          })
+        : current.source_payload_json;
     const next = this.offersRepo.create({
       ...current,
       ...dto,
       vc_course_id:
         dto.vc_course_id !== undefined ? emptyToNull(dto.vc_course_id) : current.vc_course_id,
+      source_payload_json: nextSourcePayloadJson,
       updated_at: new Date(),
     });
     await this.offersRepo.save(next);
@@ -2047,16 +2059,22 @@ export class PlanningManualService {
   }
 
   async listVcMatchRows(filters: PlanningVcMatchFilters = {}) {
+    const baseWhere: any = {
+      ...(filters.semester_id ? { semester_id: filters.semester_id } : {}),
+      ...(filters.campus_id ? { campus_id: filters.campus_id } : {}),
+      ...(filters.faculty_id ? { faculty_id: filters.faculty_id } : {}),
+      ...(filters.academic_program_id ? { academic_program_id: filters.academic_program_id } : {}),
+      ...(filters.cycle ? { cycle: filters.cycle } : {}),
+      ...(filters.study_plan_id ? { study_plan_id: filters.study_plan_id } : {}),
+    };
+
     const offers = await this.offersRepo.find({
-      where: {
-        ...(filters.semester_id ? { semester_id: filters.semester_id } : {}),
-        ...(filters.campus_id ? { campus_id: filters.campus_id } : {}),
-        ...(filters.faculty_id ? { faculty_id: filters.faculty_id } : {}),
-        ...(filters.academic_program_id ? { academic_program_id: filters.academic_program_id } : {}),
-        ...(filters.cycle ? { cycle: filters.cycle } : {}),
-        ...(filters.study_plan_id ? { study_plan_id: filters.study_plan_id } : {}),
-        ...(filters.offer_id ? { id: filters.offer_id } : {}),
-      },
+      where: filters.query
+        ? [
+            { ...baseWhere, course_name: ILike(`%${filters.query}%`) },
+            { ...baseWhere, course_code: ILike(`%${filters.query}%`) },
+          ]
+        : baseWhere,
       order: { course_name: 'ASC', updated_at: 'DESC' },
     });
     if (offers.length === 0) {
@@ -2088,15 +2106,20 @@ export class PlanningManualService {
     const facultyMap = mapById(faculties);
     const programMap = mapById(academicPrograms);
     const studyPlanMap = mapById(studyPlans);
+    const vcFacultyMap = mapById(context.vcFaculties);
+    const vcAcademicProgramMap = mapById(context.vcAcademicPrograms);
     const vcCourseMap = mapById(context.vcCourses);
     const vcSectionMap = mapById([...context.vcSections, ...candidateVcSections]);
+    const teacherMap = mapById(context.teachers);
     const candidateSectionsByCourseId = groupBy(candidateVcSections, (item) => item.course_id);
 
-    return offers
+    const rows = offers
       .flatMap((offer) => {
+        const offerVcContext = readOfferVcContextMetadata(offer.source_payload_json);
         const offerSections = sectionsByOfferId.get(offer.id) ?? [];
         return offerSections.flatMap((section) =>
           (subsectionsBySectionId.get(section.id) ?? []).map((subsection) => {
+            const sectionVcContext = readSectionVcContextMetadata(section.source_payload_json);
             const expectedVcSectionName = this.buildExpectedVcSectionNameForSubsection(
               subsection,
               section,
@@ -2106,10 +2129,28 @@ export class PlanningManualService {
                 campusVcLocations: context.campusVcLocations,
               },
             );
+            const expectedVcSectionNames = this.buildExpectedVcSectionNameCandidatesForSubsection(
+              subsection,
+              section,
+              offer,
+              {
+                modalities: context.modalities,
+                campusVcLocations: context.campusVcLocations,
+              },
+            );
             const sectionCandidates = candidateSectionsByCourseId.get(offer.vc_course_id ?? '__none__') ?? [];
-            const suggestedMatches = expectedVcSectionName
-              ? this.findMatchingVcSections(sectionCandidates, expectedVcSectionName)
+            const suggestedMatches = expectedVcSectionNames.length
+              ? this.findMatchingVcSections(sectionCandidates, expectedVcSectionNames)
               : [];
+
+            // Priorizar concordancia desde la sincronización de Akademic (tabla sinc)
+            const syncSourceId = sectionVcContext.source_vc_section_id;
+            if (syncSourceId && !suggestedMatches.some((m) => m.id === syncSourceId)) {
+              const syncRecord = vcSectionMap.get(syncSourceId);
+              if (syncRecord) {
+                suggestedMatches.unshift(syncRecord);
+              }
+            }
             return {
               id: subsection.id,
               semester: semesterMap.get(offer.semester_id) ?? null,
@@ -2123,7 +2164,15 @@ export class PlanningManualService {
                 course_code: offer.course_code,
                 course_name: offer.course_name,
                 vc_course_id: offer.vc_course_id,
+                vc_faculty_id: offer.vc_faculty_id,
+                vc_academic_program_id: offer.vc_academic_program_id,
+                vc_source: offerVcContext.vc_source,
+                vc_context_message: offerVcContext.vc_context_message,
+                source_vc_course_id: offerVcContext.source_vc_course_id,
                 vc_course: vcCourseMap.get(offer.vc_course_id ?? '') ?? null,
+                vc_faculty: vcFacultyMap.get(offer.vc_faculty_id ?? '') ?? null,
+                vc_academic_program:
+                  vcAcademicProgramMap.get(offer.vc_academic_program_id ?? '') ?? null,
               },
               section: {
                 id: section.id,
@@ -2132,7 +2181,11 @@ export class PlanningManualService {
               subsection: {
                 id: subsection.id,
                 code: subsection.code,
+                teacher_name: teacherMap.get(subsection.responsible_teacher_id ?? '')?.name ?? null,
                 vc_section_id: subsection.vc_section_id,
+                source_vc_section_id: sectionVcContext.source_vc_section_id,
+                manual_vc_section_id:
+                  sectionVcContext.manual_subsection_overrides[subsection.code] ?? null,
               },
               expected_vc_section_name: expectedVcSectionName,
               vc_section: vcSectionMap.get(subsection.vc_section_id ?? '') ?? null,
@@ -2140,13 +2193,35 @@ export class PlanningManualService {
               suggested_vc_sections: suggestedMatches,
               match_status: resolveDetailedVcMatchStatus(
                 subsection.vc_section_id,
+                vcSectionMap.get(subsection.vc_section_id ?? '') ?? null,
+                offer.vc_course_id,
                 expectedVcSectionName,
                 suggestedMatches.length,
               ),
             };
           }),
         );
-      })
+      });
+
+    return rows.filter((r) => {
+      const passesFilter = shouldIncludeVcMatchRow(r);
+      if (!passesFilter) return false;
+
+      if (filters.query) {
+        const q = filters.query.toLowerCase();
+        const teacherName = (r.subsection?.teacher_name || '').toLowerCase();
+        const courseName = (r.offer?.course_name || '').toLowerCase();
+        const courseCode = (r.offer?.course_code || '').toLowerCase();
+
+        return (
+          teacherName.includes(q) ||
+          courseName.includes(q) ||
+          courseCode.includes(q)
+        );
+      }
+
+      return true;
+    })
       .sort((left, right) => {
         const offerDelta = compareCatalogLabels(
           left.offer?.course_name ?? left.offer?.course_code,
@@ -2189,6 +2264,20 @@ export class PlanningManualService {
       updated_at: new Date(),
     });
     await this.subsectionsRepo.save(next);
+    const nextSection = this.sectionsRepo.create({
+      ...section,
+      source_payload_json: upsertSectionVcContextMetadata(section.source_payload_json, {
+        manual_subsection_overrides: {
+          ...readSectionVcContextMetadata(section.source_payload_json).manual_subsection_overrides,
+          [current.code]: nextVcSectionId,
+        },
+        vc_context_message: nextVcSectionId
+          ? 'Match VC ajustado manualmente para la subseccion.'
+          : 'Match VC manual eliminado para la subseccion.',
+      }),
+      updated_at: new Date(),
+    });
+    await this.sectionsRepo.save(nextSection);
     const saved = await this.requireEntity(this.subsectionsRepo, id, 'planning_subsection');
     await this.logChange(
       'planning_subsection',
@@ -2197,6 +2286,15 @@ export class PlanningManualService {
       current,
       saved,
       { ...this.buildSubsectionLogContext(saved, section, offer), vc_match_action: 'manual_override' },
+      actor,
+    );
+    await this.logChange(
+      'planning_section',
+      section.id,
+      'UPDATE',
+      section,
+      nextSection,
+      { ...this.buildSectionLogContext(nextSection, offer), vc_match_action: 'manual_override_metadata' },
       actor,
     );
     return this.getSubsection(id);
@@ -3057,12 +3155,15 @@ export class PlanningManualService {
     const campusVcLocationMap = new Map(
       context.campusVcLocations.map((item) => [item.campus_id, item]),
     );
+    const vcContext = readOfferVcContextMetadata(offer.source_payload_json);
     return {
       ...offer,
       vc_period: vcPeriodMap.get(offer.vc_period_id ?? '') ?? null,
       vc_faculty: vcFacultyMap.get(offer.vc_faculty_id ?? '') ?? null,
       vc_academic_program: vcAcademicProgramMap.get(offer.vc_academic_program_id ?? '') ?? null,
       vc_course: vcCourseMap.get(offer.vc_course_id ?? '') ?? null,
+      vc_source: vcContext.vc_source,
+      vc_context_message: vcContext.vc_context_message,
       campus_vc_location: campusVcLocationMap.get(offer.campus_id) ?? null,
       section_count: sections.length,
       subsection_count: subsections.length,
@@ -3313,6 +3414,7 @@ export class PlanningManualService {
     const buildingMap = mapById(input.buildings);
     const classroomMap = mapById(input.classrooms);
     const ownSchedules = input.schedules.filter((item) => item.planning_subsection_id === subsection.id);
+    const sectionVcContext = readSectionVcContextMetadata(input.section?.source_payload_json);
     const scheduleTeacherIds = uniqueIds(ownSchedules.map((item) => item.teacher_id));
     const scheduleBuildingIds = uniqueIds(ownSchedules.map((item) => item.building_id));
     const scheduleClassroomIds = uniqueIds(ownSchedules.map((item) => item.classroom_id));
@@ -3335,6 +3437,13 @@ export class PlanningManualService {
       classroom: classroomMap.get(effectiveClassroomId ?? '') ?? null,
       vc_section: input.vcSection ?? null,
       expected_vc_section_name: input.expectedVcSectionName ?? null,
+      vc_source:
+        sectionVcContext.manual_subsection_overrides[subsection.code]
+          ? 'manual_override'
+          : sectionVcContext.source_vc_section_id
+            ? 'sync_source'
+            : null,
+      vc_context_message: sectionVcContext.vc_context_message,
       vc_match_status: resolveVcMatchStatus(subsection.vc_section_id, input.expectedVcSectionName, input.vcSection),
       schedules: ownSchedules.map((schedule) => ({
         ...schedule,
@@ -3432,7 +3541,7 @@ export class PlanningManualService {
   private async syncOfferVcReferences(
     offerId: string,
     actor?: ChangeLogActor | null,
-    options?: { preserveManualCourse?: boolean },
+    options?: { preserveManualCourse?: boolean; restoreSourceContext?: boolean; preserveManualSection?: boolean },
   ) {
     const current = await this.requireEntity(this.offersRepo, offerId, 'planning_offer');
     const rule = await this.findPlanRuleForOfferContext({
@@ -3444,18 +3553,47 @@ export class PlanningManualService {
       cycle: current.cycle,
     });
     const nextVcPeriodId = rule?.vc_period_id ?? current.vc_period_id ?? null;
-    const nextVcFacultyId = rule?.vc_faculty_id ?? current.vc_faculty_id ?? null;
-    const nextVcAcademicProgramId =
-      rule?.vc_academic_program_id ?? current.vc_academic_program_id ?? null;
-    const nextVcCourseId =
-      options?.preserveManualCourse && current.vc_course_id
-        ? current.vc_course_id
-        : await this.resolveVcCourseId({
-            course_name: current.course_name,
-            course_code: current.course_code,
-            study_plan_id: current.study_plan_id,
-            vc_academic_program_id: nextVcAcademicProgramId,
-          });
+    const sourceContext = await this.resolveOfferSourceVcContext(current);
+    const restoreSourceContext = options?.restoreSourceContext !== false;
+    const preserveManualCourse = options?.preserveManualCourse !== false;
+    const nextVcFacultyId = sourceContext.source_vc_faculty_id ?? null;
+    const nextVcAcademicProgramId = sourceContext.source_vc_academic_program_id ?? null;
+    const fallbackVcCourseId = await this.resolveVcCourseIdFromSourceContext({
+      course_name: sourceContext.source_course_name ?? current.course_name,
+      course_code: sourceContext.source_course_code ?? current.course_code,
+      vc_academic_program_id: nextVcAcademicProgramId,
+    });
+    let nextVcCourseId = fallbackVcCourseId;
+    if (preserveManualCourse && sourceContext.manual_vc_course_id) {
+      nextVcCourseId = sourceContext.manual_vc_course_id;
+    } else if (restoreSourceContext && sourceContext.source_vc_course_id) {
+      nextVcCourseId = sourceContext.source_vc_course_id;
+    }
+
+    const nextSourcePayloadJson =
+      sourceContext.has_source_context || sourceContext.manual_vc_course_id
+        ? upsertOfferVcContextMetadata(current.source_payload_json, {
+            vc_source:
+              preserveManualCourse && sourceContext.manual_vc_course_id
+                ? 'manual_override'
+                : sourceContext.has_source_context
+                  ? 'sync_source'
+                  : 'fallback_match',
+            source_vc_faculty_id: sourceContext.source_vc_faculty_id,
+            source_vc_academic_program_id: sourceContext.source_vc_academic_program_id,
+            source_vc_course_id: sourceContext.source_vc_course_id,
+            manual_vc_course_id:
+              preserveManualCourse && sourceContext.manual_vc_course_id
+                ? sourceContext.manual_vc_course_id
+                : null,
+            vc_context_message:
+              preserveManualCourse && sourceContext.manual_vc_course_id
+                ? 'Curso VC ajustado manualmente.'
+                : sourceContext.has_source_context
+                  ? 'Contexto AV preservado desde la sincronizacion.'
+                  : 'Contexto AV pendiente de resolver desde sincronizacion.',
+          })
+        : current.source_payload_json;
 
     const next = this.offersRepo.create({
       ...current,
@@ -3463,6 +3601,7 @@ export class PlanningManualService {
       vc_faculty_id: nextVcFacultyId,
       vc_academic_program_id: nextVcAcademicProgramId,
       vc_course_id: nextVcCourseId,
+      source_payload_json: nextSourcePayloadJson,
       updated_at: new Date(),
     });
 
@@ -3490,7 +3629,10 @@ export class PlanningManualService {
     const sections = await this.sectionsRepo.find({ where: { planning_offer_id: offerId } });
     let updatedSubsectionCount = 0;
     for (const section of sections) {
-      updatedSubsectionCount += await this.syncSectionVcMatches(section.id, actor);
+      updatedSubsectionCount += await this.syncSectionVcMatches(section.id, actor, {
+        restoreSourceContext,
+        preserveManualSection: options?.preserveManualSection !== false,
+      });
     }
 
     return {
@@ -3499,22 +3641,31 @@ export class PlanningManualService {
     };
   }
 
-  private async syncSectionVcMatches(sectionId: string, actor?: ChangeLogActor | null) {
+  private async syncSectionVcMatches(
+    sectionId: string,
+    actor?: ChangeLogActor | null,
+    options?: { restoreSourceContext?: boolean; preserveManualSection?: boolean },
+  ) {
     const subsections = await this.subsectionsRepo.find({
       where: { planning_section_id: sectionId },
       order: { code: 'ASC' },
     });
     let updatedCount = 0;
     for (const subsection of subsections) {
-      updatedCount += await this.syncSubsectionVcMatch(subsection.id, actor);
+      updatedCount += await this.syncSubsectionVcMatch(subsection.id, actor, options);
     }
     return updatedCount;
   }
 
-  private async syncSubsectionVcMatch(subsectionId: string, actor?: ChangeLogActor | null) {
+  private async syncSubsectionVcMatch(
+    subsectionId: string,
+    actor?: ChangeLogActor | null,
+    options?: { restoreSourceContext?: boolean; preserveManualSection?: boolean },
+  ) {
     const current = await this.requireEntity(this.subsectionsRepo, subsectionId, 'planning_subsection');
     const section = await this.requireEntity(this.sectionsRepo, current.planning_section_id, 'planning_section');
     const offer = await this.requireEntity(this.offersRepo, section.planning_offer_id, 'planning_offer');
+    const sectionVcContext = readSectionVcContextMetadata(section.source_payload_json);
     const modalities = await this.findManyByIds(this.courseModalitiesRepo, [current.course_modality_id]);
     const campusVcLocations = await this.findManyByField(
       this.campusVcLocationMappingsRepo,
@@ -3525,19 +3676,52 @@ export class PlanningManualService {
       modalities,
       campusVcLocations,
     });
+    const expectedVcSectionNames = this.buildExpectedVcSectionNameCandidatesForSubsection(
+      current,
+      section,
+      offer,
+      {
+        modalities,
+        campusVcLocations,
+      },
+    );
     const candidateSections = offer.vc_course_id
       ? await this.findManyByField(this.vcSectionsRepo, 'course_id', [offer.vc_course_id])
       : [];
-    const suggestedMatches = expectedVcSectionName
-      ? this.findMatchingVcSections(candidateSections, expectedVcSectionName)
+    const suggestedMatches = expectedVcSectionNames.length
+      ? this.findMatchingVcSections(candidateSections, expectedVcSectionNames)
       : [];
     const currentVcSection =
       current.vc_section_id
         ? await this.vcSectionsRepo.findOne({ where: { id: current.vc_section_id } })
         : null;
+    const restoreSourceContext = options?.restoreSourceContext !== false;
+    const preserveManualSection = options?.preserveManualSection !== false;
+    const manualOverrideSectionId =
+      preserveManualSection
+        ? sectionVcContext.manual_subsection_overrides[current.code] ?? null
+        : null;
+    const manualOverrideSection =
+      manualOverrideSectionId
+        ? await this.vcSectionsRepo.findOne({ where: { id: manualOverrideSectionId } })
+        : null;
+    const sourceVcSectionId = sectionVcContext.source_vc_section_id;
+    const sourceVcSection =
+      sourceVcSectionId
+        ? await this.vcSectionsRepo.findOne({ where: { id: sourceVcSectionId } })
+        : null;
 
     let nextVcSectionId = current.vc_section_id ?? null;
-    if (currentVcSection && offer.vc_course_id && currentVcSection.course_id !== offer.vc_course_id) {
+    if (
+      manualOverrideSection &&
+      (!offer.vc_course_id || manualOverrideSection.course_id === offer.vc_course_id)
+    ) {
+      nextVcSectionId = manualOverrideSection.id;
+    } else if (restoreSourceContext && sourceVcSection) {
+      // Confiamos en la concordancia de origen (Akademic). 
+      // Si hay un desfase de curso, el estado de match en la UI lo marcará para revisión manual.
+      nextVcSectionId = sourceVcSection.id;
+    } else if (currentVcSection && offer.vc_course_id && currentVcSection.course_id !== offer.vc_course_id) {
       nextVcSectionId = suggestedMatches.length === 1 ? suggestedMatches[0].id : null;
     } else if (!currentVcSection) {
       nextVcSectionId = suggestedMatches.length === 1 ? suggestedMatches[0].id : null;
@@ -3564,6 +3748,145 @@ export class PlanningManualService {
       actor,
     );
     return 1;
+  }
+
+  private async resolveOfferSourceVcContext(offer: PlanningOfferEntity) {
+    const vcContext = readOfferVcContextMetadata(offer.source_payload_json);
+    const rawSourceFacultyId = vcContext.source_vc_faculty_id ?? extractSourceFacultyIdFromPayload(offer.source_payload_json);
+    const rawSourceAcademicProgramId =
+      vcContext.source_vc_academic_program_id ?? extractSourceAcademicProgramIdFromPayload(offer.source_payload_json);
+    const rawSourceCourseId =
+      vcContext.source_vc_course_id ??
+      extractSourceCourseIdFromPayload(offer.source_payload_json) ??
+      offer.source_course_id;
+    const rawSourceFacultyName = extractSourceFacultyNameFromPayload(offer.source_payload_json);
+    const rawSourceAcademicProgramName =
+      extractSourceAcademicProgramNameFromPayload(offer.source_payload_json);
+    const rawSourceCourseName =
+      extractSourceCourseNameFromPayload(offer.source_payload_json) ?? offer.course_name;
+    const rawSourceCourseCode =
+      extractSourceCourseCodeFromPayload(offer.source_payload_json) ?? offer.course_code;
+    const manualVcCourseId = vcContext.manual_vc_course_id;
+
+    let sourceCourse = rawSourceCourseId
+      ? await this.vcCoursesRepo.findOne({ where: { id: rawSourceCourseId } })
+      : null;
+    let sourceAcademicProgram = sourceCourse?.program_id
+      ? await this.vcAcademicProgramsRepo.findOne({ where: { id: sourceCourse.program_id } })
+      : rawSourceAcademicProgramId
+        ? await this.vcAcademicProgramsRepo.findOne({ where: { id: rawSourceAcademicProgramId } })
+        : null;
+    let sourceFaculty = sourceAcademicProgram?.faculty_id
+      ? await this.vcFacultiesRepo.findOne({ where: { id: sourceAcademicProgram.faculty_id } })
+      : rawSourceFacultyId
+        ? await this.vcFacultiesRepo.findOne({ where: { id: rawSourceFacultyId } })
+        : null;
+
+    if (!sourceFaculty && rawSourceFacultyName) {
+      sourceFaculty = await this.matchVcFacultyByName(rawSourceFacultyName);
+    }
+    if (!sourceAcademicProgram && rawSourceAcademicProgramName) {
+      sourceAcademicProgram = await this.matchVcAcademicProgramByName(
+        rawSourceAcademicProgramName,
+        sourceFaculty?.id ?? null,
+      );
+      if (sourceAcademicProgram && !sourceFaculty) {
+        sourceFaculty =
+          (await this.vcFacultiesRepo.findOne({ where: { id: sourceAcademicProgram.faculty_id } })) ?? null;
+      }
+    }
+    if (!sourceCourse && sourceAcademicProgram?.id) {
+      const resolvedCourseId = await this.resolveVcCourseIdFromSourceContext({
+        course_name: rawSourceCourseName,
+        course_code: rawSourceCourseCode,
+        vc_academic_program_id: sourceAcademicProgram.id,
+      });
+      sourceCourse = resolvedCourseId
+        ? await this.vcCoursesRepo.findOne({ where: { id: resolvedCourseId } })
+        : null;
+      if (sourceCourse && !sourceAcademicProgram) {
+        sourceAcademicProgram =
+          (await this.vcAcademicProgramsRepo.findOne({ where: { id: sourceCourse.program_id } })) ?? null;
+      }
+      if (sourceCourse && sourceAcademicProgram && !sourceFaculty) {
+        sourceFaculty =
+          (await this.vcFacultiesRepo.findOne({ where: { id: sourceAcademicProgram.faculty_id } })) ?? null;
+      }
+    }
+
+    return {
+      has_source_context: Boolean(sourceCourse || sourceAcademicProgram || sourceFaculty),
+      source_vc_faculty_id: sourceFaculty?.id ?? null,
+      source_vc_academic_program_id: sourceAcademicProgram?.id ?? null,
+      source_vc_course_id: sourceCourse?.id ?? null,
+      manual_vc_course_id: manualVcCourseId,
+      source_course_name: rawSourceCourseName ?? null,
+      source_course_code: rawSourceCourseCode ?? null,
+    };
+  }
+
+  private async matchVcFacultyByName(name: string | null | undefined) {
+    const variants = buildCatalogNameMatchVariants(name);
+    if (variants.length === 0) {
+      return null;
+    }
+    const faculties = await this.vcFacultiesRepo.find({ order: { name: 'ASC' } });
+    const matches = faculties.filter((item) => catalogNameMatches(item.name, variants));
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  private async matchVcAcademicProgramByName(name: string | null | undefined, facultyId: string | null) {
+    const variants = buildCatalogNameMatchVariants(name);
+    if (variants.length === 0) {
+      return null;
+    }
+    const programs = await this.vcAcademicProgramsRepo.find({
+      where: facultyId ? { faculty_id: facultyId } : {},
+      order: { name: 'ASC' },
+    });
+    const matches = programs.filter((item) => catalogNameMatches(item.name, variants));
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  private async resolveVcCourseIdFromSourceContext(input: {
+    course_name: string | null | undefined;
+    course_code: string | null | undefined;
+    vc_academic_program_id: string | null;
+  }) {
+    if (!input.vc_academic_program_id) {
+      return null;
+    }
+    const candidates = await this.vcCoursesRepo.find({
+      where: { program_id: input.vc_academic_program_id },
+      order: { name: 'ASC' },
+    });
+    const normalizedCode = normalizeMatchValue(input.course_code);
+    if (normalizedCode) {
+      const codeMatches = candidates.filter(
+        (item) => normalizeMatchValue(item.code) === normalizedCode,
+      );
+      if (codeMatches.length === 1) {
+        return codeMatches[0].id;
+      }
+    }
+
+    const normalizedCourseName = normalizeCourseNameForMatch(input.course_name);
+    if (!normalizedCourseName) {
+      return null;
+    }
+    const nameMatches = candidates.filter(
+      (item) => normalizeCourseNameForMatch(item.name) === normalizedCourseName,
+    );
+    if (nameMatches.length === 1) {
+      return nameMatches[0].id;
+    }
+    if (nameMatches.length > 1 && normalizedCode) {
+      const refinedByCode = nameMatches.filter(
+        (item) => normalizeMatchValue(item.code) === normalizedCode,
+      );
+      return refinedByCode.length === 1 ? refinedByCode[0].id : null;
+    }
+    return null;
   }
 
   private async resolveVcCourseId(input: {
@@ -3625,31 +3948,63 @@ export class PlanningManualService {
     offer: PlanningOfferEntity,
     input: { modalities?: CourseModalityEntity[]; campusVcLocations?: PlanningCampusVcLocationMappingEntity[] },
   ) {
+    const directNames = this.buildExpectedVcSectionNameCandidatesForSubsection(
+      subsection,
+      section,
+      offer,
+      input,
+    );
+    return directNames[0] ?? null;
+  }
+
+  private buildExpectedVcSectionNameCandidatesForSubsection(
+    subsection: PlanningSubsectionEntity,
+    section: PlanningSectionEntity,
+    offer: PlanningOfferEntity,
+    input: { modalities?: CourseModalityEntity[]; campusVcLocations?: PlanningCampusVcLocationMappingEntity[] },
+  ) {
+    const directCandidates = [
+      extractSourceSectionNameFromPayload(section.source_payload_json),
+      section.external_code,
+      section.code,
+    ]
+      .map((item) => `${item ?? ''}`.trim())
+      .filter(Boolean);
+    if (directCandidates.length > 0) {
+      return uniqueIds(directCandidates);
+    }
+
     const campusVcLocation = (input.campusVcLocations ?? []).find(
       (item) => item.campus_id === offer.campus_id,
     );
     if (!campusVcLocation) {
-      return null;
+      return [];
     }
     const modality = (input.modalities ?? []).find((item) => item.id === subsection.course_modality_id) ?? null;
     const modalityCode = `${modality?.code ?? ''}`.toUpperCase();
     const modalityPrefix = modalityCode.includes('VIRTUAL') ? 'V' : 'P';
     const sectionLetters = `${section.code ?? ''}`.trim().toUpperCase().replace(/[^A-Z]/g, '');
     if (!sectionLetters) {
-      return null;
+      return [];
     }
     const numericSuffixMatch = `${subsection.code ?? ''}`.trim().toUpperCase().match(/(\d+)$/);
     const numericSuffix =
       numericSuffixMatch && numericSuffixMatch[1] !== '0' ? numericSuffixMatch[1] : '';
-    return `${sectionLetters}${modalityPrefix}${numericSuffix} - ${campusVcLocation.vc_location_code}`;
+    return [`${sectionLetters}${modalityPrefix}${numericSuffix} - ${campusVcLocation.vc_location_code}`];
   }
 
-  private findMatchingVcSections(candidates: VcSectionEntity[], expectedName: string) {
-    const normalizedExpectedName = normalizeMatchValue(expectedName);
-    if (!normalizedExpectedName) {
+  private findMatchingVcSections(candidates: VcSectionEntity[], expectedName: string | string[]) {
+    const normalizedExpectedNames = uniqueIds(
+      (Array.isArray(expectedName) ? expectedName : [expectedName])
+        .map((item) => normalizeMatchValue(item))
+        .filter(Boolean),
+    );
+    if (normalizedExpectedNames.length === 0) {
       return [];
     }
-    return candidates.filter((item) => normalizeMatchValue(item.name) === normalizedExpectedName);
+    return candidates.filter((item) =>
+      normalizedExpectedNames.includes(normalizeMatchValue(item.name)),
+    );
   }
 
   private async resolveOfferIdsFromSubsectionIds(subsectionIds: string[]) {
@@ -4718,6 +5073,29 @@ function normalizeCourseNameForMatch(value: string | null | undefined) {
   return normalizeMatchValue(courseNameOnly);
 }
 
+function buildCatalogNameMatchVariants(value: string | null | undefined) {
+  const raw = `${value ?? ''}`.replace(/\s+/g, ' ').trim();
+  if (!raw) {
+    return [];
+  }
+  const variants = new Set<string>([normalizeMatchValue(raw)]);
+  const parts = raw.split(/\s-\s/);
+  if (parts.length > 1) {
+    const head = normalizeMatchValue(parts[0]);
+    if (/^[A-Z0-9/_-]+$/.test(head)) {
+      variants.add(normalizeMatchValue(parts.slice(1).join(' - ')));
+    }
+  }
+  return [...variants].filter(Boolean);
+}
+
+function catalogNameMatches(value: string | null | undefined, variants: string[]) {
+  if (!variants.length) {
+    return false;
+  }
+  return buildCatalogNameMatchVariants(value).some((item) => variants.includes(item));
+}
+
 function vcCourseCodeMatchesStudyPlanYear(
   vcCourseCode: string | null | undefined,
   normalizedStudyPlanYear: string,
@@ -4748,16 +5126,50 @@ function resolveVcMatchStatus(
 
 function resolveDetailedVcMatchStatus(
   vcSectionId: string | null | undefined,
+  currentVcSection: { id?: string | null; course_id?: string | null } | null | undefined,
+  currentVcCourseId: string | null | undefined,
   expectedVcSectionName: string | null | undefined,
   suggestedMatchCount: number,
 ) {
-  if (vcSectionId) {
+  if (
+    vcSectionId &&
+    currentVcSection?.id &&
+    (!currentVcCourseId || currentVcSection.course_id === currentVcCourseId)
+  ) {
     return 'MATCHED';
   }
   if (!expectedVcSectionName) {
     return 'UNMATCHED';
   }
   return suggestedMatchCount > 1 ? 'AMBIGUOUS' : 'UNMATCHED';
+}
+
+function shouldIncludeVcMatchRow(row: any) {
+  const offer = row.offer;
+  if (!offer) {
+    return true;
+  }
+
+  // 1. Filtrar cursos de prueba (test courses)
+  const courseName = (offer.course_name ?? '').toUpperCase();
+  const courseCode = (offer.course_code ?? '').toUpperCase();
+  if (
+    courseName.includes('PRUEBA') ||
+    courseName.includes('TEST') ||
+    courseCode.includes('PRUEBA') ||
+    courseCode.includes('TEST')
+  ) {
+    return false;
+  }
+
+  // 2. Solo mostrar los que literalmente faltan por hacer match o requieren atención
+  // Si el estado ya es MATCHED, lo ocultamos para simplificar la vista del usuario
+  if (row.match_status === 'MATCHED') {
+    return false;
+  }
+
+  // Incluimos cualquier otro estado (UNMATCHED, AMBIGUOUS) que requiera intervención manual
+  return true;
 }
 
 function emptyToNull(value: string | null | undefined) {
@@ -5188,6 +5600,169 @@ function asRecord(value: unknown) {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function payloadPickString(value: Record<string, unknown> | null | undefined, ...paths: string[]) {
+  const payload = asRecord(value);
+  if (!payload) {
+    return null;
+  }
+  for (const path of paths) {
+    const resolved = path.split('.').reduce<unknown>((acc, key) => {
+      if (!acc || typeof acc !== 'object' || Array.isArray(acc)) {
+        return undefined;
+      }
+      return (acc as Record<string, unknown>)[key];
+    }, payload);
+    const normalized = `${resolved ?? ''}`.trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
+function readOfferVcContextMetadata(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+  const payload = asRecord(sourcePayloadJson) ?? {};
+  const rawContext = asRecord(payload.__vc_context);
+  return {
+    vc_source: recordString(rawContext, 'vc_source'),
+    vc_context_message: recordString(rawContext, 'vc_context_message'),
+    source_vc_faculty_id:
+      recordString(rawContext, 'source_vc_faculty_id') ?? extractSourceFacultyIdFromPayload(payload),
+    source_vc_academic_program_id:
+      recordString(rawContext, 'source_vc_academic_program_id') ?? extractSourceAcademicProgramIdFromPayload(payload),
+    source_vc_course_id:
+      recordString(rawContext, 'source_vc_course_id') ?? extractSourceCourseIdFromPayload(payload),
+    manual_vc_course_id: recordString(rawContext, 'manual_vc_course_id'),
+  };
+}
+
+function readSectionVcContextMetadata(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+  const payload = asRecord(sourcePayloadJson) ?? {};
+  const rawContext = asRecord(payload.__vc_context);
+  const rawManualOverrides = asRecord(rawContext?.manual_subsection_overrides);
+  return {
+    vc_source: recordString(rawContext, 'vc_source'),
+    vc_context_message: recordString(rawContext, 'vc_context_message'),
+    source_vc_section_id:
+      recordString(rawContext, 'source_vc_section_id') ?? extractSourceSectionIdFromPayload(payload),
+    manual_subsection_overrides: Object.fromEntries(
+      Object.entries(rawManualOverrides ?? {})
+        .map(([key, value]) => [key, emptyToNull(`${value ?? ''}`)])
+        .filter(([, value]) => Boolean(value)),
+    ) as Record<string, string>,
+  };
+}
+
+function upsertOfferVcContextMetadata(
+  sourcePayloadJson: Record<string, unknown> | null | undefined,
+  patch: Record<string, unknown>,
+) {
+  const payload = asRecord(sourcePayloadJson) ?? {};
+  const currentContext = asRecord(payload.__vc_context) ?? {};
+  return {
+    ...payload,
+    __vc_context: {
+      ...currentContext,
+      ...patch,
+    },
+  };
+}
+
+function upsertSectionVcContextMetadata(
+  sourcePayloadJson: Record<string, unknown> | null | undefined,
+  patch: Record<string, unknown>,
+) {
+  const payload = asRecord(sourcePayloadJson) ?? {};
+  const currentContext = asRecord(payload.__vc_context) ?? {};
+  return {
+    ...payload,
+    __vc_context: {
+      ...currentContext,
+      ...patch,
+    },
+  };
+}
+
+function extractSourceCourseIdFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+  return payloadPickString(sourcePayloadJson, 'id', 'course.id');
+}
+
+function extractSourceAcademicProgramIdFromPayload(
+  sourcePayloadJson: Record<string, unknown> | null | undefined,
+) {
+  return payloadPickString(
+    sourcePayloadJson,
+    'career.id',
+    'careerId',
+    'programId',
+    'program.id',
+    'detail.career.id',
+    'detail.careerId',
+  );
+}
+
+function extractSourceFacultyIdFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+  return payloadPickString(
+    sourcePayloadJson,
+    'career.facultyId',
+    'career.faculty.id',
+    'facultyId',
+    'faculty.id',
+    'detail.career.facultyId',
+    'detail.career.faculty.id',
+  );
+}
+
+function extractSourceFacultyNameFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+  return payloadPickString(
+    sourcePayloadJson,
+    'career.faculty.name',
+    'career.facultyName',
+    'faculty.name',
+    'facultyName',
+    'detail.career.faculty.name',
+    'detail.career.facultyName',
+  );
+}
+
+function extractSourceAcademicProgramNameFromPayload(
+  sourcePayloadJson: Record<string, unknown> | null | undefined,
+) {
+  return payloadPickString(
+    sourcePayloadJson,
+    'career.name',
+    'careerName',
+    'program.name',
+    'programName',
+    'detail.career.name',
+    'detail.careerName',
+  );
+}
+
+function extractSourceCourseNameFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+  return payloadPickString(sourcePayloadJson, 'name', 'course.name', 'courseName');
+}
+
+function extractSourceCourseCodeFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+  return payloadPickString(sourcePayloadJson, 'code', 'course.code', 'courseCode', 'short_code', 'shortCode');
+}
+
+function extractSourceSectionNameFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+  return payloadPickString(
+    sourcePayloadJson,
+    'name',
+    'description',
+    'code',
+    'section.name',
+    'section.description',
+    'section.code',
+  );
+}
+
+function extractSourceSectionIdFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+  return payloadPickString(sourcePayloadJson, 'id', 'section.id', 'sectionId');
 }
 
 function buildChangeRows(

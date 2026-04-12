@@ -11,7 +11,7 @@ type PlanningVcMatchFilters = {
   faculty_id: string;
   academic_program_id: string;
   cycle: string;
-  offer_id: string;
+  query: string;
 };
 
 @Component({
@@ -33,7 +33,7 @@ export class PlanningVcMatchPageComponent implements OnInit {
     faculty_id: '',
     academic_program_id: '',
     cycle: '',
-    offer_id: '',
+    query: '',
   };
 
   catalog: any = {
@@ -48,6 +48,7 @@ export class PlanningVcMatchPageComponent implements OnInit {
   rows: any[] = [];
   vcSectionSelectionBySubsectionId: Record<string, string> = {};
   campusVcLocationDraftByCampusId: Record<string, string> = {};
+  isMappingPanelOpen = false;
 
   readonly vcLocationCodes = ['CH', 'HU', 'SU', 'IC'];
 
@@ -240,6 +241,10 @@ export class PlanningVcMatchPageComponent implements OnInit {
     this.router.navigate(['/planning/offers', row.offer.id, 'sections']);
   }
 
+  toggleMappingPanel() {
+    this.isMappingPanelOpen = !this.isMappingPanelOpen;
+  }
+
   matchStatusLabel(status: string | null | undefined) {
     switch (status) {
       case 'MATCHED':
@@ -271,6 +276,19 @@ export class PlanningVcMatchPageComponent implements OnInit {
     return candidate?.name ?? candidate?.id ?? 'Seccion VC';
   }
 
+  vcSourceLabel(value: string | null | undefined) {
+    switch (value) {
+      case 'sync_source':
+        return 'Sincronizado';
+      case 'manual_override':
+        return 'Manual';
+      case 'fallback_match':
+        return 'Fallback';
+      default:
+        return 'Sin definir';
+    }
+  }
+
   private applyQueryState() {
     const query = this.route.snapshot.queryParamMap;
     this.filters = {
@@ -279,7 +297,7 @@ export class PlanningVcMatchPageComponent implements OnInit {
       faculty_id: query.get('faculty_id') ?? '',
       academic_program_id: query.get('academic_program_id') ?? '',
       cycle: query.get('cycle') ?? '',
-      offer_id: query.get('offer_id') ?? '',
+      query: query.get('query') ?? '',
     };
   }
 
@@ -293,7 +311,7 @@ export class PlanningVcMatchPageComponent implements OnInit {
         faculty_id: this.filters.faculty_id || null,
         academic_program_id: this.filters.academic_program_id || null,
         cycle: this.filters.cycle || null,
-        offer_id: this.filters.offer_id || null,
+        query: this.filters.query || null,
       },
     });
   }

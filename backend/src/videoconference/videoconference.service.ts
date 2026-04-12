@@ -20,6 +20,7 @@ import {
 } from '../entities/planning.entities';
 import { SettingsSyncService } from '../settings/settings-sync.service';
 import {
+    AssignmentPreviewVideoconferenceDto,
     FilterOptionsDto,
     GenerateVideoconferenceDto,
     PreviewVideoconferenceDto,
@@ -31,6 +32,9 @@ import {
     PlanningSubsectionVideoconferenceOverrideEntity,
     PlanningSubsectionScheduleVcInheritanceEntity,
     PlanningSubsectionVideoconferenceLinkModeValues,
+    VcAcademicProgramEntity,
+    VcCourseEntity,
+    VcFacultyEntity,
     VcSectionEntity,
     VideoconferenceZoomPoolUserEntity,
 } from './videoconference.entity';
@@ -93,6 +97,13 @@ type ScheduleContextRow = {
     vc_course_id: string | null;
     vc_section_id: string | null;
     vc_section_name: string | null;
+    vc_faculty_name: string | null;
+    vc_academic_program_name: string | null;
+    vc_course_name: string | null;
+    vc_source: string | null;
+    vc_context_message: string | null;
+    offer_source_payload_json: Record<string, unknown> | null;
+    section_source_payload_json: Record<string, unknown> | null;
     responsible_teacher_id: string | null;
     responsible_teacher_name: string | null;
     responsible_teacher_full_name: string | null;
@@ -124,7 +135,7 @@ type ResolvedModality = {
 
 type FilterOptionKey = keyof Pick<
     FilterOptionsDto,
-    'semesterId' | 'campusIds' | 'facultyIds' | 'programIds' | 'courseIds' | 'modality' | 'days'
+    'semesterId' | 'campusIds' | 'facultyIds' | 'programIds' | 'courseIds' | 'modality' | 'modalities' | 'days'
 >;
 
 type FilterCatalogOption = {
@@ -168,6 +179,12 @@ type ZoomPoolLicenseSnapshot = {
     ok: boolean;
     error: string | null;
     byEmail: Map<string, ZoomAccountUserSummary>;
+};
+
+type PreviewZoomPoolUser = ZoomPoolUser & {
+    license_status: 'LICENSED' | 'BASIC' | 'ON_PREM' | 'UNKNOWN';
+    license_label: string;
+    is_licensed: boolean | null;
 };
 
 type ExpandedOccurrence = {
@@ -287,11 +304,81 @@ type InheritanceIndex = {
     childrenByParent: Map<string, ScheduleInheritanceMapping[]>;
 };
 
+type AssignmentPreviewMode = 'BASE' | 'OCCURRENCE';
+
+type AssignmentPreviewStatus =
+    | 'ASSIGNED_LICENSED'
+    | 'ASSIGNED_RISK'
+    | 'INHERITED'
+    | 'BLOCKED_EXISTING'
+    | 'NO_AVAILABLE_ZOOM_USER'
+    | 'VALIDATION_ERROR';
+
+type AssignmentPreviewItem = {
+    id: string;
+    mode: AssignmentPreviewMode;
+    occurrence_key: string | null;
+    schedule_id: string;
+    conference_date: string | null;
+    day_of_week: string;
+    day_label: string;
+    start_time: string;
+    end_time: string;
+    preview_status: AssignmentPreviewStatus;
+    message: string;
+    zoom_user_id: string | null;
+    zoom_user_email: string | null;
+    zoom_user_name: string | null;
+    license_status: 'LICENSED' | 'BASIC' | 'ON_PREM' | 'UNKNOWN' | null;
+    license_label: string | null;
+    is_licensed: boolean | null;
+    depends_on_unverified_license: boolean;
+    consumes_capacity: boolean;
+    inheritance: ExpandedOccurrence['inheritance'];
+    owner_occurrence_key: string | null;
+};
+
+type AssignmentPreviewDaySummary = {
+    day_of_week: string;
+    day_label: string;
+    required_hosts: number;
+};
+
+type AssignmentPreviewSummary = {
+    requested_rows: number;
+    assigned_rows: number;
+    hosts_used: number;
+    verified_hosts_used: number;
+    risk_hosts_used: number;
+    no_available_zoom_user: number;
+    validation_errors: number;
+    blocked_existing: number;
+    virtual_hosts_needed: number;
+    licenses_required_global: number;
+    additional_licenses_needed: number | null;
+    licenses_by_day: AssignmentPreviewDaySummary[];
+};
+
+type ExistingConferenceLookup = Map<string, PlanningSubsectionVideoconferenceEntity>;
+
+type SimulatedReservation = {
+    scheduled_start: Date;
+    scheduled_end: Date;
+};
+
 @Injectable()
 export class VideoconferenceService {
     constructor(
         @InjectRepository(PlanningOfferEntity)
         private readonly offersRepo: Repository<PlanningOfferEntity>,
+        @InjectRepository(VcFacultyEntity)
+        private readonly vcFacultiesRepo: Repository<VcFacultyEntity>,
+        @InjectRepository(VcAcademicProgramEntity)
+        private readonly vcAcademicProgramsRepo: Repository<VcAcademicProgramEntity>,
+        @InjectRepository(VcCourseEntity)
+        private readonly vcCoursesRepo: Repository<VcCourseEntity>,
+        @InjectRepository(VcSectionEntity)
+        private readonly vcSectionsRepo: Repository<VcSectionEntity>,
         @InjectRepository(PlanningSubsectionScheduleEntity)
         private readonly schedulesRepo: Repository<PlanningSubsectionScheduleEntity>,
         @InjectRepository(VideoconferenceZoomPoolUserEntity)
@@ -403,14 +490,35 @@ export class VideoconferenceService {
     }
 
     async getFilterOptions(filters: FilterOptionsDto) {
+        const periodFilters = this.pickCatalogFilters(filters, []);
+        const campusFilters = this.pickCatalogFilters(filters, ['semesterId']);
+        const facultyFilters = this.pickCatalogFilters(filters, ['semesterId', 'campusIds']);
+        const programFilters = this.pickCatalogFilters(filters, ['semesterId', 'campusIds', 'facultyIds']);
+        const courseFilters = this.pickCatalogFilters(filters, ['semesterId', 'campusIds', 'facultyIds', 'programIds']);
+        const modalityFilters = this.pickCatalogFilters(filters, [
+            'semesterId',
+            'campusIds',
+            'facultyIds',
+            'programIds',
+            'courseIds',
+        ]);
+        const dayFilters = this.pickCatalogFilters(filters, [
+            'semesterId',
+            'campusIds',
+            'facultyIds',
+            'programIds',
+            'courseIds',
+            'modalities',
+        ]);
+
         const [periodRows, campusRows, facultyRows, programRows, courseRows, modalityRows, dayRows] = await Promise.all([
-            this.getFilterOptionRows(filters, ['semesterId']),
-            this.getFilterOptionRows(filters, ['campusIds']),
-            this.getFilterOptionRows(filters, ['facultyIds']),
-            this.getFilterOptionRows(filters, ['programIds']),
-            this.getFilterOptionRows(filters, ['courseIds']),
-            this.getFilterOptionRows(filters, ['modality']),
-            this.getFilterOptionRows(filters, ['days']),
+            this.getFilterOptionRows(periodFilters),
+            this.getFilterOptionRows(campusFilters),
+            this.getFilterOptionRows(facultyFilters),
+            this.getFilterOptionRows(programFilters),
+            this.getFilterOptionRows(courseFilters),
+            this.getFilterOptionRows(modalityFilters),
+            this.getFilterOptionRows(dayFilters),
         ]);
 
         return {
@@ -589,6 +697,729 @@ export class VideoconferenceService {
         }
         const occurrences = await this.resolveOccurrences(rows, startDate, endDate, 'America/Lima', inheritanceIndex);
         return occurrences.map((occurrence) => this.serializeOccurrencePreviewRow(occurrence));
+    }
+
+    async assignmentPreview(payload: AssignmentPreviewVideoconferenceDto) {
+        const scheduleIds = normalizeIdArray(payload.scheduleIds);
+        const occurrenceKeys = normalizeIdArray(payload.occurrenceKeys);
+        const useCurrentFilters = Boolean(payload.selectAllVisible);
+        if (!scheduleIds.length && !occurrenceKeys.length && !useCurrentFilters) {
+            throw new BadRequestException('Debe enviar al menos un scheduleId u occurrenceKey.');
+        }
+
+        const hasStartDate = Boolean(payload.startDate?.trim());
+        const hasEndDate = Boolean(payload.endDate?.trim());
+        if (hasStartDate !== hasEndDate) {
+            throw new BadRequestException('Debe enviar startDate y endDate juntos.');
+        }
+
+        const zoomConfig = await this.zoomAccountService.requireConfiguredConfig();
+        const poolValidation = await this.getActiveZoomPoolUsers(true);
+        if (!poolValidation.users.length) {
+            throw new BadRequestException('No hay usuarios Zoom activos en el pool de videoconferencias.');
+        }
+        const licenseSnapshot = await this.loadZoomPoolLicenseSnapshot();
+        const zoomUsers: PreviewZoomPoolUser[] = poolValidation.users.map((item) => ({
+            ...item,
+            ...this.resolveZoomLicenseMetadata(item.email, licenseSnapshot),
+        }));
+
+        const requestedScheduleIds = scheduleIds.length
+            ? scheduleIds
+            : uniqueIds(occurrenceKeys.map((item) => parseOccurrenceKey(item).schedule_id).filter(Boolean));
+        const selectedFilters = this.extractAssignmentPreviewFilters(payload);
+        const expanded = useCurrentFilters
+            ? await this.buildExpandedScheduleContextFromFilters(selectedFilters)
+            : await this.buildExpandedScheduleContext(requestedScheduleIds);
+
+        if (!hasStartDate || !hasEndDate) {
+            const result = await this.simulateBaseAssignmentPreview(
+                useCurrentFilters
+                    ? new Set(expanded.requestedRows.map((row) => row.schedule_id))
+                    : new Set(requestedScheduleIds),
+                expanded.rows,
+                expanded.inheritanceIndex,
+                zoomUsers,
+                zoomConfig.maxConcurrent,
+                licenseSnapshot,
+            );
+            return {
+                mode: 'BASE' as const,
+                ...result,
+                pool_warnings: poolValidation.warnings,
+                license_sync_ok: licenseSnapshot.ok,
+                license_sync_error: licenseSnapshot.error,
+            };
+        }
+
+        const startDate = normalizeIsoDate(payload.startDate ?? '');
+        const endDate = normalizeIsoDate(payload.endDate ?? '');
+        if (startDate > endDate) {
+            throw new BadRequestException('startDate no puede ser mayor que endDate.');
+        }
+
+        const occurrences = await this.resolveOccurrences(
+            expanded.rows,
+            startDate,
+            endDate,
+            zoomConfig.timezone,
+            expanded.inheritanceIndex,
+        );
+        const result = await this.simulateOccurrenceAssignmentPreview({
+            selectedOccurrenceKeys: useCurrentFilters ? new Set<string>() : new Set(occurrenceKeys),
+            requestedScheduleIds: useCurrentFilters
+                ? new Set(expanded.requestedRows.map((row) => row.schedule_id))
+                : new Set(requestedScheduleIds),
+            occurrences,
+            zoomUsers,
+            maxConcurrent: zoomConfig.maxConcurrent,
+            licenseSnapshot,
+        });
+        return {
+            mode: 'OCCURRENCE' as const,
+            ...result,
+            pool_warnings: poolValidation.warnings,
+            license_sync_ok: licenseSnapshot.ok,
+            license_sync_error: licenseSnapshot.error,
+        };
+    }
+
+    private async buildExpandedScheduleContext(requestedScheduleIds: string[]) {
+        const requestedRows = await this.getScheduleRows(undefined, requestedScheduleIds);
+        return this.buildExpandedScheduleContextFromRequestedRows(requestedRows);
+    }
+
+    private async buildExpandedScheduleContextFromFilters(filters?: FilterOptionsDto) {
+        const requestedRows = await this.getScheduleRows(filters);
+        return this.buildExpandedScheduleContextFromRequestedRows(requestedRows);
+    }
+
+    private async buildExpandedScheduleContextFromRequestedRows(requestedRows: ScheduleContextRow[]) {
+        const requestedScheduleIds = uniqueIds(requestedRows.map((row) => row.schedule_id));
+        const requestedInheritanceIndex = await this.buildInheritanceIndex(requestedScheduleIds);
+        const expandedScheduleIds = new Set<string>(requestedScheduleIds);
+        for (const scheduleId of requestedScheduleIds) {
+            const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
+            if (inherited?.parent_schedule_id) {
+                expandedScheduleIds.add(inherited.parent_schedule_id);
+            }
+            const childMappings = requestedInheritanceIndex.childrenByParent.get(scheduleId) ?? [];
+            for (const item of childMappings) {
+                expandedScheduleIds.add(item.child_schedule_id);
+            }
+        }
+        const rows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
+        const inheritanceIndex = await this.buildInheritanceIndex(Array.from(expandedScheduleIds));
+        return {
+            requestedRows,
+            rows,
+            inheritanceIndex,
+        };
+    }
+
+    private extractAssignmentPreviewFilters(payload: AssignmentPreviewVideoconferenceDto): FilterOptionsDto | undefined {
+        const filters: FilterOptionsDto = {};
+        if (payload.semesterId?.trim()) {
+            filters.semesterId = payload.semesterId.trim();
+        }
+        if (payload.campusIds?.length) {
+            filters.campusIds = normalizeIdArray(payload.campusIds);
+        }
+        if (payload.facultyIds?.length) {
+            filters.facultyIds = normalizeIdArray(payload.facultyIds);
+        }
+        if (payload.programIds?.length) {
+            filters.programIds = normalizeIdArray(payload.programIds);
+        }
+        if (payload.courseIds?.length) {
+            filters.courseIds = normalizeIdArray(payload.courseIds);
+        }
+        const normalizedModalities = normalizeModalityFilterInput(payload.modalities ?? payload.modality);
+        if (normalizedModalities.length) {
+            filters.modalities = normalizedModalities;
+        }
+        if (payload.days?.length) {
+            filters.days = normalizeIdArray(payload.days);
+        }
+        return Object.keys(filters).length ? filters : undefined;
+    }
+
+    private async simulateBaseAssignmentPreview(
+        selectedScheduleIds: Set<string>,
+        rows: ScheduleContextRow[],
+        inheritanceIndex: InheritanceIndex,
+        zoomUsers: PreviewZoomPoolUser[],
+        maxConcurrent: number,
+        licenseSnapshot: ZoomPoolLicenseSnapshot,
+    ) {
+        const inheritanceByScheduleId = new Map(
+            rows.map((row) => [row.schedule_id, this.resolveScheduleInheritance(row.schedule_id, inheritanceIndex, rows)] as const),
+        );
+        const selectedRows = rows.filter((row) => selectedScheduleIds.has(row.schedule_id));
+        const selectedOwnerIds = new Set(
+            selectedRows.map((row) => inheritanceByScheduleId.get(row.schedule_id)?.family_owner_schedule_id ?? row.schedule_id),
+        );
+        const rowsByOwnerId = new Map<string, ScheduleContextRow[]>();
+        const selectedRowsByOwnerId = new Map<string, ScheduleContextRow[]>();
+        for (const row of rows) {
+            const ownerId = inheritanceByScheduleId.get(row.schedule_id)?.family_owner_schedule_id ?? row.schedule_id;
+            if (!selectedOwnerIds.has(ownerId)) {
+                continue;
+            }
+            const currentRows = rowsByOwnerId.get(ownerId) ?? [];
+            currentRows.push(row);
+            rowsByOwnerId.set(ownerId, currentRows);
+            if (selectedScheduleIds.has(row.schedule_id)) {
+                const currentSelected = selectedRowsByOwnerId.get(ownerId) ?? [];
+                currentSelected.push(row);
+                selectedRowsByOwnerId.set(ownerId, currentSelected);
+            }
+        }
+
+        const simulatedReservations = new Map<string, SimulatedReservation[]>();
+        const virtualReservations = new Map<string, SimulatedReservation[]>();
+        const items: AssignmentPreviewItem[] = [];
+        let virtualHostCounter = 0;
+        const ownerRows = sortBaseRowsForSimulation(
+            Array.from(selectedOwnerIds)
+                .map((ownerId) => rows.find((row) => row.schedule_id === ownerId) ?? null)
+                .filter((row): row is ScheduleContextRow => Boolean(row)),
+        );
+
+        for (const ownerRow of ownerRows) {
+            const ownerId = ownerRow.schedule_id;
+            const selectedFamilyRows = sortBaseRowsForSimulation(selectedRowsByOwnerId.get(ownerId) ?? []);
+            if (!selectedFamilyRows.length) {
+                continue;
+            }
+
+            const validationError = this.validateScheduleForGeneration(ownerRow);
+            let host: PreviewZoomPoolUser | null = null;
+            let ownerStatus: AssignmentPreviewStatus = 'NO_AVAILABLE_ZOOM_USER';
+            let ownerMessage = 'No se encontro un usuario Zoom disponible para este horario base.';
+            if (validationError) {
+                ownerStatus = 'VALIDATION_ERROR';
+                ownerMessage = validationError;
+            } else {
+                const slotStart = buildWeeklyScheduleDateTime(ownerRow.day_of_week, ownerRow.start_time);
+                const slotEnd = buildWeeklyScheduleDateTime(ownerRow.day_of_week, ownerRow.end_time);
+                host = this.findAvailableZoomUserForBaseSlot(
+                    slotStart,
+                    slotEnd,
+                    zoomUsers,
+                    maxConcurrent,
+                    simulatedReservations,
+                );
+                if (host) {
+                    ownerStatus = host.is_licensed === true ? 'ASSIGNED_LICENSED' : 'ASSIGNED_RISK';
+                    ownerMessage =
+                        host.is_licensed === true
+                            ? 'Host Zoom sugerido para este horario base.'
+                            : 'Host Zoom sugerido, pero depende de licencia basica o no verificada.';
+                    const currentReservations = simulatedReservations.get(host.zoom_user_id) ?? [];
+                    currentReservations.push({
+                        scheduled_start: slotStart,
+                        scheduled_end: slotEnd,
+                    });
+                    simulatedReservations.set(host.zoom_user_id, currentReservations);
+                }
+            }
+
+            if (ownerStatus === 'NO_AVAILABLE_ZOOM_USER') {
+                const slotStart = buildWeeklyScheduleDateTime(ownerRow.day_of_week, ownerRow.start_time);
+                const slotEnd = buildWeeklyScheduleDateTime(ownerRow.day_of_week, ownerRow.end_time);
+                assignReservationToVirtualHost(slotStart, slotEnd, maxConcurrent, virtualReservations, () => {
+                    virtualHostCounter += 1;
+                    return `virtual:${virtualHostCounter}`;
+                });
+            }
+
+            for (const row of selectedFamilyRows) {
+                const inheritance = inheritanceByScheduleId.get(row.schedule_id) ?? null;
+                if (row.schedule_id === ownerId) {
+                    items.push(
+                        this.buildAssignmentPreviewItem({
+                            id: `schedule:${row.schedule_id}`,
+                            mode: 'BASE',
+                            occurrenceKey: `schedule:${row.schedule_id}`,
+                            scheduleId: row.schedule_id,
+                            conferenceDate: null,
+                            row,
+                            previewStatus: ownerStatus,
+                            message: ownerMessage,
+                            host,
+                            consumesCapacity: ownerStatus === 'ASSIGNED_LICENSED' || ownerStatus === 'ASSIGNED_RISK',
+                            inheritance: buildDefaultInheritance(row.schedule_id),
+                            ownerOccurrenceKey: null,
+                        }),
+                    );
+                    continue;
+                }
+
+                if (host) {
+                    items.push(
+                        this.buildAssignmentPreviewItem({
+                            id: `schedule:${row.schedule_id}`,
+                            mode: 'BASE',
+                            occurrenceKey: `schedule:${row.schedule_id}`,
+                            scheduleId: row.schedule_id,
+                            conferenceDate: null,
+                            row,
+                            previewStatus: 'INHERITED',
+                            message: 'Hereda el host sugerido del horario padre para el calculo semanal.',
+                            host,
+                            consumesCapacity: false,
+                            inheritance: {
+                                is_inherited: inheritance?.is_inherited ?? true,
+                                mapping_id: inheritance?.mapping?.id ?? null,
+                                parent_schedule_id: inheritance?.parent_schedule_id ?? ownerId,
+                                parent_occurrence_key: `schedule:${ownerId}`,
+                                parent_label: inheritance?.parent_label ?? null,
+                                family_owner_schedule_id: inheritance?.family_owner_schedule_id ?? ownerId,
+                            },
+                            ownerOccurrenceKey: `schedule:${ownerId}`,
+                        }),
+                    );
+                    continue;
+                }
+
+                items.push(
+                    this.buildAssignmentPreviewItem({
+                        id: `schedule:${row.schedule_id}`,
+                        mode: 'BASE',
+                        occurrenceKey: `schedule:${row.schedule_id}`,
+                        scheduleId: row.schedule_id,
+                        conferenceDate: null,
+                        row,
+                        previewStatus: ownerStatus,
+                        message:
+                            ownerStatus === 'VALIDATION_ERROR'
+                                ? 'No se puede heredar porque el horario padre tiene validaciones pendientes.'
+                                : 'No se puede heredar porque el horario padre no encontro host disponible.',
+                        host: null,
+                        consumesCapacity: false,
+                        inheritance: {
+                            is_inherited: inheritance?.is_inherited ?? true,
+                            mapping_id: inheritance?.mapping?.id ?? null,
+                            parent_schedule_id: inheritance?.parent_schedule_id ?? ownerId,
+                            parent_occurrence_key: `schedule:${ownerId}`,
+                            parent_label: inheritance?.parent_label ?? null,
+                            family_owner_schedule_id: inheritance?.family_owner_schedule_id ?? ownerId,
+                        },
+                        ownerOccurrenceKey: `schedule:${ownerId}`,
+                    }),
+                );
+            }
+        }
+
+        const orderedItems = sortAssignmentPreviewItems(items);
+        return {
+            summary: this.buildAssignmentPreviewSummary(orderedItems, licenseSnapshot.ok, virtualReservations.size),
+            items: orderedItems,
+        };
+    }
+
+    private async simulateOccurrenceAssignmentPreview(input: {
+        selectedOccurrenceKeys: Set<string>;
+        requestedScheduleIds: Set<string>;
+        occurrences: ExpandedOccurrence[];
+        zoomUsers: PreviewZoomPoolUser[];
+        maxConcurrent: number;
+        licenseSnapshot: ZoomPoolLicenseSnapshot;
+    }) {
+        const selectedOccurrences = input.selectedOccurrenceKeys.size
+            ? input.occurrences.filter((item) => input.selectedOccurrenceKeys.has(item.occurrence_key))
+            : input.occurrences.filter(
+                (item) =>
+                    input.requestedScheduleIds.has(item.row.schedule_id) && item.occurrence_type !== 'SKIPPED',
+            );
+        const selectedOccurrenceKeys = new Set(selectedOccurrences.map((item) => item.occurrence_key));
+        const familyKeys = Array.from(
+            new Set(
+                selectedOccurrences.map((item) =>
+                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date),
+                ),
+            ),
+        );
+        const familyOccurrences = familyKeys.flatMap((familyKey) =>
+            input.occurrences.filter(
+                (item) =>
+                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date) === familyKey &&
+                    item.occurrence_type !== 'SKIPPED',
+            ),
+        );
+        const existingLookup = await this.loadExistingConferenceLookup(familyOccurrences);
+        const remoteMeetingsCache = new Map<string, ZoomMeetingSummary[] | null>();
+        const simulatedReservations = new Map<string, SimulatedReservation[]>();
+        const virtualReservations = new Map<string, SimulatedReservation[]>();
+        const items: AssignmentPreviewItem[] = [];
+        let virtualHostCounter = 0;
+
+        for (const familyKey of familyKeys) {
+            const familyItems = familyOccurrences.filter(
+                (item) =>
+                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date) === familyKey,
+            );
+            const ownerOccurrence = familyItems.find((item) => !item.inheritance.is_inherited) ?? null;
+            if (!ownerOccurrence) {
+                continue;
+            }
+
+            const ownerResult = await this.previewOwnerOccurrenceAssignment(
+                ownerOccurrence,
+                input.zoomUsers,
+                input.maxConcurrent,
+                existingLookup,
+                remoteMeetingsCache,
+                simulatedReservations,
+                input.licenseSnapshot,
+            );
+
+            if (ownerResult.preview_status === 'NO_AVAILABLE_ZOOM_USER') {
+                assignReservationToVirtualHost(
+                    ownerOccurrence.scheduled_start,
+                    ownerOccurrence.scheduled_end,
+                    input.maxConcurrent,
+                    virtualReservations,
+                    () => {
+                        virtualHostCounter += 1;
+                        return `virtual:${virtualHostCounter}`;
+                    },
+                );
+            }
+
+            for (const occurrence of familyItems.filter((item) => selectedOccurrenceKeys.has(item.occurrence_key))) {
+                if (!occurrence.inheritance.is_inherited) {
+                    items.push(ownerResult);
+                    continue;
+                }
+
+                if (ownerResult.zoom_user_id || ownerResult.zoom_user_email) {
+                    items.push(
+                        this.buildAssignmentPreviewItem({
+                            id: occurrence.occurrence_key,
+                            mode: 'OCCURRENCE',
+                            occurrenceKey: occurrence.occurrence_key,
+                            scheduleId: occurrence.row.schedule_id,
+                            conferenceDate: occurrence.effective_conference_date,
+                            row: occurrence.row,
+                            dayOfWeek: dayCodeForDate(occurrence.effective_conference_date),
+                            startTime: occurrence.effective_start_time,
+                            endTime: occurrence.effective_end_time,
+                            previewStatus: 'INHERITED',
+                            message: 'Hereda el host del horario padre para esta ocurrencia.',
+                            host: this.resolvePreviewZoomUser(
+                                ownerResult.zoom_user_id,
+                                ownerResult.zoom_user_email,
+                                ownerResult.zoom_user_name,
+                                input.zoomUsers,
+                                input.licenseSnapshot,
+                            ),
+                            consumesCapacity: false,
+                            inheritance: occurrence.inheritance,
+                            ownerOccurrenceKey: ownerOccurrence.occurrence_key,
+                        }),
+                    );
+                    continue;
+                }
+
+                items.push(
+                    this.buildAssignmentPreviewItem({
+                        id: occurrence.occurrence_key,
+                        mode: 'OCCURRENCE',
+                        occurrenceKey: occurrence.occurrence_key,
+                        scheduleId: occurrence.row.schedule_id,
+                        conferenceDate: occurrence.effective_conference_date,
+                        row: occurrence.row,
+                        dayOfWeek: dayCodeForDate(occurrence.effective_conference_date),
+                        startTime: occurrence.effective_start_time,
+                        endTime: occurrence.effective_end_time,
+                        previewStatus: ownerResult.preview_status,
+                        message:
+                            ownerResult.preview_status === 'VALIDATION_ERROR'
+                                ? 'No se puede heredar porque el horario padre tiene validaciones pendientes.'
+                                : 'No se puede heredar porque el horario padre no tiene host disponible.',
+                        host: null,
+                        consumesCapacity: false,
+                        inheritance: occurrence.inheritance,
+                        ownerOccurrenceKey: ownerOccurrence.occurrence_key,
+                    }),
+                );
+            }
+        }
+
+        const orderedItems = sortAssignmentPreviewItems(items);
+        return {
+            summary: this.buildAssignmentPreviewSummary(
+                orderedItems,
+                input.licenseSnapshot.ok,
+                virtualReservations.size,
+            ),
+            items: orderedItems,
+        };
+    }
+
+    private async previewOwnerOccurrenceAssignment(
+        occurrence: ExpandedOccurrence,
+        zoomUsers: PreviewZoomPoolUser[],
+        maxConcurrent: number,
+        existingLookup: ExistingConferenceLookup,
+        remoteMeetingsCache: Map<string, ZoomMeetingSummary[] | null>,
+        simulatedReservations: Map<string, SimulatedReservation[]>,
+        licenseSnapshot: ZoomPoolLicenseSnapshot,
+    ) {
+        const validationError = this.validateScheduleForGeneration(occurrence.row);
+        if (validationError) {
+            return this.buildAssignmentPreviewItem({
+                id: occurrence.occurrence_key,
+                mode: 'OCCURRENCE',
+                occurrenceKey: occurrence.occurrence_key,
+                scheduleId: occurrence.row.schedule_id,
+                conferenceDate: occurrence.effective_conference_date,
+                row: occurrence.row,
+                dayOfWeek: dayCodeForDate(occurrence.effective_conference_date),
+                startTime: occurrence.effective_start_time,
+                endTime: occurrence.effective_end_time,
+                previewStatus: 'VALIDATION_ERROR',
+                message: validationError,
+                host: null,
+                consumesCapacity: false,
+                inheritance: occurrence.inheritance,
+                ownerOccurrenceKey: null,
+            });
+        }
+
+        const existing =
+            existingLookup.get(`${occurrence.row.schedule_id}::${occurrence.effective_conference_date}`) ?? null;
+        if (existing) {
+            const existingHost = this.resolvePreviewZoomUser(
+                existing.zoom_user_id,
+                existing.zoom_user_email,
+                existing.zoom_user_name,
+                zoomUsers,
+                licenseSnapshot,
+            );
+            return this.buildAssignmentPreviewItem({
+                id: occurrence.occurrence_key,
+                mode: 'OCCURRENCE',
+                occurrenceKey: occurrence.occurrence_key,
+                scheduleId: occurrence.row.schedule_id,
+                conferenceDate: occurrence.effective_conference_date,
+                row: occurrence.row,
+                dayOfWeek: dayCodeForDate(occurrence.effective_conference_date),
+                startTime: occurrence.effective_start_time,
+                endTime: occurrence.effective_end_time,
+                previewStatus: 'BLOCKED_EXISTING',
+                message: 'Ya existe una videoconferencia registrada para esta ocurrencia.',
+                host: existingHost,
+                consumesCapacity: false,
+                inheritance: occurrence.inheritance,
+                ownerOccurrenceKey: null,
+            });
+        }
+
+        const selectedZoomUser = await this.findAvailableZoomUser(
+            occurrence.scheduled_start,
+            occurrence.scheduled_end,
+            zoomUsers,
+            maxConcurrent,
+            remoteMeetingsCache,
+            simulatedReservations,
+        );
+        if (!selectedZoomUser) {
+            return this.buildAssignmentPreviewItem({
+                id: occurrence.occurrence_key,
+                mode: 'OCCURRENCE',
+                occurrenceKey: occurrence.occurrence_key,
+                scheduleId: occurrence.row.schedule_id,
+                conferenceDate: occurrence.effective_conference_date,
+                row: occurrence.row,
+                dayOfWeek: dayCodeForDate(occurrence.effective_conference_date),
+                startTime: occurrence.effective_start_time,
+                endTime: occurrence.effective_end_time,
+                previewStatus: 'NO_AVAILABLE_ZOOM_USER',
+                message: 'No se encontro un usuario Zoom disponible para la fecha y horario indicados.',
+                host: null,
+                consumesCapacity: false,
+                inheritance: occurrence.inheritance,
+                ownerOccurrenceKey: null,
+            });
+        }
+
+        const currentReservations = simulatedReservations.get(selectedZoomUser.zoom_user_id) ?? [];
+        currentReservations.push({
+            scheduled_start: occurrence.scheduled_start,
+            scheduled_end: occurrence.scheduled_end,
+        });
+        simulatedReservations.set(selectedZoomUser.zoom_user_id, currentReservations);
+        return this.buildAssignmentPreviewItem({
+            id: occurrence.occurrence_key,
+            mode: 'OCCURRENCE',
+            occurrenceKey: occurrence.occurrence_key,
+            scheduleId: occurrence.row.schedule_id,
+            conferenceDate: occurrence.effective_conference_date,
+            row: occurrence.row,
+            dayOfWeek: dayCodeForDate(occurrence.effective_conference_date),
+            startTime: occurrence.effective_start_time,
+            endTime: occurrence.effective_end_time,
+            previewStatus: selectedZoomUser.is_licensed === true ? 'ASSIGNED_LICENSED' : 'ASSIGNED_RISK',
+            message:
+                selectedZoomUser.is_licensed === true
+                    ? 'Host Zoom sugerido para esta ocurrencia.'
+                    : 'Host Zoom sugerido, pero depende de licencia basica o no verificada.',
+            host: selectedZoomUser,
+            consumesCapacity: true,
+            inheritance: occurrence.inheritance,
+            ownerOccurrenceKey: null,
+        });
+    }
+
+    private buildAssignmentPreviewItem(input: {
+        id: string;
+        mode: AssignmentPreviewMode;
+        occurrenceKey: string | null;
+        scheduleId: string;
+        conferenceDate: string | null;
+        row: ScheduleContextRow;
+        dayOfWeek?: string;
+        startTime?: string;
+        endTime?: string;
+        previewStatus: AssignmentPreviewStatus;
+        message: string;
+        host: PreviewZoomPoolUser | null;
+        consumesCapacity: boolean;
+        inheritance: ExpandedOccurrence['inheritance'];
+        ownerOccurrenceKey: string | null;
+    }): AssignmentPreviewItem {
+        return {
+            id: input.id,
+            mode: input.mode,
+            occurrence_key: input.occurrenceKey,
+            schedule_id: input.scheduleId,
+            conference_date: input.conferenceDate,
+            day_of_week: input.dayOfWeek ?? input.row.day_of_week,
+            day_label: displayDay(input.dayOfWeek ?? input.row.day_of_week),
+            start_time: compactTime(input.startTime ?? input.row.start_time),
+            end_time: compactTime(input.endTime ?? input.row.end_time),
+            preview_status: input.previewStatus,
+            message: input.message,
+            zoom_user_id: input.host?.zoom_user_id ?? null,
+            zoom_user_email: input.host?.email ?? null,
+            zoom_user_name: input.host?.name ?? null,
+            license_status: input.host?.license_status ?? null,
+            license_label: input.host?.license_label ?? null,
+            is_licensed: input.host?.is_licensed ?? null,
+            depends_on_unverified_license: input.host ? input.host.is_licensed !== true : false,
+            consumes_capacity: input.consumesCapacity,
+            inheritance: input.inheritance,
+            owner_occurrence_key: input.ownerOccurrenceKey,
+        };
+    }
+
+    private buildAssignmentPreviewSummary(
+        items: AssignmentPreviewItem[],
+        licenseSyncOk: boolean,
+        virtualHostsNeeded = 0,
+    ): AssignmentPreviewSummary {
+        const assignedStatuses = new Set<AssignmentPreviewStatus>([
+            'ASSIGNED_LICENSED',
+            'ASSIGNED_RISK',
+            'INHERITED',
+            'BLOCKED_EXISTING',
+        ]);
+        const usedHosts = new Map<string, AssignmentPreviewItem>();
+        const hostsByDay = new Map<string, Map<string, AssignmentPreviewItem>>();
+        for (const item of items) {
+            if (!assignedStatuses.has(item.preview_status)) {
+                continue;
+            }
+            const hostKey = buildAssignmentHostKey(item);
+            if (!hostKey) {
+                continue;
+            }
+            usedHosts.set(hostKey, item);
+            const dayHosts = hostsByDay.get(item.day_of_week) ?? new Map<string, AssignmentPreviewItem>();
+            dayHosts.set(hostKey, item);
+            hostsByDay.set(item.day_of_week, dayHosts);
+        }
+
+        const verifiedHostsUsed = [...usedHosts.values()].filter((item) => item.is_licensed === true).length;
+        const riskHostsUsed = [...usedHosts.values()].filter((item) => item.is_licensed !== true).length;
+
+        return {
+            requested_rows: items.length,
+            assigned_rows: items.filter((item) => assignedStatuses.has(item.preview_status)).length,
+            hosts_used: usedHosts.size,
+            verified_hosts_used: verifiedHostsUsed,
+            risk_hosts_used: riskHostsUsed,
+            no_available_zoom_user: items.filter((item) => item.preview_status === 'NO_AVAILABLE_ZOOM_USER').length,
+            validation_errors: items.filter((item) => item.preview_status === 'VALIDATION_ERROR').length,
+            blocked_existing: items.filter((item) => item.preview_status === 'BLOCKED_EXISTING').length,
+            virtual_hosts_needed: virtualHostsNeeded,
+            licenses_required_global: usedHosts.size + virtualHostsNeeded,
+            additional_licenses_needed: licenseSyncOk ? riskHostsUsed + virtualHostsNeeded : null,
+            licenses_by_day: [...hostsByDay.entries()]
+                .map(([dayCode, dayHosts]) => ({
+                    day_of_week: dayCode,
+                    day_label: displayDay(dayCode),
+                    required_hosts: dayHosts.size,
+                }))
+                .sort((left, right) => getDaySortOrder(left.day_of_week) - getDaySortOrder(right.day_of_week)),
+        };
+    }
+
+    private resolvePreviewZoomUser(
+        zoomUserId: string | null | undefined,
+        email: string | null | undefined,
+        name: string | null | undefined,
+        zoomUsers: PreviewZoomPoolUser[],
+        licenseSnapshot: ZoomPoolLicenseSnapshot,
+    ) {
+        const foundById = `${zoomUserId ?? ''}`.trim()
+            ? zoomUsers.find((item) => item.zoom_user_id === `${zoomUserId ?? ''}`.trim()) ?? null
+            : null;
+        if (foundById) {
+            return foundById;
+        }
+
+        const foundByEmail = `${email ?? ''}`.trim().toLowerCase()
+            ? zoomUsers.find((item) => `${item.email ?? ''}`.trim().toLowerCase() === `${email ?? ''}`.trim().toLowerCase()) ?? null
+            : null;
+        if (foundByEmail) {
+            return foundByEmail;
+        }
+
+        const fallbackLicense = this.resolveZoomLicenseMetadata(email, licenseSnapshot);
+        if (!zoomUserId && !email && !name) {
+            return null;
+        }
+        return {
+            pool_id: '',
+            zoom_user_id: `${zoomUserId ?? ''}`.trim(),
+            sort_order: 999999,
+            is_active: false,
+            name: emptyTextToNull(name),
+            email: emptyTextToNull(email),
+            ...fallbackLicense,
+        };
+    }
+
+    private async loadExistingConferenceLookup(occurrences: ExpandedOccurrence[]): Promise<ExistingConferenceLookup> {
+        const scheduleIds = uniqueIds(occurrences.map((item) => item.row.schedule_id));
+        const conferenceDates = uniqueIds(occurrences.map((item) => item.effective_conference_date));
+        if (!scheduleIds.length || !conferenceDates.length) {
+            return new Map();
+        }
+
+        const rows = await this.planningVideoconferencesRepo
+            .createQueryBuilder('conference')
+            .where('conference.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds })
+            .andWhere('conference.conference_date IN (:...conferenceDates)', { conferenceDates })
+            .getMany();
+
+        return new Map(
+            rows.map((item) => [`${item.planning_subsection_schedule_id}::${item.conference_date}`, item] as const),
+        );
     }
 
     async getZoomPool() {
@@ -1421,12 +2252,14 @@ export class VideoconferenceService {
             .addSelect('offer.study_plan_course_id', 'course_id')
             .addSelect('offer.course_code', 'course_code')
             .addSelect('offer.course_name', 'course_name')
+            .addSelect('offer.source_payload_json', 'offer_source_payload_json')
             .addSelect('offer.vc_period_id', 'vc_period_id')
             .addSelect('offer.vc_faculty_id', 'vc_faculty_id')
             .addSelect('offer.vc_academic_program_id', 'vc_academic_program_id')
             .addSelect('offer.vc_course_id', 'vc_course_id')
             .addSelect('subsection.vc_section_id', 'vc_section_id')
             .addSelect('vc_section.name', 'vc_section_name')
+            .addSelect('section.source_payload_json', 'section_source_payload_json')
             .addSelect('responsible_teacher.id', 'responsible_teacher_id')
             .addSelect('responsible_teacher.name', 'responsible_teacher_name')
             .addSelect('responsible_teacher.full_name', 'responsible_teacher_full_name')
@@ -1480,6 +2313,7 @@ export class VideoconferenceService {
             course_id: readString(row.course_id),
             course_code: readNullableString(row.course_code),
             course_name: readNullableString(row.course_name),
+            offer_source_payload_json: readNullableRecord(row.offer_source_payload_json),
             vc_period_id: readNullableString(row.vc_period_id),
             vc_faculty_id: readNullableString(row.vc_faculty_id),
             vc_academic_program_id: readNullableString(row.vc_academic_program_id),
@@ -1488,6 +2322,12 @@ export class VideoconferenceService {
             vc_section_name:
               readNullableString(row.vc_section_name) ??
               readNullableString(row.section_external_code),
+            vc_faculty_name: null,
+            vc_academic_program_name: null,
+            vc_course_name: null,
+            vc_source: null,
+            vc_context_message: null,
+            section_source_payload_json: readNullableRecord(row.section_source_payload_json),
             responsible_teacher_id: readNullableString(row.responsible_teacher_id),
             responsible_teacher_name: readNullableString(row.responsible_teacher_name),
             responsible_teacher_full_name: readNullableString(row.responsible_teacher_full_name),
@@ -1509,7 +2349,33 @@ export class VideoconferenceService {
             ),
         }));
 
-        return filterRowsByModality(mappedRows, filters?.modality);
+        return this.resolveRowsWithAvContext(filterRowsByModality(mappedRows, filters?.modalities ?? filters?.modality));
+    }
+
+    private pickCatalogFilters(
+        filters: FilterOptionsDto | undefined,
+        allowedKeys: FilterOptionKey[],
+    ): FilterOptionsDto | undefined {
+        if (!filters) {
+            return undefined;
+        }
+
+        const picked: FilterOptionsDto = {};
+        const pickedRecord = picked as Record<FilterOptionKey, string | string[] | undefined>;
+        for (const key of allowedKeys) {
+            const value = filters[key];
+            if (Array.isArray(value)) {
+                if (value.length) {
+                    pickedRecord[key] = [...value];
+                }
+                continue;
+            }
+            if (typeof value === 'string' && value.trim()) {
+                pickedRecord[key] = value.trim();
+            }
+        }
+
+        return Object.keys(picked).length ? picked : undefined;
     }
 
     private async getFilterOptionRows(filters?: FilterOptionsDto, ignoredFilters: FilterOptionKey[] = []) {
@@ -1561,8 +2427,8 @@ export class VideoconferenceService {
             day_of_week: readNullableString(row.day_of_week),
         }));
 
-        if (!ignoredFilters.includes('modality')) {
-            return filterOptionRowsByModality(mappedRows, filters?.modality);
+        if (!ignoredFilters.includes('modalities')) {
+            return filterOptionRowsByModality(mappedRows, filters?.modalities ?? filters?.modality);
         }
 
         return mappedRows;
@@ -1691,7 +2557,15 @@ export class VideoconferenceService {
     }
 
     private buildDayOptions(rows: FilterOptionRow[]) {
-        const options = new Map<string, string>();
+        const options = new Map<string, string>([
+            ['LUNES', displayDay('LUNES')],
+            ['MARTES', displayDay('MARTES')],
+            ['MIERCOLES', displayDay('MIERCOLES')],
+            ['JUEVES', displayDay('JUEVES')],
+            ['VIERNES', displayDay('VIERNES')],
+            ['SABADO', displayDay('SABADO')],
+            ['DOMINGO', displayDay('DOMINGO')],
+        ]);
         for (const row of rows) {
             const dayCode = (row.day_of_week ?? '').trim().toUpperCase();
             if (!dayCode) {
@@ -1702,6 +2576,127 @@ export class VideoconferenceService {
         return [...options.entries()]
             .map(([id, label]) => ({ id, label }))
             .sort((left, right) => getDaySortOrder(left.id) - getDaySortOrder(right.id));
+    }
+
+    private async resolveRowsWithAvContext(rows: ScheduleContextRow[]) {
+        if (!rows.length) {
+            return rows;
+        }
+
+        const sourceFacultyIds = rows
+            .map((row) => extractSourceFacultyIdFromPayload(row.offer_source_payload_json))
+            .filter((value): value is string => Boolean(value));
+        const sourceAcademicProgramIds = rows
+            .map((row) => extractSourceAcademicProgramIdFromPayload(row.offer_source_payload_json))
+            .filter((value): value is string => Boolean(value));
+        const sourceCourseIds = rows
+            .map((row) => extractSourceCourseIdFromPayload(row.offer_source_payload_json))
+            .filter((value): value is string => Boolean(value));
+        const sourceSectionIds = rows
+            .map((row) => extractSourceSectionIdFromPayload(row.section_source_payload_json))
+            .filter((value): value is string => Boolean(value));
+
+        const [vcFaculties, vcAcademicPrograms, vcCourses, vcSections] = await Promise.all([
+            this.findManyByIds(
+                this.vcFacultiesRepo,
+                uniqueIds([...rows.map((row) => row.vc_faculty_id), ...sourceFacultyIds]),
+            ),
+            this.findManyByIds(
+                this.vcAcademicProgramsRepo,
+                uniqueIds([...rows.map((row) => row.vc_academic_program_id), ...sourceAcademicProgramIds]),
+            ),
+            this.findManyByIds(
+                this.vcCoursesRepo,
+                uniqueIds([...rows.map((row) => row.vc_course_id), ...sourceCourseIds]),
+            ),
+            this.findManyByIds(
+                this.vcSectionsRepo,
+                uniqueIds([...rows.map((row) => row.vc_section_id), ...sourceSectionIds]),
+            ),
+        ]);
+
+        const vcFacultyMap = mapById(vcFaculties);
+        const vcAcademicProgramMap = mapById(vcAcademicPrograms);
+        const vcCourseMap = mapById(vcCourses);
+        const vcSectionMap = mapById(vcSections);
+
+        return rows.map((row) => {
+            const offerVcContext = readOfferVcContextMetadata(row.offer_source_payload_json);
+            const sectionVcContext = readSectionVcContextMetadata(row.section_source_payload_json);
+            const sourceCourse = vcCourseMap.get(offerVcContext.source_vc_course_id ?? '') ?? null;
+            const sourceAcademicProgram =
+                vcAcademicProgramMap.get(
+                    sourceCourse?.program_id ?? offerVcContext.source_vc_academic_program_id ?? '',
+                ) ?? null;
+            const sourceFaculty =
+                vcFacultyMap.get(
+                    sourceAcademicProgram?.faculty_id ?? offerVcContext.source_vc_faculty_id ?? '',
+                ) ?? null;
+            const sourceSection = vcSectionMap.get(sectionVcContext.source_vc_section_id ?? '') ?? null;
+
+            const currentCourse = vcCourseMap.get(row.vc_course_id ?? '') ?? null;
+            const currentAcademicProgram =
+                vcAcademicProgramMap.get(
+                    currentCourse?.program_id ?? row.vc_academic_program_id ?? '',
+                ) ?? null;
+            const currentFaculty =
+                vcFacultyMap.get(
+                    currentAcademicProgram?.faculty_id ?? row.vc_faculty_id ?? '',
+                ) ?? null;
+            const currentSection = vcSectionMap.get(row.vc_section_id ?? '') ?? null;
+
+            const useSourceContext =
+                Boolean(sourceCourse || sourceAcademicProgram || sourceFaculty || sourceSection) &&
+                (!currentCourse ||
+                    !currentAcademicProgram ||
+                    !currentFaculty ||
+                    !currentSection ||
+                    (sourceFaculty && currentFaculty && sourceFaculty.id !== currentFaculty.id) ||
+                    (sourceAcademicProgram && currentAcademicProgram && sourceAcademicProgram.id !== currentAcademicProgram.id) ||
+                    (sourceCourse && currentCourse && sourceCourse.id !== currentCourse.id) ||
+                    (sourceSection && currentSection && sourceSection.id !== currentSection.id) ||
+                    (currentAcademicProgram && currentFaculty && currentAcademicProgram.faculty_id !== currentFaculty.id) ||
+                    (currentCourse && currentAcademicProgram && currentCourse.program_id !== currentAcademicProgram.id) ||
+                    (currentSection && currentCourse && currentSection.course_id !== currentCourse.id));
+
+            const effectiveCourse = useSourceContext ? sourceCourse : currentCourse;
+            const effectiveAcademicProgram =
+                useSourceContext
+                    ? sourceAcademicProgram ?? (effectiveCourse ? vcAcademicProgramMap.get(effectiveCourse.program_id) ?? null : null)
+                    : currentAcademicProgram;
+            const effectiveFaculty =
+                useSourceContext
+                    ? sourceFaculty ?? (effectiveAcademicProgram ? vcFacultyMap.get(effectiveAcademicProgram.faculty_id) ?? null : null)
+                    : currentFaculty;
+            const effectiveSection = useSourceContext ? sourceSection : currentSection;
+
+            return {
+                ...row,
+                vc_faculty_id: effectiveFaculty?.id ?? row.vc_faculty_id,
+                vc_faculty_name: effectiveFaculty?.name ?? null,
+                vc_academic_program_id: effectiveAcademicProgram?.id ?? row.vc_academic_program_id,
+                vc_academic_program_name: effectiveAcademicProgram?.name ?? null,
+                vc_course_id: effectiveCourse?.id ?? row.vc_course_id,
+                vc_course_name: effectiveCourse?.name ?? null,
+                vc_section_id: effectiveSection?.id ?? row.vc_section_id,
+                vc_section_name: effectiveSection?.name ?? row.vc_section_name,
+                vc_source: useSourceContext ? 'sync_source' : offerVcContext.vc_source,
+                vc_context_message: useSourceContext
+                    ? 'Contexto AV restaurado desde la sincronizacion.'
+                    : offerVcContext.vc_context_message,
+            };
+        });
+    }
+
+    private async findManyByIds<T extends { id: string }>(
+        repo: Repository<T>,
+        ids: Array<string | null | undefined>,
+    ) {
+        const normalizedIds = uniqueIds(ids);
+        if (!normalizedIds.length) {
+            return [] as T[];
+        }
+        return repo.find({ where: { id: In(normalizedIds) } as never });
     }
 
     private serializeBasePreviewRow(row: ScheduleContextRow, inheritance: ScheduleInheritanceInfo) {
@@ -1740,10 +2735,15 @@ export class VideoconferenceService {
             duration_minutes: row.duration_minutes,
             vc_period_id: row.vc_period_id,
             vc_faculty_id: row.vc_faculty_id,
+            vc_faculty_name: row.vc_faculty_name,
             vc_academic_program_id: row.vc_academic_program_id,
+            vc_academic_program_name: row.vc_academic_program_name,
             vc_course_id: row.vc_course_id,
+            vc_course_name: row.vc_course_name,
             vc_section_id: row.vc_section_id,
             vc_section_name: row.vc_section_name,
+            vc_source: row.vc_source,
+            vc_context_message: row.vc_context_message,
             occurrence_type: 'BASE' as const,
             base_conference_date: '',
             effective_conference_date: '',
@@ -1804,10 +2804,15 @@ export class VideoconferenceService {
             ),
             vc_period_id: row.vc_period_id,
             vc_faculty_id: row.vc_faculty_id,
+            vc_faculty_name: row.vc_faculty_name,
             vc_academic_program_id: row.vc_academic_program_id,
+            vc_academic_program_name: row.vc_academic_program_name,
             vc_course_id: row.vc_course_id,
+            vc_course_name: row.vc_course_name,
             vc_section_id: row.vc_section_id,
             vc_section_name: row.vc_section_name,
+            vc_source: row.vc_source,
+            vc_context_message: row.vc_context_message,
             occurrence_type: occurrence.occurrence_type,
             base_conference_date: occurrence.base_conference_date,
             effective_conference_date: occurrence.effective_conference_date,
@@ -2239,6 +3244,11 @@ export class VideoconferenceService {
         if (!row.vc_course_id?.trim()) return 'Falta vc_course_id en la oferta de planificacion.';
         if (!row.vc_section_id?.trim()) return 'Falta vc_section_id en la subseccion.';
         if (!row.vc_section_name?.trim()) return 'Falta el nombre de la seccion VC en la subseccion.';
+        if (!row.vc_faculty_name?.trim()) return 'El vc_faculty_id no existe o no es valido en Aula Virtual.';
+        if (!row.vc_academic_program_name?.trim()) {
+            return 'El vc_academic_program_id no existe o no es valido en Aula Virtual.';
+        }
+        if (!row.vc_course_name?.trim()) return 'El vc_course_id no existe o no es valido en Aula Virtual.';
         if (!teacher.id) return 'La subseccion no tiene docente responsable ni docente de seccion.';
         if (!teacher.name?.trim()) return 'El docente asignado no tiene nombre valido.';
         if (!teacher.dni?.trim()) return 'El docente asignado no tiene DNI.';
@@ -2352,13 +3362,14 @@ export class VideoconferenceService {
         };
     }
 
-    private async findAvailableZoomUser(
+    private async findAvailableZoomUser<T extends ZoomPoolUser>(
         scheduledStart: Date,
         scheduledEnd: Date,
-        zoomUsers: ZoomPoolUser[],
+        zoomUsers: T[],
         maxConcurrent: number,
         remoteMeetingsCache: Map<string, ZoomMeetingSummary[] | null>,
-    ) {
+        simulatedReservations?: Map<string, SimulatedReservation[]>,
+    ): Promise<T | null> {
         const windowStart = addMinutes(scheduledStart, -MEETING_MARGIN_MINUTES);
         const windowEnd = addMinutes(scheduledEnd, MEETING_MARGIN_MINUTES);
 
@@ -2414,7 +3425,33 @@ export class VideoconferenceService {
                 return doesOverlap(windowStart, windowEnd, remoteStart, remoteEnd);
             }).length;
 
-            if (localMeetings.length + remoteOverlapCount < maxConcurrent) {
+            const simulatedOverlapCount = (simulatedReservations?.get(zoomUser.zoom_user_id) ?? []).filter(
+                (item) => doesOverlap(windowStart, windowEnd, item.scheduled_start, item.scheduled_end),
+            ).length;
+
+            if (localMeetings.length + remoteOverlapCount + simulatedOverlapCount < maxConcurrent) {
+                return zoomUser;
+            }
+        }
+
+        return null;
+    }
+
+    private findAvailableZoomUserForBaseSlot(
+        scheduledStart: Date,
+        scheduledEnd: Date,
+        zoomUsers: PreviewZoomPoolUser[],
+        maxConcurrent: number,
+        simulatedReservations: Map<string, SimulatedReservation[]>,
+    ) {
+        const windowStart = addMinutes(scheduledStart, -MEETING_MARGIN_MINUTES);
+        const windowEnd = addMinutes(scheduledEnd, MEETING_MARGIN_MINUTES);
+
+        for (const zoomUser of zoomUsers) {
+            const overlaps = (simulatedReservations.get(zoomUser.zoom_user_id) ?? []).filter((item) =>
+                doesOverlap(windowStart, windowEnd, item.scheduled_start, item.scheduled_end),
+            ).length;
+            if (overlaps < maxConcurrent) {
                 return zoomUser;
             }
         }
@@ -2734,20 +3771,43 @@ function extractSectionToken(value: string | null | undefined) {
     return normalized.split('-')[0]?.replace(/\s+/g, '') ?? null;
 }
 
-function filterRowsByModality(rows: ScheduleContextRow[], modality: string | null | undefined) {
-    const normalized = normalizeModalityCode(modality);
-    if (!normalized) {
+function filterRowsByModality(rows: ScheduleContextRow[], modality: string | string[] | null | undefined) {
+    const normalized = new Set(normalizeModalityFilterInput(modality));
+    if (!normalized.size) {
         return rows;
     }
-    return rows.filter((row) => normalizeModalityCode(resolveModality(row).code) === normalized);
+    return rows.filter((row) => {
+        const rowModality = normalizeModalityCode(resolveModality(row).code);
+        if (!rowModality) {
+            return false;
+        }
+        return normalized.has(rowModality);
+    });
 }
 
-function filterOptionRowsByModality(rows: FilterOptionRow[], modality: string | null | undefined) {
-    const normalized = normalizeModalityCode(modality);
-    if (!normalized) {
+function filterOptionRowsByModality(rows: FilterOptionRow[], modality: string | string[] | null | undefined) {
+    const normalized = new Set(normalizeModalityFilterInput(modality));
+    if (!normalized.size) {
         return rows;
     }
-    return rows.filter((row) => normalizeModalityCode(resolveFilterRowModality(row).code) === normalized);
+    return rows.filter((row) => {
+        const rowModality = normalizeModalityCode(resolveFilterRowModality(row).code);
+        if (!rowModality) {
+            return false;
+        }
+        return normalized.has(rowModality);
+    });
+}
+
+function normalizeModalityFilterInput(value: string | string[] | null | undefined) {
+    const rawValues = Array.isArray(value) ? value : value ? [value] : [];
+    return Array.from(
+        new Set(
+            rawValues
+                .map((item) => normalizeModalityCode(item))
+                .filter((item): item is string => Boolean(item)),
+        ),
+    );
 }
 
 function buildOccurrence(
@@ -3051,6 +4111,175 @@ function readNullableNumber(value: unknown) {
         return Number.isFinite(parsed) ? parsed : null;
     }
     return null;
+}
+
+function readNullableRecord(value: unknown) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return null;
+    }
+    return value as Record<string, unknown>;
+}
+
+function uniqueIds(values: Array<string | null | undefined>) {
+    return Array.from(new Set(values.map((value) => `${value ?? ''}`.trim()).filter(Boolean)));
+}
+
+function mapById<T extends { id: string }>(items: T[]) {
+    return new Map(items.map((item) => [item.id, item] as const));
+}
+
+function payloadPickString(value: Record<string, unknown> | null | undefined, ...paths: string[]) {
+    const payload = readNullableRecord(value);
+    if (!payload) {
+        return null;
+    }
+    for (const path of paths) {
+        const resolved = path.split('.').reduce<unknown>((acc, key) => {
+            if (!acc || typeof acc !== 'object' || Array.isArray(acc)) {
+                return undefined;
+            }
+            return (acc as Record<string, unknown>)[key];
+        }, payload);
+        const normalized = `${resolved ?? ''}`.trim();
+        if (normalized) {
+            return normalized;
+        }
+    }
+    return null;
+}
+
+function readOfferVcContextMetadata(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+    const payload = readNullableRecord(sourcePayloadJson) ?? {};
+    const rawContext = readNullableRecord(payload.__vc_context);
+    return {
+        vc_source: readNullableString(rawContext?.vc_source),
+        vc_context_message: readNullableString(rawContext?.vc_context_message),
+        source_vc_faculty_id:
+            readNullableString(rawContext?.source_vc_faculty_id) ?? extractSourceFacultyIdFromPayload(payload),
+        source_vc_academic_program_id:
+            readNullableString(rawContext?.source_vc_academic_program_id)
+            ?? extractSourceAcademicProgramIdFromPayload(payload),
+        source_vc_course_id:
+            readNullableString(rawContext?.source_vc_course_id) ?? extractSourceCourseIdFromPayload(payload),
+    };
+}
+
+function readSectionVcContextMetadata(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+    const payload = readNullableRecord(sourcePayloadJson) ?? {};
+    const rawContext = readNullableRecord(payload.__vc_context);
+    return {
+        source_vc_section_id:
+            readNullableString(rawContext?.source_vc_section_id) ?? extractSourceSectionIdFromPayload(payload),
+    };
+}
+
+function extractSourceCourseIdFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+    return payloadPickString(sourcePayloadJson, 'id', 'course.id');
+}
+
+function extractSourceAcademicProgramIdFromPayload(
+    sourcePayloadJson: Record<string, unknown> | null | undefined,
+) {
+    return payloadPickString(
+        sourcePayloadJson,
+        'career.id',
+        'careerId',
+        'programId',
+        'program.id',
+        'detail.career.id',
+        'detail.careerId',
+    );
+}
+
+function extractSourceFacultyIdFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+    return payloadPickString(
+        sourcePayloadJson,
+        'career.facultyId',
+        'career.faculty.id',
+        'facultyId',
+        'faculty.id',
+        'detail.career.facultyId',
+        'detail.career.faculty.id',
+    );
+}
+
+function extractSourceSectionIdFromPayload(sourcePayloadJson: Record<string, unknown> | null | undefined) {
+    return payloadPickString(sourcePayloadJson, 'id', 'section.id', 'sectionId');
+}
+
+function sortBaseRowsForSimulation(rows: ScheduleContextRow[]) {
+    return [...rows].sort((left, right) => {
+        const comparisons = [
+            getDaySortOrder(left.day_of_week) - getDaySortOrder(right.day_of_week),
+            compactTime(left.start_time).localeCompare(compactTime(right.start_time)),
+            compactTime(left.end_time).localeCompare(compactTime(right.end_time)),
+            (left.campus_name ?? '').localeCompare(right.campus_name ?? ''),
+            (left.faculty_name ?? '').localeCompare(right.faculty_name ?? ''),
+            (left.program_name ?? '').localeCompare(right.program_name ?? ''),
+            buildCourseLabel(left.course_code, left.course_name).localeCompare(
+                buildCourseLabel(right.course_code, right.course_name),
+            ),
+            left.section_code.localeCompare(right.section_code),
+            left.subsection_code.localeCompare(right.subsection_code),
+            left.schedule_id.localeCompare(right.schedule_id),
+        ];
+        return comparisons.find((value) => value !== 0) ?? 0;
+    });
+}
+
+function sortAssignmentPreviewItems(items: AssignmentPreviewItem[]) {
+    return [...items].sort((left, right) => {
+        const comparisons = [
+            (left.conference_date ?? '').localeCompare(right.conference_date ?? ''),
+            getDaySortOrder(left.day_of_week) - getDaySortOrder(right.day_of_week),
+            left.start_time.localeCompare(right.start_time),
+            left.end_time.localeCompare(right.end_time),
+            left.schedule_id.localeCompare(right.schedule_id),
+            (left.occurrence_key ?? '').localeCompare(right.occurrence_key ?? ''),
+        ];
+        return comparisons.find((value) => value !== 0) ?? 0;
+    });
+}
+
+function buildAssignmentHostKey(item: Pick<AssignmentPreviewItem, 'zoom_user_id' | 'zoom_user_email' | 'zoom_user_name'>) {
+    const zoomUserId = `${item.zoom_user_id ?? ''}`.trim();
+    const zoomUserEmail = `${item.zoom_user_email ?? ''}`.trim().toLowerCase();
+    const zoomUserName = `${item.zoom_user_name ?? ''}`.trim().toLowerCase();
+    return zoomUserId || zoomUserEmail || zoomUserName || null;
+}
+
+function buildWeeklyScheduleDateTime(dayCode: string, timeValue: string) {
+    const dayOffset = Math.max(0, getDaySortOrder(dayCode) - 1);
+    const [hours, minutes] = compactTime(timeValue)
+        .split(':')
+        .map((value) => Number(value ?? 0));
+    return new Date(Date.UTC(2026, 0, 5 + dayOffset, hours || 0, minutes || 0, 0, 0));
+}
+
+function assignReservationToVirtualHost(
+    scheduledStart: Date,
+    scheduledEnd: Date,
+    maxConcurrent: number,
+    virtualReservations: Map<string, SimulatedReservation[]>,
+    createKey: () => string,
+) {
+    const windowStart = addMinutes(scheduledStart, -MEETING_MARGIN_MINUTES);
+    const windowEnd = addMinutes(scheduledEnd, MEETING_MARGIN_MINUTES);
+
+    for (const [hostKey, reservations] of virtualReservations.entries()) {
+        const overlapCount = reservations.filter((item) =>
+            doesOverlap(windowStart, windowEnd, item.scheduled_start, item.scheduled_end),
+        ).length;
+        if (overlapCount < maxConcurrent) {
+            reservations.push({ scheduled_start: scheduledStart, scheduled_end: scheduledEnd });
+            virtualReservations.set(hostKey, reservations);
+            return hostKey;
+        }
+    }
+
+    const nextKey = createKey();
+    virtualReservations.set(nextKey, [{ scheduled_start: scheduledStart, scheduled_end: scheduledEnd }]);
+    return nextKey;
 }
 
 function toErrorMessage(error: unknown) {
