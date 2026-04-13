@@ -131,6 +131,28 @@ export class GeneratePreferredHostDto {
     zoomUserId!: string;
 }
 
+export class CheckExistingVideoconferencesDto {
+    @IsOptional()
+    @IsArray()
+    @ArrayUnique()
+    @IsString({ each: true })
+    occurrenceKeys?: string[];
+
+    @IsOptional()
+    @IsArray()
+    @ArrayUnique()
+    @IsString({ each: true })
+    scheduleIds?: string[];
+
+    @IsOptional()
+    @IsDateString()
+    startDate?: string;
+
+    @IsOptional()
+    @IsDateString()
+    endDate?: string;
+}
+
 export class UpsertVideoconferenceOverrideDto {
     @IsString()
     scheduleId!: string;

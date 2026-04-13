@@ -178,10 +178,26 @@
         <button class="btn btn-secondary" type="button" (click)="previewAssignments()" [disabled]="loading || !selectedCount">
           Previsualizar asignacion Zoom
         </button>
+        <button
+          *ngIf="canRetryFailed"
+          class="btn btn-warning"
+          type="button"
+          (click)="retryFailed()"
+          [disabled]="generating">
+          Reintentar {{ retryableFailedRows.length }} fallidas
+        </button>
         <button class="btn btn-success" (click)="generate()" [disabled]="loading || !selectedCount">
           {{ generating ? 'Generando...' : 'Generar videoconferencias' }}
         </button>
       </div>
+    </div>
+
+    <div class="existing-check-banner" *ngIf="checkingExisting">
+      Verificando clases ya creadas en el rango&hellip;
+    </div>
+
+    <div class="existing-check-banner existing-check-banner-done" *ngIf="!checkingExisting && existingByOccurrenceKey.size > 0">
+      {{ existingByOccurrenceKey.size }} ocurrencia(s) ya creadas encontradas en el rango &mdash; fueron deseleccionadas automaticamente.
     </div>
 
     <div class="generation-progress-bar" *ngIf="generating" role="status" aria-label="Generando videoconferencias">
@@ -500,6 +516,20 @@
               <span class="course-meta-chip">{{ getSectionDisplay(item) }}</span>
               <span class="course-meta-chip">{{ getSubsectionDisplay(item) }}</span>
               <span *ngIf="!item.vc_section_id" class="course-meta-chip chip-warning">Match pendiente</span>
+              <!-- Occurrence mode: exact match badge -->
+              <span
+                *ngIf="usesOccurrenceRows && isAlreadyCreated(item)"
+                class="course-meta-chip chip-already-created"
+                title="Ya existe una videoconferencia para esta ocurrencia">
+                ✓ Ya creada{{ getExistingRecord(item)?.status === 'MATCHED' ? ' y conciliada' : '' }}
+              </span>
+              <!-- Base schedule mode: count of sessions already in the range -->
+              <span
+                *ngIf="!usesOccurrenceRows && existingByOccurrenceKey.size > 0 && isAnyCreatedForSchedule(item)"
+                class="course-meta-chip chip-already-created"
+                [title]="'Tiene ' + getExistingCountForSchedule(item) + ' clase(s) ya creada(s) en el rango ' + startDate + ' – ' + endDate">
+                ✓ {{ getExistingCountForSchedule(item) }} clase(s) en rango
+              </span>
             </div>
           </div>
 

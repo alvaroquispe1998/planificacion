@@ -1125,6 +1125,51 @@ h1 {
   transition: width 0.28s ease-out;
 }
 
+/* ── Already-created badge ───────────────────────────── */
+.chip-already-created {
+  background: #e8f5e9;
+  border: 1px solid #a5d6a7;
+  color: #2e7d32;
+  font-weight: 700;
+}
+
+/* ── Existing-check banners ──────────────────────────── */
+.existing-check-banner {
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.55rem 0.9rem;
+  border-radius: 8px;
+  background: #f5f9ff;
+  border: 1px dashed #aecde8;
+  font-size: 0.82rem;
+  color: #4a718f;
+}
+
+.existing-check-banner-done {
+  background: #edf7f0;
+  border-color: #a5d6a7;
+  color: #2e7d32;
+}
+
+/* ── Warning / retry button ──────────────────────────── */
+.btn-warning {
+  background: #ff8f00;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s;
+}
+.btn-warning:hover:not(:disabled) {
+  background: #e65100;
+}
+.btn-warning:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .generation-progress-hint {
   margin: 0.45rem 0 0;
   font-size: 0.78rem;
