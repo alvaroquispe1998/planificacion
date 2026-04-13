@@ -36,6 +36,27 @@
   flex-wrap: wrap;
 }
 
+.candidate-head-btn {
+  min-height: 46px;
+  padding: 0 18px;
+  border-radius: 14px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.candidate-head-btn-primary {
+  border: 1px solid rgba(21, 83, 172, 0.18);
+  background: linear-gradient(135deg, #1d6fd0, #1553ac);
+  color: #fff;
+  box-shadow: 0 14px 28px rgba(26, 92, 170, 0.18);
+}
+
+.candidate-head-btn-secondary {
+  border: 1px solid rgba(124, 160, 213, 0.24);
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.98), rgba(238, 244, 252, 0.98));
+  color: #21406b;
+}
+
 .filters-grid,
 .mapping-grid {
   display: grid;
@@ -252,6 +273,53 @@
 .mapping-list {
   display: grid;
   gap: 14px;
+}
+
+.candidate-list {
+  display: grid;
+  gap: 14px;
+}
+
+.candidate-item {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(124, 160, 213, 0.18);
+  background: linear-gradient(180deg, rgba(243, 248, 255, 0.95), rgba(255, 255, 255, 0.98));
+}
+
+.candidate-line {
+  color: #16345e;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.candidate-meta {
+  gap: 12px;
+}
+
+.candidate-actions {
+  justify-content: flex-start;
+}
+
+.candidate-action-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  font-weight: 800;
+}
+
+.candidate-action-btn-primary {
+  border: 1px solid rgba(21, 83, 172, 0.18);
+  background: linear-gradient(135deg, #1d6fd0, #1553ac);
+  color: #fff;
+}
+
+.candidate-action-btn-secondary {
+  border: 1px solid rgba(124, 160, 213, 0.24);
+  background: #fff;
+  color: #21406b;
 }
 
 .mapping-item {

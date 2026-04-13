@@ -7,6 +7,7 @@ import {
     CreateVideoconferenceInheritanceDto,
     FilterOptionsDto,
     GenerateVideoconferenceDto,
+    PreviewVideoconferenceInheritanceCandidatesDto,
     PreviewVideoconferenceDto,
     UpdateVideoconferenceInheritanceDto,
     UpsertVideoconferenceOverrideDto,
@@ -59,6 +60,22 @@ export class VideoconferenceController {
     @Post('inheritances')
     async createInheritance(@Body() payload: CreateVideoconferenceInheritanceDto) {
         return this.service.createVideoconferenceInheritance(payload);
+    }
+
+    @Post('inheritances/candidates')
+    async previewInheritanceCandidates(@Body() payload: PreviewVideoconferenceInheritanceCandidatesDto) {
+        return this.service.previewInheritanceCandidates(payload);
+    }
+
+    @Delete('inheritances/cleanup-legacy')
+    async cleanupLegacyInheritances(
+        @Query('semesterId') semesterId?: string,
+        @Query('facultyId') facultyId?: string,
+    ) {
+        return this.service.cleanupLegacyInheritances({
+            semesterId: semesterId?.trim() || undefined,
+            facultyId: facultyId?.trim() || undefined,
+        });
     }
 
     @Patch('inheritances/:id')

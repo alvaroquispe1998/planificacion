@@ -4,8 +4,7 @@
       <span class="eyebrow">Configuracion Zoom</span>
       <h1>Herencias Zoom</h1>
       <p>
-        Configura que seccion-horario hereda la videoconferencia de otra dentro del mismo periodo,
-        sede, facultad y programa.
+        Configura herencias manuales y revisa sugerencias por periodo, facultad, docente y franja.
       </p>
     </div>
   </section>
@@ -35,26 +34,10 @@
       </label>
 
       <label class="field">
-        <span>Sede</span>
-        <select [(ngModel)]="filters.campusId" (ngModelChange)="onFiltersChanged()">
-          <option value="">Selecciona una sede</option>
-          <option *ngFor="let option of campusOptions" [value]="option.id">{{ option.label }}</option>
-        </select>
-      </label>
-
-      <label class="field">
         <span>Facultad</span>
         <select [(ngModel)]="filters.facultyId" (ngModelChange)="onFiltersChanged()">
           <option value="">Selecciona una facultad</option>
           <option *ngFor="let option of facultyOptions" [value]="option.id">{{ option.label }}</option>
-        </select>
-      </label>
-
-      <label class="field">
-        <span>Programa</span>
-        <select [(ngModel)]="filters.programId" (ngModelChange)="onFiltersChanged()">
-          <option value="">Selecciona un programa</option>
-          <option *ngFor="let option of programOptions" [value]="option.id">{{ option.label }}</option>
         </select>
       </label>
     </div>
@@ -65,14 +48,74 @@
   <section class="panel">
     <div class="panel-head">
       <div>
+        <span class="eyebrow">Sugerencias</span>
+        <h2>Buscar posibles herencias</h2>
+        <p class="context-note">
+          Busca coincidencias por mismo periodo, facultad, docente y franja. No guarda nada automaticamente.
+        </p>
+      </div>
+      <div class="panel-head-actions">
+        <button
+          type="button"
+          class="btn btn-secondary candidate-head-btn candidate-head-btn-secondary"
+          (click)="cleanupLegacyMappings()"
+          [disabled]="cleaningLegacy">
+          {{ cleaningLegacy ? 'Limpiando...' : 'Limpiar herencias automaticas viejas' }}
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary candidate-head-btn candidate-head-btn-primary"
+          (click)="previewCandidates()"
+          [disabled]="candidateLoading || !canLoadCatalog">
+          {{ candidateLoading ? 'Buscando...' : 'Buscar posibles herencias' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="candidate-list" *ngIf="inheritanceCandidates.length; else emptyCandidateState">
+      <article class="candidate-item" *ngFor="let item of inheritanceCandidates">
+        <div class="candidate-summary">
+          <div>
+            <span class="summary-label">Padre sugerido</span>
+            <strong class="candidate-line">{{ formatCandidateLine(item.parent, item) }}</strong>
+          </div>
+          <div>
+            <span class="summary-label">Hijo sugerido</span>
+            <strong class="candidate-line">{{ formatCandidateLine(item.child, item) }}</strong>
+          </div>
+        </div>
+
+        <div class="mapping-meta candidate-meta">
+          <span class="pill">{{ item.teacher_name }}</span>
+          <span class="muted">{{ item.faculty_name }}</span>
+        </div>
+
+        <div class="mapping-actions candidate-actions">
+          <button type="button" class="btn btn-primary btn-sm candidate-action-btn candidate-action-btn-primary" (click)="applyCandidate(item)">
+            Usar sugerencia
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm candidate-action-btn candidate-action-btn-secondary" (click)="dismissCandidate(item)">
+            Descartar
+          </button>
+        </div>
+      </article>
+    </div>
+
+    <ng-template #emptyCandidateState>
+      <div class="empty-block">
+        <h3>No hay sugerencias cargadas.</h3>
+        <p>Usa el boton de busqueda para previsualizar posibles herencias sin guardar.</p>
+      </div>
+    </ng-template>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div>
         <span class="eyebrow">Nueva herencia</span>
         <h2>{{ form.id ? 'Editar herencia' : 'Crear herencia' }}</h2>
       </div>
-      <button
-        *ngIf="form.id"
-        type="button"
-        class="btn btn-secondary"
-        (click)="startNewMapping()">
+      <button *ngIf="form.id" type="button" class="btn btn-secondary" (click)="startNewMapping()">
         Nueva herencia
       </button>
     </div>
@@ -81,13 +124,26 @@
       <article class="mapping-column">
         <span class="column-title">Horario padre</span>
 
+        <label class="field">
+          <span>Sede</span>
+          <select [(ngModel)]="form.parentCampusId" (ngModelChange)="onFormContextChange()">
+            <option value="">Selecciona una sede</option>
+            <option *ngFor="let option of campusOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Programa</span>
+          <select [(ngModel)]="form.parentProgramId" (ngModelChange)="onFormContextChange()">
+            <option value="">Selecciona un programa</option>
+            <option *ngFor="let option of programOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+
         <div class="field">
           <span>Curso</span>
           <div class="search-select" [class.open]="parentCourseDropdownOpen">
-            <button
-              type="button"
-              class="search-select-trigger"
-              (click)="toggleParentCourseDropdown()">
+            <button type="button" class="search-select-trigger" (click)="toggleParentCourseDropdown()">
               <span [class.placeholder]="!form.parentCourseId">{{ selectedParentCourseLabel }}</span>
               <span class="search-select-arrow" aria-hidden="true"></span>
             </button>
@@ -150,8 +206,24 @@
         <span class="column-title">Horario hijo</span>
 
         <label class="field">
+          <span>Sede</span>
+          <select [(ngModel)]="form.childCampusId" (ngModelChange)="onChildContextChange()" [disabled]="!form.parentScheduleId">
+            <option value="">Selecciona una sede</option>
+            <option *ngFor="let option of campusOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Programa</span>
+          <select [(ngModel)]="form.childProgramId" (ngModelChange)="onChildContextChange()" [disabled]="!form.parentScheduleId">
+            <option value="">Selecciona un programa</option>
+            <option *ngFor="let option of programOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+
+        <label class="field">
           <span>Curso</span>
-          <select [(ngModel)]="form.childCourseId" (ngModelChange)="onChildCourseChange()">
+          <select [(ngModel)]="form.childCourseId" (ngModelChange)="onChildCourseChange()" [disabled]="!form.parentScheduleId">
             <option value="">Selecciona un curso</option>
             <option *ngFor="let option of childCourseOptions" [value]="option.id">{{ option.label }}</option>
           </select>

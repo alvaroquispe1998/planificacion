@@ -37,6 +37,7 @@ export interface VideoconferencePreviewItem {
     id: string;
     occurrence_key: string;
     schedule_id: string;
+    grouped_schedule_ids?: string[];
     section_id: string;
     section_code: string;
     section_label: string;
@@ -243,6 +244,8 @@ export interface ZoomPoolResponse {
 
 export interface VideoconferenceInheritanceCatalogSchedule {
     schedule_id: string;
+    campus_id: string | null;
+    program_id: string | null;
     subsection_id: string;
     section_id: string;
     section_code: string;
@@ -287,6 +290,42 @@ export interface VideoconferenceInheritanceItem {
         subsection_label: string;
         schedule_label: string;
     } | null;
+}
+
+export interface VideoconferenceInheritanceCandidateItem {
+    id: string;
+    teacher_name: string | null;
+    day_of_week: string;
+    day_label: string;
+    start_time: string;
+    end_time: string;
+    faculty_name: string | null;
+    parent: {
+        schedule_id: string;
+        campus_id: string | null;
+        campus_name: string | null;
+        program_id: string | null;
+        program_name: string | null;
+        course_id: string;
+        course_label: string;
+        section_id: string;
+        section_label: string;
+        subsection_label: string;
+        schedule_label: string;
+    };
+    child: {
+        schedule_id: string;
+        campus_id: string | null;
+        campus_name: string | null;
+        program_id: string | null;
+        program_name: string | null;
+        course_id: string;
+        course_label: string;
+        section_id: string;
+        section_label: string;
+        subsection_label: string;
+        schedule_label: string;
+    };
 }
 
 @Injectable({ providedIn: 'root' })
@@ -342,6 +381,27 @@ export class VideoconferenceApiService {
 
     listInheritances() {
         return this.http.get<VideoconferenceInheritanceItem[]>(`${this.baseUrl}/inheritances`);
+    }
+
+    previewInheritanceCandidates(payload: { semesterId: string; facultyId: string }) {
+        return this.http.post<{ success: boolean; count: number; items: VideoconferenceInheritanceCandidateItem[] }>(
+            `${this.baseUrl}/inheritances/candidates`,
+            payload,
+        );
+    }
+
+    cleanupLegacyInheritances(filters: { semesterId?: string; facultyId?: string }) {
+        let params = new HttpParams();
+        if (filters.semesterId) {
+            params = params.set('semesterId', filters.semesterId);
+        }
+        if (filters.facultyId) {
+            params = params.set('facultyId', filters.facultyId);
+        }
+        return this.http.delete<{ success: boolean; count: number }>(
+            `${this.baseUrl}/inheritances/cleanup-legacy`,
+            { params },
+        );
     }
 
     createInheritance(payload: {
