@@ -511,6 +511,10 @@ export class VideoconferenceApiService {
         return this.http.get<ZoomPoolResponse>(`${API_BASE_URL}/settings/zoom/pool`);
     }
 
+    getZoomGroupPool(groupId: string) {
+        return this.http.get<ZoomPoolResponse>(`${API_BASE_URL}/settings/zoom/groups/${encodeURIComponent(groupId)}/pool`);
+    }
+
     listZoomGroups() {
         return this.http.get<ZoomGroupItem[]>(`${this.baseUrl}/zoom-groups`);
     }

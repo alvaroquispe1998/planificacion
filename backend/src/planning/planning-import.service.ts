@@ -55,6 +55,7 @@ import {
 import {
   PlanningSubsectionVideoconferenceEntity,
   PlanningSubsectionVideoconferenceOverrideEntity,
+  PlanningSubsectionScheduleVcInheritanceEntity,
   VcAcademicProgramEntity,
   VcCourseEntity,
   VcFacultyEntity,
@@ -3612,13 +3613,19 @@ export class PlanningImportService {
         await manager.save(PlanningSubsectionScheduleEntity, schedulesToSave);
       }
 
-      // Delete stale schedules: clean up videoconferences and overrides first
+      // Delete stale schedules: clean up videoconferences, overrides and inheritance mappings first
       if (staleScheduleIds.length) {
         await manager.delete(PlanningSubsectionVideoconferenceOverrideEntity, {
           planning_subsection_schedule_id: In(staleScheduleIds),
         });
         await manager.delete(PlanningSubsectionVideoconferenceEntity, {
           planning_subsection_schedule_id: In(staleScheduleIds),
+        });
+        await manager.delete(PlanningSubsectionScheduleVcInheritanceEntity, {
+          parent_schedule_id: In(staleScheduleIds),
+        });
+        await manager.delete(PlanningSubsectionScheduleVcInheritanceEntity, {
+          child_schedule_id: In(staleScheduleIds),
         });
         await manager.delete(PlanningSubsectionScheduleEntity, { id: In(staleScheduleIds) });
       }

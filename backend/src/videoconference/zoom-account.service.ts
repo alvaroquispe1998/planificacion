@@ -59,6 +59,8 @@ export type ZoomMeetingSummary = {
     join_url: string | null;
     start_url: string | null;
     host_email: string | null;
+    /** Indicates whether this meeting was fetched from the live or upcoming list */
+    source_type: 'live' | 'upcoming';
 };
 
 export type ZoomPastMeetingInstanceSummary = {
@@ -251,7 +253,7 @@ export class ZoomAccountService {
             for (const row of rows) {
                 const meeting = this.mapMeetingSummary(row);
                 if (meeting) {
-                    meetings.push(meeting);
+                    meetings.push({ ...meeting, source_type: type });
                 }
             }
 
@@ -473,6 +475,8 @@ export class ZoomAccountService {
             join_url: typeof record.join_url === 'string' ? record.join_url : null,
             start_url: typeof record.start_url === 'string' ? record.start_url : null,
             host_email: typeof record.host_email === 'string' ? record.host_email : null,
+            // source_type is set by the caller (listUserMeetings) who knows the fetch context
+            source_type: 'upcoming' as 'live' | 'upcoming',
         };
     }
 

@@ -21,6 +21,7 @@ import {
 
 type PreviewSelectionItem = VideoconferencePreviewItem & {
   selected: boolean;
+  manualZoomUserId?: string;
 };
 
 type ResolvedGenerationResultItem = VideoconferenceGenerationResultItem & {
@@ -70,6 +71,7 @@ export class VideoconferencesPageComponent implements OnInit {
   selectedDays: string[] = [];
   selectedZoomGroupId = '';
   zoomGroups: ZoomGroupItem[] = [];
+  hybridZoomUsers: { id: string; label: string }[] = [];
 
   periodOptions: MultiSelectOption[] = [];
   campusOptions: MultiSelectOption[] = [];
@@ -182,6 +184,11 @@ export class VideoconferencesPageComponent implements OnInit {
     return this.zoomGroups.find((item) => item.id === this.selectedZoomGroupId) ?? null;
   }
 
+  get isHybridGroup() {
+    const group = this.selectedZoomGroup;
+    return group ? group.code.toUpperCase().includes('HIBRI') : false;
+  }
+
   get selectedZoomGroupLabel() {
     const group = this.selectedZoomGroup;
     return group ? `${group.name} (${group.code})` : 'Sin grupo Zoom';
@@ -273,6 +280,18 @@ export class VideoconferencesPageComponent implements OnInit {
   onZoomGroupChange(value: string) {
     this.selectedZoomGroupId = value;
     this.assignmentPreview = null;
+    this.hybridZoomUsers = [];
+    if (value && this.isHybridGroup) {
+      this.api.getZoomGroupPool(value).subscribe({
+        next: (res) => {
+          this.hybridZoomUsers = (res.users ?? res.items ?? []).map((u) => ({
+            id: u.zoom_user_id ?? u.id ?? '',
+            label: u.email ? `${u.name ?? ''} (${u.email})`.trim() : (u.name ?? u.zoom_user_id ?? u.id ?? ''),
+          })).filter((u) => u.id);
+          this.cdr.markForCheck();
+        },
+      });
+    }
   }
 
   clearFilters() {
@@ -1630,25 +1649,40 @@ export class VideoconferencesPageComponent implements OnInit {
   }
 
   private buildPreferredHostsForGeneration(selectedRows: PreviewSelectionItem[]) {
-    if (!this.assignmentPreview) {
-      return [] as Array<{ scheduleId: string; conferenceDate?: string; zoomUserId: string }>;
-    }
-    const selectedKeys = new Set(selectedRows.map((item) => item.occurrence_key));
-    const preferred = this.assignmentPreviewRows
-      .filter((item) => selectedKeys.has(item.preview?.occurrence_key || ''))
-      .filter((item) => item.zoom_user_id)
-      .filter((item) => item.preview_status === 'ASSIGNED_LICENSED' || item.preview_status === 'ASSIGNED_RISK')
-      .map((item) => ({
-        scheduleId: item.schedule_id,
-        conferenceDate: item.mode === 'OCCURRENCE' ? (item.conference_date || undefined) : undefined,
-        zoomUserId: item.zoom_user_id as string,
-      }));
-
     const dedup = new Map<string, { scheduleId: string; conferenceDate?: string; zoomUserId: string }>();
-    for (const item of preferred) {
-      const key = `${item.scheduleId}|${item.conferenceDate || ''}`;
-      dedup.set(key, item);
+
+    // Manual overrides from hybrid selector take priority
+    for (const row of selectedRows) {
+      if (row.manualZoomUserId) {
+        const key = `${row.schedule_id}|${row.effective_conference_date || ''}`;
+        dedup.set(key, {
+          scheduleId: row.schedule_id,
+          conferenceDate: row.effective_conference_date || undefined,
+          zoomUserId: row.manualZoomUserId,
+        });
+      }
     }
+
+    // Fill remaining from assignment preview (if available)
+    if (this.assignmentPreview) {
+      const selectedKeys = new Set(selectedRows.map((item) => item.occurrence_key));
+      const preferred = this.assignmentPreviewRows
+        .filter((item) => selectedKeys.has(item.preview?.occurrence_key || ''))
+        .filter((item) => item.zoom_user_id)
+        .filter((item) => item.preview_status === 'ASSIGNED_LICENSED' || item.preview_status === 'ASSIGNED_RISK')
+        .map((item) => ({
+          scheduleId: item.schedule_id,
+          conferenceDate: item.mode === 'OCCURRENCE' ? (item.conference_date || undefined) : undefined,
+          zoomUserId: item.zoom_user_id as string,
+        }));
+      for (const item of preferred) {
+        const key = `${item.scheduleId}|${item.conferenceDate || ''}`;
+        if (!dedup.has(key)) {
+          dedup.set(key, item);
+        }
+      }
+    }
+
     return Array.from(dedup.values());
   }
 
