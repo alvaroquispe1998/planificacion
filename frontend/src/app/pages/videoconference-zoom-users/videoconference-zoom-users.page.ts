@@ -50,7 +50,7 @@ type ZoomGroup = {
   active_members_count?: number;
 };
 
-type LicenseFilter = 'ALL' | 'NOT_FOUND' | 'BASIC' | 'LICENSED';
+type LicenseFilter = 'ALL' | 'UNVERIFIED' | 'BASIC' | 'LICENSED';
 
 @Component({
   selector: 'app-videoconference-zoom-users-page',
@@ -330,6 +330,18 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
       }
     }
 
+    if (this.licenseFilterKey(user) === 'UNVERIFIED') {
+      const confirmed = await this.dialog.confirm({
+        title: 'Usuario Zoom sin verificacion API',
+        message: `${this.userLabel(user)} no aparece en la API estandar de usuarios de Zoom, pero puede existir (por ejemplo, cuentas especiales/Rooms). Se agregara como no verificado y al generar se pedira confirmacion. Deseas continuar?`,
+        confirmLabel: 'Agregar igual',
+        cancelLabel: 'Cancelar',
+      });
+      if (!confirmed) {
+        return;
+      }
+    }
+
     this.poolItems = this.reindexPool([
       ...this.poolItems,
       {
@@ -432,7 +444,7 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
   }
 
   canAddUser(user: ZoomPoolUser) {
-    return this.licenseFilterKey(user) !== 'NOT_FOUND';
+    return Boolean(user.id);
   }
 
   licenseFilterKey(user: { license_status: 'LICENSED' | 'BASIC' | 'ON_PREM' | 'UNKNOWN' }) {
@@ -443,7 +455,7 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
       case 'BASIC':
         return 'BASIC' as const;
       default:
-        return 'NOT_FOUND' as const;
+        return 'UNVERIFIED' as const;
     }
   }
 

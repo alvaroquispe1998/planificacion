@@ -163,7 +163,7 @@
         <span>Filtrar licencia</span>
         <select [(ngModel)]="availableLicenseFilter" [disabled]="loading || saving">
           <option value="ALL">Todos</option>
-          <option value="NOT_FOUND">No encontrado en Zoom</option>
+          <option value="UNVERIFIED">No verificado en API</option>
           <option value="BASIC">Basico</option>
           <option value="LICENSED">Licenciado</option>
         </select>

@@ -684,6 +684,8 @@ function mapZoomLicenseStatus(typeCode: number | null): ZoomAccountUserLicenseSt
             return 'ON_PREM';
         case 1:
             return 'BASIC';
+        case 40:
+            return 'LICENSED'; // Zoom Rooms
         default:
             return 'UNKNOWN';
     }

@@ -186,6 +186,7 @@ type ZoomPoolLicenseSnapshot = {
     ok: boolean;
     error: string | null;
     byEmail: Map<string, ZoomAccountUserSummary>;
+    byId: Map<string, ZoomAccountUserSummary>;
 };
 
 type PreviewZoomPoolUser = ZoomPoolUser & {
@@ -1291,7 +1292,7 @@ export class VideoconferenceService implements OnModuleInit {
         const licenseSnapshot = await this.loadZoomPoolLicenseSnapshot();
         const zoomUsers: PreviewZoomPoolUser[] = poolValidation.users.map((item) => ({
             ...item,
-            ...this.resolveZoomLicenseMetadata(item.email, licenseSnapshot),
+            ...this.resolveZoomLicenseMetadata(item.email, licenseSnapshot, item.zoom_user_id),
         }));
 
         const requestedScheduleIds = scheduleIds.length
@@ -1951,7 +1952,7 @@ export class VideoconferenceService implements OnModuleInit {
             return foundByEmail;
         }
 
-        const fallbackLicense = this.resolveZoomLicenseMetadata(email, licenseSnapshot);
+        const fallbackLicense = this.resolveZoomLicenseMetadata(email, licenseSnapshot, zoomUserId);
         if (!zoomUserId && !email && !name) {
             return null;
         }
@@ -2165,14 +2166,14 @@ export class VideoconferenceService implements OnModuleInit {
                 is_active: Boolean(row.is_active),
                 name: readNullableString(row.name),
                 email: readNullableString(row.email),
-                ...this.resolveZoomLicenseMetadata(readNullableString(row.email), licenseSnapshot),
+                ...this.resolveZoomLicenseMetadata(readNullableString(row.email), licenseSnapshot, readNullableString(row.zoom_user_id)),
             })),
             users: users.map((user) => ({
                 id: user.id,
                 name: user.name,
                 email: user.email,
                 in_pool: selectedIds.has(user.id),
-                ...this.resolveZoomLicenseMetadata(user.email, licenseSnapshot),
+                ...this.resolveZoomLicenseMetadata(user.email, licenseSnapshot, user.id),
             })),
             license_sync_ok: licenseSnapshot.ok,
             license_sync_error: licenseSnapshot.error,
@@ -3765,7 +3766,7 @@ export class VideoconferenceService implements OnModuleInit {
 
         const usersWithLicense = rows.map((row) => ({
             ...row,
-            license: this.resolveZoomLicenseMetadata(row.email, licenseSnapshot),
+            license: this.resolveZoomLicenseMetadata(row.email, licenseSnapshot, row.zoom_user_id),
         }));
         const warnedUsers = usersWithLicense.filter((row) => row.license.is_licensed !== true);
 
@@ -3800,16 +3801,23 @@ export class VideoconferenceService implements OnModuleInit {
                     .filter((item) => item.email?.trim())
                     .map((item) => [item.email!.trim().toLowerCase(), item] as const),
             );
+            const byId = new Map(
+                zoomUsers
+                    .filter((item) => item.id?.trim())
+                    .map((item) => [item.id.trim().toLowerCase(), item] as const),
+            );
             return {
                 ok: true,
                 error: null,
                 byEmail,
+                byId,
             } satisfies ZoomPoolLicenseSnapshot;
         } catch (error) {
             return {
                 ok: false,
                 error: toErrorMessage(error),
                 byEmail: new Map<string, ZoomAccountUserSummary>(),
+                byId: new Map<string, ZoomAccountUserSummary>(),
             } satisfies ZoomPoolLicenseSnapshot;
         }
     }
@@ -3817,6 +3825,7 @@ export class VideoconferenceService implements OnModuleInit {
     private resolveZoomLicenseMetadata(
         email: string | null | undefined,
         snapshot: ZoomPoolLicenseSnapshot,
+        zoomUserId?: string | null,
     ) {
         if (!snapshot.ok) {
             return {
@@ -3826,11 +3835,25 @@ export class VideoconferenceService implements OnModuleInit {
             };
         }
         const normalizedEmail = `${email ?? ''}`.trim().toLowerCase();
-        const found = normalizedEmail ? snapshot.byEmail.get(normalizedEmail) ?? null : null;
+        const normalizedId = `${zoomUserId ?? ''}`.trim().toLowerCase();
+        const found =
+            (normalizedEmail ? snapshot.byEmail.get(normalizedEmail) : null) ??
+            (normalizedId ? snapshot.byId.get(normalizedId) : null) ??
+            null;
         if (!found) {
+            // Zoom Rooms accounts (auto-generated email prefix "rooms_") are licensed room
+            // credentials managed by Aula Virtual. They may not appear in the standard Zoom
+            // /users API, but they are valid. Treat them as licensed Sala Zoom accounts.
+            if (normalizedEmail.startsWith('rooms_')) {
+                return {
+                    license_status: 'LICENSED' as const,
+                    license_label: 'Sala Zoom',
+                    is_licensed: true,
+                };
+            }
             return {
                 license_status: 'UNKNOWN' as const,
-                license_label: 'No encontrado en Zoom',
+                license_label: 'No verificado en API de usuarios',
                 is_licensed: null,
             };
         }
