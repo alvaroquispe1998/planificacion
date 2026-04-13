@@ -950,7 +950,7 @@ export class VideoconferenceService {
 
         // Se carga TODO el semestre sin filtrar por facultad, programa ni sede.
         const rows = await this.getScheduleRows({ semesterId: normalizedId });
-        
+
         // Cargar herencias existentes para poder saltarlas
         const inheritances = await this.listInheritedMappings(rows.map((row) => row.schedule_id));
         const childScheduleIds = new Set(inheritances.map((item) => item.child_schedule_id));
@@ -958,7 +958,7 @@ export class VideoconferenceService {
         const groups = new Map<string, ScheduleContextRow[]>();
         for (const item of rows) {
             const hasTeacher = resolveTeacher(item).name && resolveTeacher(item).name !== 'Por asignar';
-            if (!hasTeacher || childScheduleIds.has(item.schedule_id)) continue; 
+            if (!hasTeacher || childScheduleIds.has(item.schedule_id)) continue;
             const teacherName = resolveTeacher(item).name;
             // Se asume continuidad por curso, seccion, dia y docente
             const key = `${item.course_id}|${item.section_id}|${item.day_of_week}|${teacherName}`;
@@ -975,26 +975,26 @@ export class VideoconferenceService {
 
         for (const group of groups.values()) {
             if (group.length < 2) continue;
-            group.sort((a,b) => compactTime(a.start_time).localeCompare(compactTime(b.start_time)));
-            for(let i=0; i < group.length -1; i++) {
+            group.sort((a, b) => compactTime(a.start_time).localeCompare(compactTime(b.start_time)));
+            for (let i = 0; i < group.length - 1; i++) {
                 const parent = group[i];
-                const child = group[i+1];
+                const child = group[i + 1];
                 const pTime = parseMinutes(parent.end_time);
                 const cTime = parseMinutes(child.start_time);
                 const diffMs = cTime - pTime;
                 // Si la diferencia entre termino e inicio es de 0 a 20 minutos
                 if (diffMs >= 0 && diffMs <= 20) {
-                   const entity = new PlanningSubsectionScheduleVcInheritanceEntity();
-                   entity.id = newId();
-                   entity.parent_schedule_id = parent.schedule_id;
-                   entity.child_schedule_id = child.schedule_id;
-                   entity.notes = LEGACY_AUTO_INHERITANCE_NOTE;
-                   entity.is_active = true;
-                   entity.created_at = new Date();
-                   entity.updated_at = new Date();
-                   toCreate.push(entity);
-                   // Como ya se emparejo este hijo, agregar al set para no tomarlo como padre si sobran mas
-                   childScheduleIds.add(child.schedule_id);
+                    const entity = new PlanningSubsectionScheduleVcInheritanceEntity();
+                    entity.id = newId();
+                    entity.parent_schedule_id = parent.schedule_id;
+                    entity.child_schedule_id = child.schedule_id;
+                    entity.notes = LEGACY_AUTO_INHERITANCE_NOTE;
+                    entity.is_active = true;
+                    entity.created_at = new Date();
+                    entity.updated_at = new Date();
+                    toCreate.push(entity);
+                    // Como ya se emparejo este hijo, agregar al set para no tomarlo como padre si sobran mas
+                    childScheduleIds.add(child.schedule_id);
                 }
             }
         }
@@ -1046,7 +1046,7 @@ export class VideoconferenceService {
                 const inheritance = this.resolveScheduleInheritance(row.schedule_id, inheritanceIndex, allRows);
                 if (inheritance.is_inherited) continue; // Omitir hijos de la vista
 
-                const familyRows = allRows.filter((r) => 
+                const familyRows = allRows.filter((r) =>
                     this.resolveScheduleInheritance(r.schedule_id, inheritanceIndex, allRows).family_owner_schedule_id === row.schedule_id
                 );
                 const maxEndTime = familyRows.reduce(
@@ -1082,13 +1082,13 @@ export class VideoconferenceService {
         }
         const occurrences = await this.resolveOccurrences(allRows, startDate, endDate, 'America/Lima', inheritanceIndex);
         const continuousBlockMap = this.buildContinuousBlockMap(allRows, inheritanceIndex);
-        
+
         const mappedOccurrences = [];
         for (const occ of occurrences) {
             if (!requestedScheduleIdSet.has(occ.row.schedule_id)) continue;
             if (occ.inheritance.is_inherited) continue; // Omitir hijos de la vista
 
-            const familyOccurrences = occurrences.filter((r) => 
+            const familyOccurrences = occurrences.filter((r) =>
                 r.inheritance.family_owner_schedule_id === occ.inheritance.family_owner_schedule_id &&
                 r.base_conference_date === occ.base_conference_date
             );
@@ -2117,6 +2117,21 @@ export class VideoconferenceService {
                 continue;
             }
 
+            // Merge the full continuous block end time into the owner occurrence,
+            // exactly as the assignment preview does, so that the payload sent to
+            // Aula Virtual reflects the combined block duration and not only the
+            // first schedule's end time.
+            const maxEndTime = familyItems.reduce(
+                (max, occ) => (compactTime(occ.effective_end_time) > compactTime(max) ? occ.effective_end_time : max),
+                ownerOccurrence.effective_end_time,
+            );
+            const maxScheduledEnd = familyItems.reduce(
+                (max, occ) => (occ.scheduled_end > max ? occ.scheduled_end : max),
+                ownerOccurrence.scheduled_end,
+            );
+            ownerOccurrence.effective_end_time = maxEndTime;
+            ownerOccurrence.scheduled_end = maxScheduledEnd;
+
             const ownerResult = await this.generateOccurrence(
                 ownerOccurrence,
                 aulaVirtualContext,
@@ -2558,7 +2573,7 @@ export class VideoconferenceService {
                 audit_synced_at: ownerRecord?.audit_synced_at ?? null,
                 audit_sync_error: ownerRecord?.audit_sync_error ?? null,
                 updated_at: now,
-              })
+            })
             : this.planningVideoconferencesRepo.create({
                 id: newId(),
                 planning_offer_id: occurrence.row.offer_id,
@@ -2599,7 +2614,7 @@ export class VideoconferenceService {
                 audit_sync_error: ownerRecord?.audit_sync_error ?? null,
                 created_at: now,
                 updated_at: now,
-              });
+            });
 
         const saved = await this.planningVideoconferencesRepo.save(entity);
         return {
@@ -2741,8 +2756,8 @@ export class VideoconferenceService {
             vc_course_id: readNullableString(row.vc_course_id),
             vc_section_id: readNullableString(row.vc_section_id),
             vc_section_name:
-              readNullableString(row.vc_section_name) ??
-              readNullableString(row.section_external_code),
+                readNullableString(row.vc_section_name) ??
+                readNullableString(row.section_external_code),
             vc_faculty_name: null,
             vc_academic_program_name: null,
             vc_course_name: null,
@@ -3306,7 +3321,7 @@ export class VideoconferenceService {
                             `${item.email || item.name || item.zoom_user_id} (${item.license.license_label})`,
                     )
                     .join(', ')}.`,
-              ]
+            ]
             : [];
 
         if (warnings.length && !allowWarnings) {
@@ -3596,15 +3611,21 @@ export class VideoconferenceService {
                 continue;
             }
 
-            const ordered = [...groupRows].sort((left, right) =>
-                compactTime(left.start_time).localeCompare(compactTime(right.start_time)),
-            );
+            const ordered = [...groupRows].sort((left, right) => {
+                const startCmp = compactTime(left.start_time).localeCompare(compactTime(right.start_time));
+                if (startCmp !== 0) return startCmp;
+                return compactTime(right.end_time).localeCompare(compactTime(left.end_time)); // Mas largo primero si empiezan igual
+            });
+
             let owner = ordered[0];
-            let previous = ordered[0];
+            let blockMaxEndTime = compactTime(ordered[0].end_time);
 
             for (let index = 1; index < ordered.length; index += 1) {
                 const current = ordered[index];
-                if (compactTime(previous.end_time) === compactTime(current.start_time)) {
+                const currentStartTime = compactTime(current.start_time);
+
+                // Si el siguiente empieza antes o justo cuando termina el bloque actual, es continuo/traslapado
+                if (currentStartTime <= blockMaxEndTime) {
                     mappings.push({
                         id: null,
                         parent_schedule_id: owner.schedule_id,
@@ -3614,12 +3635,16 @@ export class VideoconferenceService {
                         created_at: new Date(0),
                         updated_at: new Date(0),
                     });
-                    previous = current;
+
+                    const currentEndTime = compactTime(current.end_time);
+                    if (currentEndTime > blockMaxEndTime) {
+                        blockMaxEndTime = currentEndTime;
+                    }
                     continue;
                 }
 
                 owner = current;
-                previous = current;
+                blockMaxEndTime = compactTime(current.end_time);
             }
         }
 
@@ -3908,7 +3933,7 @@ export class VideoconferenceService {
                         section_label: buildSectionLabel(parent),
                         subsection_label: buildGroupLabel(parent),
                         schedule_label: buildScheduleLabel(parent),
-                      }
+                    }
                     : null,
                 child: child
                     ? {
@@ -3917,7 +3942,7 @@ export class VideoconferenceService {
                         section_label: buildSectionLabel(child),
                         subsection_label: buildGroupLabel(child),
                         schedule_label: buildScheduleLabel(child),
-                      }
+                    }
                     : null,
             };
         });
