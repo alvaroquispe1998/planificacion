@@ -849,41 +849,69 @@ export class PlanningImportService {
           continue;
         }
 
-        if (hasExistingData(decision?.existing_summary_json) && decision?.decision === 'REPLACE_SCOPE') {
+        let created: { plan_rules: number; offers: number; sections: number; subsections: number; schedules: number };
+
+        if (batch.source_kind === 'AKADEMIC') {
+          // Akademic: merge in-place. Updates existing records (keeping IDs stable so
+          // videoconferences keep pointing to valid schedules), creates new ones that
+          // appeared in Akademic, and deletes stale ones that were removed from Akademic.
           executionSummary = await this.updateExecutionBatchProgress(
             batch,
             executionSummary,
             Math.max(10, progressPercent - 1),
-            `Reemplazando datos existentes del grupo ${index + 1}/${scopeEntries.length}: ${scopeLabel}.`,
+            `Sincronizando grupo ${index + 1}/${scopeEntries.length}: ${scopeLabel}.`,
             {
-              stage_code: 'REPLACING_SCOPE',
+              stage_code: 'IMPORTING_SCOPE',
               current_scope_key: scopeKey,
               current_scope_label: scopeLabel,
             },
           );
-          const replaced = await this.replaceExistingScope(scope, actor);
-          executionSummary.replaced_scope_count = numberValue(executionSummary.replaced_scope_count) + (replaced ? 1 : 0);
-        }
+          created = await this.mergeAkademicScopeRows(
+            batchId,
+            scope,
+            scopeRows,
+            catalog,
+            executionCaches,
+            actor,
+          );
+          executionSummary.replaced_scope_count = numberValue(executionSummary.replaced_scope_count) + 1;
+        } else {
+          if (hasExistingData(decision?.existing_summary_json) && decision?.decision === 'REPLACE_SCOPE') {
+            executionSummary = await this.updateExecutionBatchProgress(
+              batch,
+              executionSummary,
+              Math.max(10, progressPercent - 1),
+              `Reemplazando datos existentes del grupo ${index + 1}/${scopeEntries.length}: ${scopeLabel}.`,
+              {
+                stage_code: 'REPLACING_SCOPE',
+                current_scope_key: scopeKey,
+                current_scope_label: scopeLabel,
+              },
+            );
+            const replaced = await this.replaceExistingScope(scope, actor);
+            executionSummary.replaced_scope_count = numberValue(executionSummary.replaced_scope_count) + (replaced ? 1 : 0);
+          }
 
-        executionSummary = await this.updateExecutionBatchProgress(
-          batch,
-          executionSummary,
-          Math.max(10, progressPercent - 1),
-          `Importando grupo ${index + 1}/${scopeEntries.length}: ${scopeLabel}.`,
-          {
-            stage_code: 'IMPORTING_SCOPE',
-            current_scope_key: scopeKey,
-            current_scope_label: scopeLabel,
-          },
-        );
-        const created = await this.importRowsForScope(
-          batchId,
-          scope,
-          scopeRows,
-          catalog,
-          executionCaches,
-          actor,
-        );
+          executionSummary = await this.updateExecutionBatchProgress(
+            batch,
+            executionSummary,
+            Math.max(10, progressPercent - 1),
+            `Importando grupo ${index + 1}/${scopeEntries.length}: ${scopeLabel}.`,
+            {
+              stage_code: 'IMPORTING_SCOPE',
+              current_scope_key: scopeKey,
+              current_scope_label: scopeLabel,
+            },
+          );
+          created = await this.importRowsForScope(
+            batchId,
+            scope,
+            scopeRows,
+            catalog,
+            executionCaches,
+            actor,
+          );
+        }
         executionSummary.processed_scope_count = index + 1;
         executionSummary.imported_scope_count = numberValue(executionSummary.imported_scope_count) + 1;
         executionSummary.created_plan_rule_count = numberValue(executionSummary.created_plan_rule_count) + created.plan_rules;
@@ -2903,6 +2931,725 @@ export class PlanningImportService {
         };
       }),
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // mergeAkademicScopeRows
+  // ---------------------------------------------------------------------------
+  // Akademic-specific upsert path: instead of deleting everything and recreating
+  // from scratch (which orphans videoconferences), this method:
+  //   1. Loads existing offers/sections/subsections/schedules for the scope.
+  //   2. For each incoming entity, finds a match by stable key and UPDATES it
+  //      in-place (keeping the same DB id), so existing videoconferences that
+  //      reference planning_subsection_schedule_id remain valid.
+  //   3. Creates brand-new records for entities that did not exist before.
+  //   4. Deletes stale records that no longer appear in Akademic. Before
+  //      deleting stale schedules it also deletes the associated videoconferences
+  //      and overrides (clean break instead of silent orphan).
+  // ---------------------------------------------------------------------------
+  private async mergeAkademicScopeRows(
+    batchId: string,
+    scope: ImportScope,
+    rows: PlanningImportRowEntity[],
+    catalog: ImportCatalog,
+    caches: ImportExecutionCaches,
+    actor?: ImportActor | null,
+  ): Promise<{ plan_rules: number; offers: number; sections: number; subsections: number; schedules: number }> {
+    const now = new Date();
+
+    // ── 1. Resolve VC context (identical to importRowsForScope) ───────────────
+    const rowsByOffer = groupBy(rows, (row) => {
+      const resolution = asRecord(row.resolution_json);
+      return `${recordString(resolution, 'study_plan_course_id')}::${recordString(resolution, 'offer_course_code')}`;
+    });
+    const directScopeVcFacultyId = firstNonEmpty(
+      rows.map((row) => recordString(asRecord(row.resolution_json), 'source_vc_faculty_id')),
+    );
+    const directScopeVcAcademicProgramId = firstNonEmpty(
+      rows.map((row) => recordString(asRecord(row.resolution_json), 'source_vc_academic_program_id')),
+    );
+    const firstScopeSource = rows
+      .map((row) => asRecord(row.source_json))
+      .find((item) => Object.keys(item).length > 0);
+    const scopeCourseSource =
+      asRecord(recordValue(firstScopeSource ?? {}, 'course')) ?? firstScopeSource ?? null;
+    const scopeDetailSource = asRecord(recordValue(firstScopeSource ?? {}, 'detail')) ?? null;
+    const sourceScopeVcContext = await this.resolveVcContextFromSourceInput(
+      {
+        source_vc_faculty_id: directScopeVcFacultyId,
+        source_vc_academic_program_id: directScopeVcAcademicProgramId,
+        faculty_name: extractAkademicFacultyNameFromSource(scopeCourseSource, scopeDetailSource),
+        academic_program_name: extractAkademicProgramNameFromSource(scopeCourseSource, scopeDetailSource),
+      },
+      caches,
+    );
+    const effectiveVcFacultyId = sourceScopeVcContext.vcFacultyId;
+    const effectiveVcAcademicProgramId = sourceScopeVcContext.vcAcademicProgramId;
+    const sourceVcFacultyIdByOfferKey = new Map<string, string | null>();
+    const sourceVcAcademicProgramIdByOfferKey = new Map<string, string | null>();
+    const vcFacultyIdByOfferKey = new Map<string, string | null>();
+    const vcAcademicProgramIdByOfferKey = new Map<string, string | null>();
+    const vcCourseIdByOfferKey = new Map<string, string | null>();
+
+    for (const [offerKey, offerRows] of rowsByOffer.entries()) {
+      const representative = offerRows.map((row) => asRecord(row.resolution_json)).find(Boolean);
+      if (!representative) {
+        sourceVcFacultyIdByOfferKey.set(offerKey, null);
+        sourceVcAcademicProgramIdByOfferKey.set(offerKey, null);
+        vcFacultyIdByOfferKey.set(offerKey, null);
+        vcAcademicProgramIdByOfferKey.set(offerKey, null);
+        vcCourseIdByOfferKey.set(offerKey, null);
+        continue;
+      }
+      const firstOfferSource = asRecord(offerRows[0]?.source_json);
+      const offerCourseSource =
+        asRecord(recordValue(firstOfferSource, 'course')) ?? firstOfferSource ?? null;
+      const offerDetailSource = asRecord(recordValue(firstOfferSource, 'detail')) ?? null;
+      const sourceVcCourseId = recordString(representative, 'source_vc_course_id');
+      const sourceVcCourse = sourceVcCourseId
+        ? await this.vcCoursesRepo.findOne({ where: { id: sourceVcCourseId } })
+        : null;
+      const sourceNamedVcContext = await this.resolveVcContextFromSourceInput(
+        {
+          source_vc_faculty_id: recordString(representative, 'source_vc_faculty_id'),
+          source_vc_academic_program_id: recordString(representative, 'source_vc_academic_program_id'),
+          faculty_name: extractAkademicFacultyNameFromSource(offerCourseSource, offerDetailSource),
+          academic_program_name: extractAkademicProgramNameFromSource(offerCourseSource, offerDetailSource),
+        },
+        caches,
+      );
+      const sourceResolvedVcAcademicProgramId =
+        sourceVcCourse?.program_id ?? sourceNamedVcContext.vcAcademicProgramId ?? null;
+      const sourceVcAcademicProgram = sourceResolvedVcAcademicProgramId
+        ? await this.vcAcademicProgramsRepo.findOne({ where: { id: sourceResolvedVcAcademicProgramId } })
+        : null;
+      const sourceResolvedVcFacultyId =
+        sourceVcAcademicProgram?.faculty_id ?? sourceNamedVcContext.vcFacultyId ?? null;
+      sourceVcFacultyIdByOfferKey.set(offerKey, sourceResolvedVcFacultyId);
+      sourceVcAcademicProgramIdByOfferKey.set(offerKey, sourceResolvedVcAcademicProgramId);
+      const vcCourseId =
+        sourceVcCourse?.id ??
+        (await this.resolveVcCourseIdForImport(
+          {
+            course_code: recordString(representative, 'offer_course_code'),
+            course_name: recordString(representative, 'offer_course_name'),
+            study_plan_year: scope.study_plan_year,
+            vc_academic_program_id: sourceResolvedVcAcademicProgramId ?? null,
+          },
+          caches,
+        ));
+      vcFacultyIdByOfferKey.set(offerKey, sourceResolvedVcFacultyId);
+      vcAcademicProgramIdByOfferKey.set(offerKey, sourceResolvedVcAcademicProgramId);
+      vcCourseIdByOfferKey.set(offerKey, vcCourseId);
+    }
+
+    // ── 2. Load existing DB state for this scope ──────────────────────────────
+    const scopeWhere = {
+      semester_id: scope.semester_id,
+      campus_id: scope.campus_id,
+      ...(scope.vc_period_id ? { vc_period_id: scope.vc_period_id } : {}),
+      faculty_id: scope.faculty_id,
+      academic_program_id: scope.academic_program_id,
+      study_plan_id: scope.study_plan_id,
+      cycle: scope.cycle,
+    };
+    const [existingRules, existingOffers] = await Promise.all([
+      this.planRulesRepo.find({ where: scopeWhere }),
+      this.offersRepo.find({ where: scopeWhere }),
+    ]);
+    const existingOfferByCourseId = new Map(existingOffers.map((o) => [o.study_plan_course_id, o]));
+    const existingOfferIds = existingOffers.map((o) => o.id);
+
+    const existingSections = existingOfferIds.length
+      ? await this.sectionsRepo.find({ where: { planning_offer_id: In(existingOfferIds) } })
+      : [];
+    // key = `${offerId}::${sectionCode}`
+    const existingSectionByKey = new Map(existingSections.map((s) => [`${s.planning_offer_id}::${s.code}`, s]));
+    const existingSectionIds = existingSections.map((s) => s.id);
+
+    const existingSubsections = existingSectionIds.length
+      ? await this.subsectionsRepo.find({ where: { planning_section_id: In(existingSectionIds) } })
+      : [];
+    // key = `${sectionId}::${subsectionCode}`
+    const existingSubsectionByKey = new Map(existingSubsections.map((sub) => [`${sub.planning_section_id}::${sub.code}`, sub]));
+    const existingSubsectionIds = existingSubsections.map((sub) => sub.id);
+
+    const existingSchedules = existingSubsectionIds.length
+      ? await this.schedulesRepo.find({ where: { planning_subsection_id: In(existingSubsectionIds) } })
+      : [];
+    // Two lookup strategies for schedule matching
+    const existingScheduleBySourceId = new Map<string, PlanningSubsectionScheduleEntity>();
+    const existingScheduleBySlot = new Map<string, PlanningSubsectionScheduleEntity>();
+    for (const sch of existingSchedules) {
+      if (sch.source_schedule_id) {
+        existingScheduleBySourceId.set(`${sch.planning_subsection_id}::${sch.source_schedule_id}`, sch);
+      }
+      existingScheduleBySlot.set(
+        `${sch.planning_subsection_id}::${sch.day_of_week}::${sch.start_time}::${sch.end_time}`,
+        sch,
+      );
+    }
+
+    // ── 3. Track which existing IDs are still valid ───────────────────────────
+    const touchedOfferIds = new Set<string>();
+    const touchedSectionIds = new Set<string>();
+    const touchedSubsectionIds = new Set<string>();
+    const touchedScheduleIds = new Set<string>();
+
+    // ── 4. Build upsert collections ───────────────────────────────────────────
+    const result = { plan_rules: 0, offers: 0, sections: 0, subsections: 0, schedules: 0 };
+    const changeLogs: Partial<PlanningChangeLogEntity>[] = [];
+    const offersToSave: PlanningOfferEntity[] = [];
+    const sectionsToSave: PlanningSectionEntity[] = [];
+    const subsectionsToSave: PlanningSubsectionEntity[] = [];
+    const schedulesToSave: PlanningSubsectionScheduleEntity[] = [];
+
+    // Plan rule: update existing or create new
+    const existingPlanRule = existingRules[0] ?? null;
+    let planRule: PlanningCyclePlanRuleEntity;
+    if (existingPlanRule) {
+      existingPlanRule.vc_faculty_id = effectiveVcFacultyId;
+      existingPlanRule.vc_academic_program_id = effectiveVcAcademicProgramId;
+      existingPlanRule.updated_at = now;
+      planRule = existingPlanRule;
+    } else {
+      planRule = this.planRulesRepo.create({
+        id: newId(),
+        semester_id: scope.semester_id,
+        vc_period_id: scope.vc_period_id,
+        campus_id: scope.campus_id,
+        academic_program_id: scope.academic_program_id,
+        faculty_id: scope.faculty_id,
+        career_name: scope.academic_program_name ?? scope.study_plan_name ?? null,
+        cycle: scope.cycle,
+        study_plan_id: scope.study_plan_id,
+        vc_faculty_id: effectiveVcFacultyId,
+        vc_academic_program_id: effectiveVcAcademicProgramId,
+        is_active: true,
+        workflow_status: 'DRAFT',
+        submitted_at: null,
+        submitted_by_user_id: null,
+        submitted_by: null,
+        reviewed_at: null,
+        reviewed_by_user_id: null,
+        reviewed_by: null,
+        review_comment: null,
+        created_at: now,
+        updated_at: now,
+      });
+      result.plan_rules += 1;
+      changeLogs.push(
+        this.buildChangeLogEntry(
+          'planning_cycle_plan_rule',
+          planRule.id,
+          'CREATE',
+          null,
+          planRule,
+          this.buildPlanRuleLogContext(planRule),
+          actor,
+        ),
+      );
+    }
+
+    // Offers, sections, subsections, schedules
+    for (const offerRows of rowsByOffer.values()) {
+      const representative = offerRows.map((row) => asRecord(row.resolution_json)).find(Boolean);
+      if (!representative) continue;
+
+      const offerKey = `${recordString(representative, 'study_plan_course_id')}::${recordString(representative, 'offer_course_code')}`;
+      const offerResolutions = offerRows.map((row) => asRecord(row.resolution_json));
+      const sourceVcCourseId = recordString(representative, 'source_vc_course_id');
+      const sourceResolvedVcFacultyId = sourceVcFacultyIdByOfferKey.get(offerKey) ?? null;
+      const sourceResolvedVcAcademicProgramId = sourceVcAcademicProgramIdByOfferKey.get(offerKey) ?? null;
+      const offerVcFacultyId = vcFacultyIdByOfferKey.get(offerKey) ?? effectiveVcFacultyId;
+      const offerVcAcademicProgramId = vcAcademicProgramIdByOfferKey.get(offerKey) ?? effectiveVcAcademicProgramId;
+      const resolvedVcCourseId = vcCourseIdByOfferKey.get(offerKey) ?? null;
+      const sourceSystem = (firstNonEmpty(offerResolutions.map((row) => recordString(row, 'source_system'))) as PlanningSourceSystem | null) ?? 'AKADEMIC';
+      const firstOfferSource = asRecord(offerRows[0]?.source_json);
+      const offerVcSource =
+        sourceResolvedVcFacultyId || sourceResolvedVcAcademicProgramId || sourceVcCourseId
+          ? 'sync_source'
+          : 'fallback_match';
+      const studyPlanCourseId = recordString(representative, 'study_plan_course_id')!;
+      const existingOffer = existingOfferByCourseId.get(studyPlanCourseId);
+
+      let offer: PlanningOfferEntity;
+      if (existingOffer) {
+        // Update in-place — keep same id
+        existingOffer.vc_faculty_id = offerVcFacultyId;
+        existingOffer.vc_academic_program_id = offerVcAcademicProgramId;
+        existingOffer.vc_course_id = resolvedVcCourseId;
+        existingOffer.course_name =
+          recordString(representative, 'offer_course_name') ?? existingOffer.course_name;
+        existingOffer.course_type =
+          recordString(representative, 'offer_course_type') ?? existingOffer.course_type;
+        existingOffer.theoretical_hours =
+          maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_theoretical_hours'))) ??
+          existingOffer.theoretical_hours;
+        existingOffer.practical_hours =
+          maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_practical_hours'))) ??
+          existingOffer.practical_hours;
+        existingOffer.total_hours =
+          maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_total_hours'))) ??
+          existingOffer.total_hours;
+        existingOffer.last_synced_at = now;
+        existingOffer.updated_at = now;
+        offer = existingOffer;
+      } else {
+        offer = this.offersRepo.create({
+          id: newId(),
+          semester_id: scope.semester_id,
+          vc_period_id: scope.vc_period_id,
+          campus_id: scope.campus_id,
+          faculty_id: scope.faculty_id,
+          academic_program_id: scope.academic_program_id,
+          study_plan_id: scope.study_plan_id,
+          cycle: scope.cycle,
+          study_plan_course_id: studyPlanCourseId,
+          vc_faculty_id: offerVcFacultyId,
+          vc_academic_program_id: offerVcAcademicProgramId,
+          vc_course_id: resolvedVcCourseId,
+          course_code: recordString(representative, 'offer_course_code'),
+          course_name: recordString(representative, 'offer_course_name'),
+          study_type_id: catalog.defaultStudyTypeId,
+          course_type: recordString(representative, 'offer_course_type') ?? 'TEORICO_PRACTICO',
+          source_system: sourceSystem,
+          source_course_id: firstNonEmpty(offerResolutions.map((row) => recordString(row, 'source_course_id'))),
+          source_term_id: firstNonEmpty(offerResolutions.map((row) => recordString(row, 'source_term_id'))),
+          last_synced_at: now,
+          source_payload_json: attachVcContextMetadata(
+            asRecord(recordValue(firstOfferSource, 'course')) ?? firstOfferSource ?? null,
+            {
+              vc_source: offerVcSource,
+              source_vc_faculty_id: sourceResolvedVcFacultyId,
+              source_vc_academic_program_id: sourceResolvedVcAcademicProgramId,
+              source_vc_course_id: sourceVcCourseId,
+              vc_context_message:
+                offerVcSource === 'sync_source'
+                  ? 'Contexto AV preservado desde la sincronizacion.'
+                  : 'Contexto AV resuelto por nombre/codigo del origen.',
+            },
+          ),
+          theoretical_hours:
+            maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_theoretical_hours'))) ?? 0,
+          practical_hours:
+            maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_practical_hours'))) ?? 0,
+          total_hours:
+            maxNumber(offerResolutions.map((row) => recordNumberOrNull(row, 'offer_total_hours'))) ?? 0,
+          status: 'DRAFT',
+          created_at: now,
+          updated_at: now,
+        });
+        result.offers += 1;
+        changeLogs.push(
+          this.buildChangeLogEntry(
+            'planning_offer',
+            offer.id,
+            'CREATE',
+            null,
+            offer,
+            this.buildOfferLogContext(offer),
+            actor,
+          ),
+        );
+      }
+      touchedOfferIds.add(offer.id);
+      offersToSave.push(offer);
+
+      const rowsBySection = groupBy(offerRows, (row) => {
+        const resolution = asRecord(row.resolution_json);
+        return recordString(resolution, 'import_section_code') ?? '__NO_SECTION__';
+      });
+
+      for (const [sectionCode, sectionRows] of rowsBySection.entries()) {
+        if (sectionCode === '__NO_SECTION__') continue;
+        const sectionResolutions = sectionRows.map((row) => asRecord(row.resolution_json));
+        const sourceVcSectionId = firstNonEmpty(
+          sectionResolutions.map((row) => recordString(row, 'source_vc_section_id')),
+        );
+        const sectionMapKey = `${offer.id}::${sectionCode}`;
+        const existingSection = existingSectionByKey.get(sectionMapKey);
+
+        let section: PlanningSectionEntity;
+        if (existingSection) {
+          // Update in-place — keep same id
+          existingSection.external_code =
+            firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'external_section_code'))) ??
+            existingSection.external_code;
+          existingSection.source_section_id =
+            firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'source_section_id'))) ??
+            existingSection.source_section_id;
+          existingSection.teacher_id = firstNonEmpty(
+            sectionResolutions.map((row) => recordString(row, 'teacher_id')),
+          );
+          existingSection.course_modality_id = firstNonEmpty(
+            sectionResolutions.map((row) => recordString(row, 'course_modality_id')),
+          );
+          existingSection.projected_vacancies =
+            maxNumber(sectionResolutions.map((row) => recordNumberOrNull(row, 'projected_vacancies'))) ??
+            existingSection.projected_vacancies;
+          existingSection.is_cepea = sectionResolutions.some((row) =>
+            Boolean(recordBoolean(row, 'is_cepea')),
+          );
+          existingSection.has_subsections =
+            new Set(
+              sectionResolutions
+                .map((row) => recordString(row, 'import_subsection_code'))
+                .filter(Boolean),
+            ).size > 1;
+          existingSection.updated_at = now;
+          section = existingSection;
+        } else {
+          section = this.sectionsRepo.create({
+            id: newId(),
+            planning_offer_id: offer.id,
+            code: sectionCode,
+            external_code: firstNonEmpty(
+              sectionResolutions.map((row) => recordString(row, 'external_section_code')),
+            ),
+            source_section_id: firstNonEmpty(
+              sectionResolutions.map((row) => recordString(row, 'source_section_id')),
+            ),
+            source_payload_json: attachVcContextMetadata(
+              asRecord(recordValue(asRecord(sectionRows[0]?.source_json), 'section')) ??
+                asRecord(sectionRows[0]?.source_json) ??
+                null,
+              {
+                vc_source: sourceVcSectionId ? 'sync_source' : 'fallback_match',
+                source_vc_section_id: sourceVcSectionId,
+                vc_context_message: sourceVcSectionId
+                  ? 'Seccion VC preservada desde la sincronizacion.'
+                  : 'Seccion VC pendiente de resolver por fallback.',
+              },
+            ),
+            teacher_id: firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'teacher_id'))),
+            course_modality_id: firstNonEmpty(
+              sectionResolutions.map((row) => recordString(row, 'course_modality_id')),
+            ),
+            projected_vacancies: maxNumber(
+              sectionResolutions.map((row) => recordNumberOrNull(row, 'projected_vacancies')),
+            ),
+            is_cepea: sectionResolutions.some((row) => Boolean(recordBoolean(row, 'is_cepea'))),
+            has_subsections:
+              new Set(
+                sectionResolutions
+                  .map((row) => recordString(row, 'import_subsection_code'))
+                  .filter(Boolean),
+              ).size > 1,
+            default_theoretical_hours: offer.theoretical_hours,
+            default_practical_hours: offer.practical_hours,
+            default_virtual_hours: 0,
+            default_seminar_hours: 0,
+            default_total_hours: offer.total_hours,
+            status: 'DRAFT',
+            created_at: now,
+            updated_at: now,
+          });
+          result.sections += 1;
+          changeLogs.push(
+            this.buildChangeLogEntry(
+              'planning_section',
+              section.id,
+              'CREATE',
+              null,
+              section,
+              this.buildSectionLogContext(section, offer),
+              actor,
+            ),
+          );
+        }
+        touchedSectionIds.add(section.id);
+        sectionsToSave.push(section);
+
+        const rowsBySubsection = groupBy(sectionRows, (row) => {
+          const resolution = asRecord(row.resolution_json);
+          return recordString(resolution, 'import_subsection_code') ?? '__NO_SUBSECTION__';
+        });
+
+        for (const [subsectionCode, subsectionRows] of rowsBySubsection.entries()) {
+          if (subsectionCode === '__NO_SUBSECTION__') continue;
+          const subsectionResolutions = subsectionRows.map((row) => asRecord(row.resolution_json));
+          const assignedTheoretical =
+            maxNumber(subsectionResolutions.map((row) => recordNumberOrNull(row, 'assigned_theoretical_hours'))) ?? 0;
+          const assignedPractical =
+            maxNumber(subsectionResolutions.map((row) => recordNumberOrNull(row, 'assigned_practical_hours'))) ?? 0;
+          const assignedTotal =
+            maxNumber(subsectionResolutions.map((row) => recordNumberOrNull(row, 'assigned_total_hours'))) ??
+            assignedTheoretical + assignedPractical;
+          const schedulePayloads = subsectionResolutions
+            .map((row) => asRecord(recordValue(row, 'schedule')))
+            .filter((item) => Object.keys(item).length > 0);
+          const uniqueScheduleTeacherIds = uniqueIds(schedulePayloads.map((row) => recordString(row, 'teacher_id')));
+          const uniqueScheduleBuildingIds = uniqueIds(schedulePayloads.map((row) => recordString(row, 'building_id')));
+          const uniqueScheduleClassroomIds = uniqueIds(
+            schedulePayloads.map((row) => recordString(row, 'classroom_id')),
+          );
+          const subsectionKind = (
+            firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'subsection_kind'))) ??
+            deriveSubsectionKind(assignedTheoretical, assignedPractical)
+          ) as PlanningSubsectionKind;
+
+          const subsectionMapKey = `${section.id}::${subsectionCode}`;
+          const existingSubsection = existingSubsectionByKey.get(subsectionMapKey);
+
+          let subsection: PlanningSubsectionEntity;
+          if (existingSubsection) {
+            // Update in-place — keep same id
+            existingSubsection.kind = subsectionKind;
+            existingSubsection.responsible_teacher_id =
+              uniqueScheduleTeacherIds.length === 1
+                ? uniqueScheduleTeacherIds[0]
+                : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'teacher_id')));
+            existingSubsection.course_modality_id = firstNonEmpty(
+              subsectionResolutions.map((row) => recordString(row, 'course_modality_id')),
+            );
+            existingSubsection.building_id =
+              uniqueScheduleBuildingIds.length === 1
+                ? uniqueScheduleBuildingIds[0]
+                : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'building_id')));
+            existingSubsection.classroom_id =
+              uniqueScheduleClassroomIds.length === 1
+                ? uniqueScheduleClassroomIds[0]
+                : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'classroom_id')));
+            existingSubsection.capacity_snapshot =
+              maxNumber(subsectionResolutions.map((row) => recordNumberOrNull(row, 'capacity_snapshot'))) ??
+              existingSubsection.capacity_snapshot;
+            existingSubsection.shift = firstNonEmpty(
+              subsectionResolutions.map((row) => recordString(row, 'shift')),
+            );
+            existingSubsection.projected_vacancies = maxNumber(
+              subsectionResolutions.map((row) => recordNumberOrNull(row, 'projected_vacancies')),
+            );
+            existingSubsection.assigned_theoretical_hours = assignedTheoretical;
+            existingSubsection.assigned_practical_hours = assignedPractical;
+            existingSubsection.assigned_total_hours = assignedTotal;
+            existingSubsection.vc_section_id =
+              firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'source_vc_section_id'))) ??
+              existingSubsection.vc_section_id;
+            existingSubsection.updated_at = now;
+            subsection = existingSubsection;
+          } else {
+            subsection = this.subsectionsRepo.create({
+              id: newId(),
+              planning_section_id: section.id,
+              code: subsectionCode,
+              kind: subsectionKind,
+              responsible_teacher_id:
+                uniqueScheduleTeacherIds.length === 1
+                  ? uniqueScheduleTeacherIds[0]
+                  : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'teacher_id'))),
+              course_modality_id: firstNonEmpty(
+                subsectionResolutions.map((row) => recordString(row, 'course_modality_id')),
+              ),
+              building_id:
+                uniqueScheduleBuildingIds.length === 1
+                  ? uniqueScheduleBuildingIds[0]
+                  : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'building_id'))),
+              classroom_id:
+                uniqueScheduleClassroomIds.length === 1
+                  ? uniqueScheduleClassroomIds[0]
+                  : firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'classroom_id'))),
+              capacity_snapshot: maxNumber(
+                subsectionResolutions.map((row) => recordNumberOrNull(row, 'capacity_snapshot')),
+              ),
+              shift: firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'shift'))),
+              projected_vacancies: maxNumber(
+                subsectionResolutions.map((row) => recordNumberOrNull(row, 'projected_vacancies')),
+              ),
+              course_type: offer.course_type,
+              assigned_theoretical_hours: assignedTheoretical,
+              assigned_practical_hours: assignedPractical,
+              assigned_virtual_hours: 0,
+              assigned_seminar_hours: 0,
+              assigned_total_hours: assignedTotal,
+              denomination:
+                firstNonEmpty(subsectionResolutions.map((row) => recordString(row, 'denomination'))) ??
+                buildDenomination(
+                  offer.course_code,
+                  offer.course_name,
+                  section.code,
+                  subsectionCode,
+                  offer.campus_id,
+                ),
+              vc_section_id:
+                firstNonEmpty(
+                  subsectionResolutions.map((row) => recordString(row, 'source_vc_section_id')),
+                ) ?? null,
+              status: 'DRAFT',
+              created_at: now,
+              updated_at: now,
+            });
+            result.subsections += 1;
+            changeLogs.push(
+              this.buildChangeLogEntry(
+                'planning_subsection',
+                subsection.id,
+                'CREATE',
+                null,
+                subsection,
+                this.buildSubsectionLogContext(subsection, section, offer),
+                actor,
+              ),
+            );
+          }
+          touchedSubsectionIds.add(subsection.id);
+          subsectionsToSave.push(subsection);
+
+          const uniqueSchedules = dedupeImportedSchedules(schedulePayloads);
+          for (const selectedSchedule of uniqueSchedules) {
+            const sourceScheduleId = recordString(selectedSchedule, 'source_schedule_id');
+            const dayOfWeek = recordString(selectedSchedule, 'day_of_week') as (typeof DayOfWeekValues)[number];
+            const startTime = recordString(selectedSchedule, 'start_time')!;
+            const endTime = recordString(selectedSchedule, 'end_time')!;
+
+            // Match by source_schedule_id first (reliable), then by time-slot (fallback)
+            const existingSchedule =
+              (sourceScheduleId
+                ? existingScheduleBySourceId.get(`${subsection.id}::${sourceScheduleId}`)
+                : null) ??
+              existingScheduleBySlot.get(
+                `${subsection.id}::${dayOfWeek}::${startTime}::${endTime}`,
+              ) ??
+              null;
+
+            let schedule: PlanningSubsectionScheduleEntity;
+            if (existingSchedule) {
+              // Update in-place — SAME ID → existing videoconferences remain valid!
+              existingSchedule.planning_subsection_id = subsection.id;
+              existingSchedule.day_of_week = dayOfWeek;
+              existingSchedule.start_time = startTime;
+              existingSchedule.end_time = endTime;
+              existingSchedule.session_type =
+                (recordString(selectedSchedule, 'session_type') as PlanningSessionType | null) ?? 'OTHER';
+              existingSchedule.source_session_type_code = recordString(
+                selectedSchedule,
+                'source_session_type_code',
+              );
+              existingSchedule.teacher_id = recordString(selectedSchedule, 'teacher_id');
+              existingSchedule.building_id = recordString(selectedSchedule, 'building_id');
+              existingSchedule.classroom_id = recordString(selectedSchedule, 'classroom_id');
+              existingSchedule.source_schedule_id = sourceScheduleId;
+              existingSchedule.source_payload_json =
+                asRecord(recordValue(selectedSchedule, 'source_payload_json')) ?? null;
+              existingSchedule.duration_minutes = recordNumber(selectedSchedule, 'duration_minutes');
+              existingSchedule.academic_hours = recordNumber(selectedSchedule, 'academic_hours');
+              existingSchedule.updated_at = now;
+              schedule = existingSchedule;
+            } else {
+              schedule = this.schedulesRepo.create({
+                id: newId(),
+                planning_subsection_id: subsection.id,
+                day_of_week: dayOfWeek,
+                start_time: startTime,
+                end_time: endTime,
+                session_type:
+                  (recordString(selectedSchedule, 'session_type') as PlanningSessionType | null) ?? 'OTHER',
+                source_session_type_code: recordString(selectedSchedule, 'source_session_type_code'),
+                teacher_id: recordString(selectedSchedule, 'teacher_id'),
+                building_id: recordString(selectedSchedule, 'building_id'),
+                classroom_id: recordString(selectedSchedule, 'classroom_id'),
+                source_schedule_id: sourceScheduleId,
+                source_payload_json:
+                  asRecord(recordValue(selectedSchedule, 'source_payload_json')) ?? null,
+                duration_minutes: recordNumber(selectedSchedule, 'duration_minutes'),
+                academic_hours: recordNumber(selectedSchedule, 'academic_hours'),
+                created_at: now,
+                updated_at: now,
+              });
+              result.schedules += 1;
+              changeLogs.push(
+                this.buildChangeLogEntry(
+                  'planning_subsection_schedule',
+                  schedule.id,
+                  'CREATE',
+                  null,
+                  schedule,
+                  this.buildScheduleLogContext(schedule, subsection, section, offer),
+                  actor,
+                ),
+              );
+            }
+            touchedScheduleIds.add(schedule.id);
+            schedulesToSave.push(schedule);
+          }
+        }
+      }
+    }
+
+    // ── 5. Identify stale records (existed before but not in incoming data) ────
+    const staleScheduleIds = existingSchedules
+      .map((s) => s.id)
+      .filter((id) => !touchedScheduleIds.has(id));
+    const staleSubsectionIds = existingSubsections
+      .map((s) => s.id)
+      .filter((id) => !touchedSubsectionIds.has(id));
+    const staleSectionIds = existingSections
+      .map((s) => s.id)
+      .filter((id) => !touchedSectionIds.has(id));
+    const staleOfferIds = existingOffers
+      .map((o) => o.id)
+      .filter((id) => !touchedOfferIds.has(id));
+    const staleRuleIds = existingRules
+      .filter((r) => r.id !== planRule.id)
+      .map((r) => r.id);
+
+    // ── 6. Persist all changes in a single transaction ────────────────────────
+    await this.offersRepo.manager.transaction(async (manager) => {
+      // Upsert plan rule
+      await manager.save(PlanningCyclePlanRuleEntity, planRule);
+
+      // Upsert offers / sections / subsections / schedules
+      if (offersToSave.length) {
+        await manager.save(PlanningOfferEntity, offersToSave);
+      }
+      if (sectionsToSave.length) {
+        await manager.save(PlanningSectionEntity, sectionsToSave);
+      }
+      if (subsectionsToSave.length) {
+        await manager.save(PlanningSubsectionEntity, subsectionsToSave);
+      }
+      if (schedulesToSave.length) {
+        await manager.save(PlanningSubsectionScheduleEntity, schedulesToSave);
+      }
+
+      // Delete stale schedules: clean up videoconferences and overrides first
+      if (staleScheduleIds.length) {
+        await manager.delete(PlanningSubsectionVideoconferenceOverrideEntity, {
+          planning_subsection_schedule_id: In(staleScheduleIds),
+        });
+        await manager.delete(PlanningSubsectionVideoconferenceEntity, {
+          planning_subsection_schedule_id: In(staleScheduleIds),
+        });
+        await manager.delete(PlanningSubsectionScheduleEntity, { id: In(staleScheduleIds) });
+      }
+      if (staleSubsectionIds.length) {
+        await manager.delete(PlanningSubsectionEntity, { id: In(staleSubsectionIds) });
+      }
+      if (staleSectionIds.length) {
+        await manager.delete(PlanningSectionEntity, { id: In(staleSectionIds) });
+      }
+      if (staleOfferIds.length) {
+        await manager.delete(PlanningOfferEntity, { id: In(staleOfferIds) });
+      }
+      if (staleRuleIds.length) {
+        await manager.delete(PlanningCyclePlanRuleEntity, { id: In(staleRuleIds) });
+      }
+
+      // Mark rows as imported
+      await manager.update(
+        PlanningImportRowEntity,
+        { batch_id: batchId, id: In(rows.map((row) => row.id)) },
+        { imported: true, updated_at: new Date() },
+      );
+      await this.saveChangeLogsBulk(changeLogs, manager);
+    });
+
+    // ── 7. Recalculate VC matches for all (new + updated) offers ─────────────
+    for (const offer of offersToSave) {
+      await this.planningManualService.recalculateVcMatches(actor as any, { offer_id: offer.id });
+    }
+
+    return result;
   }
 
   private async importRowsForScope(
