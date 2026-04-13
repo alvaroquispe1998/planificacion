@@ -1090,6 +1090,46 @@ export class PreviewPlanningAkademicImportDto {
   course_code?: string;
 }
 
+export class ExportPlanningWorkspaceDto {
+  @IsOptional()
+  @IsString()
+  semester_id?: string;
+
+  @IsOptional()
+  @IsString()
+  campus_id?: string;
+
+  @IsOptional()
+  @IsString()
+  faculty_id?: string;
+
+  @IsOptional()
+  @IsString()
+  academic_program_id?: string;
+
+  @IsOptional()
+  @IsString()
+  study_plan_id?: string;
+
+  @IsOptional()
+  @IsString()
+  delivery_modality_id?: string;
+
+  @IsOptional()
+  @IsString()
+  shift_id?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+}
+
+export class ComparePlanningExcelDto {
+  @IsString()
+  @IsNotEmpty()
+  semester_id!: string;
+}
+
 export class PlanningImportScopeDecisionInputDto {
   @IsString()
   scope_key!: string;

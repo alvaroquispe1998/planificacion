@@ -240,6 +240,37 @@ export class ApiService {
     return this.http.get<any[]>(`${this.baseUrl}/planning/offers-expanded`, { params });
   }
 
+  exportPlanningWorkspace(filters: Record<string, string>) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) {
+        params = params.set(key, value);
+      }
+    });
+    return this.http.get(`${this.baseUrl}/planning/workspace/export`, {
+      params,
+      responseType: 'blob',
+      observe: 'response',
+    });
+  }
+
+  comparePlanningExcelWithSystem(file: File, semesterId: string) {
+    const formData = new FormData();
+    formData.set('file', file);
+    formData.set('semester_id', semesterId);
+    return this.http.post<any>(`${this.baseUrl}/planning/imports/excel/compare`, formData);
+  }
+
+  exportPlanningExcelComparison(file: File, semesterId: string) {
+    const formData = new FormData();
+    formData.set('file', file);
+    formData.set('semester_id', semesterId);
+    return this.http.post(`${this.baseUrl}/planning/imports/excel/compare/report`, formData, {
+      responseType: 'blob',
+      observe: 'response',
+    });
+  }
+
   createPlanningOffer(payload: any) {
     return this.http.post<any>(`${this.baseUrl}/planning/offers`, payload);
   }

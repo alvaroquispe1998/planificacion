@@ -216,6 +216,7 @@ export class PlanningWorkspacePageComponent implements OnInit {
 
   loading = true;
   saving = false;
+  exporting = false;
   error = '';
   message = '';
   quickFilter: WorkspaceQuickFilter = 'ALL';
@@ -613,6 +614,44 @@ export class PlanningWorkspacePageComponent implements OnInit {
     this.clearSelection();
     this.closeDrawer();
     this.loadBootstrap();
+  }
+
+  exportExcel() {
+    this.exporting = true;
+    this.error = '';
+    this.message = '';
+    this.api
+      .exportPlanningWorkspace({
+        semester_id: this.filters.semester_id,
+        campus_id: this.filters.campus_id,
+        faculty_id: this.filters.faculty_id,
+        academic_program_id: this.filters.academic_program_id,
+        study_plan_id: this.filters.study_plan_id,
+        delivery_modality_id: this.filters.delivery_modality_id,
+        shift_id: this.filters.shift_id,
+        search: this.filters.search.trim(),
+      })
+      .pipe(catchError((err) => {
+        this.error = err?.error?.message ?? 'No se pudo exportar el Excel del workspace.';
+        return of(null);
+      }))
+      .subscribe((response: any) => {
+        this.exporting = false;
+        if (!response?.body) {
+          this.cdr.detectChanges();
+          return;
+        }
+        const fileName = this.fileNameFromDisposition(response.headers?.get('content-disposition'))
+          || `planificacion-${this.filters.semester_id || 'workspace'}.xlsx`;
+        const url = URL.createObjectURL(response.body);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = fileName;
+        anchor.click();
+        URL.revokeObjectURL(url);
+        this.message = 'Excel exportado correctamente.';
+        this.cdr.detectChanges();
+      });
   }
 
   onFacultyChange() {
@@ -1234,20 +1273,19 @@ export class PlanningWorkspacePageComponent implements OnInit {
   }
 
   courseLabel(row: PlanningWorkspaceRow) {
-    if (row.course_code && row.course_name) {
-      return `${row.course_code} - ${row.course_name}`;
+    const courseCode = this.actualCourseCode(row.course_code);
+    if (courseCode && row.course_name) {
+      return `${courseCode} - ${row.course_name}`;
     }
-    return row.course_code || row.course_name || 'Curso sin referencia';
+    return courseCode || row.course_name || 'Curso sin referencia';
   }
 
   groupLabel(row: PlanningWorkspaceRow) {
-    return row.external_section_code || row.course_section_name || 'Seccion sin referencia';
+    return this.baseSectionCode(row) || 'Seccion sin referencia';
   }
 
   groupMetaLabel(row: PlanningWorkspaceRow) {
-    const subsection = row.group_code ? `Grupo ${row.group_code}` : null;
-    const internal = row.internal_section_code ? `Interna ${row.internal_section_code}` : null;
-    return [subsection, internal, this.groupTypeLabel(row.group_type)].filter(Boolean).join(' | ');
+    return this.groupTypeLabel(row.group_type);
   }
 
   groupTypeLabel(value: string | null | undefined) {
@@ -1268,10 +1306,13 @@ export class PlanningWorkspacePageComponent implements OnInit {
   }
 
   modalityLabel(row: PlanningWorkspaceRow) {
-    return (
+    const external = this.parseExternalSection(row.external_section_code);
+    if (external.modalityLabel) {
+      return external.modalityLabel;
+    }
+    return this.normalizeWorkspaceModalityLabel(
       this.modalityOptions.find((item: any) => item.id === row.delivery_modality_id)?.name ??
-      row.delivery_modality_id ??
-      'Sin modalidad'
+        row.delivery_modality_id,
     );
   }
 
@@ -1670,6 +1711,12 @@ export class PlanningWorkspacePageComponent implements OnInit {
 
   private persistFilters() {
     localStorage.setItem(this.filtersStorageKey, JSON.stringify(this.filters));
+  }
+
+  private fileNameFromDisposition(contentDisposition: string | null) {
+    const value = `${contentDisposition ?? ''}`;
+    const match = value.match(/filename=\"?([^\";]+)\"?/i);
+    return match?.[1] ?? '';
   }
 
   private syncCatalogSelections() {
@@ -2150,6 +2197,71 @@ export class PlanningWorkspacePageComponent implements OnInit {
       return null;
     }
     return Math.max(0, Math.trunc(parsed));
+  }
+
+  private actualCourseCode(value: string | null | undefined) {
+    const raw = `${value ?? ''}`.trim();
+    if (!raw) {
+      return '';
+    }
+    const parts = raw.split('-').map((item) => item.trim()).filter(Boolean);
+    return parts.length >= 3 ? parts.slice(2).join('-') : raw;
+  }
+
+  private baseSectionCode(row: PlanningWorkspaceRow) {
+    const external = this.parseExternalSection(row.external_section_code);
+    return (
+      external.sectionCode ||
+      this.normalizeSectionCode(row.internal_section_code) ||
+      this.normalizeSectionCode(row.group_code) ||
+      this.normalizeSectionCode(row.course_section_name)
+    );
+  }
+
+  private normalizeSectionCode(value: string | null | undefined) {
+    const raw = `${value ?? ''}`.trim().toUpperCase();
+    if (!raw) {
+      return '';
+    }
+    const compact = raw.replace(/\s+/g, '');
+    const match = compact.match(/^([A-Z]+)/);
+    return match?.[1] ?? compact;
+  }
+
+  private parseExternalSection(value: string | null | undefined) {
+    const raw = `${value ?? ''}`.trim().toUpperCase();
+    const compact = raw.replace(/\s+/g, '');
+    const match = compact.match(/^([A-Z]+)-([A-Z]{2,})$/);
+    if (!match) {
+      return { sectionCode: '', modalityLabel: '' };
+    }
+    const prefix = match[1];
+    for (const token of ['HV', 'HP', 'V', 'P']) {
+      if (prefix.endsWith(token) && prefix.length > token.length) {
+        return {
+          sectionCode: prefix.slice(0, -token.length),
+          modalityLabel: this.normalizeWorkspaceModalityLabel(token),
+        };
+      }
+    }
+    return { sectionCode: prefix, modalityLabel: '' };
+  }
+
+  private normalizeWorkspaceModalityLabel(value: string | null | undefined) {
+    const normalized = this.normalizeSearchValue(value).toUpperCase();
+    if (normalized === 'V' || normalized === 'CV' || normalized === 'VIRTUAL') {
+      return 'Virtual';
+    }
+    if (normalized === 'P' || normalized === 'CP' || normalized === 'PRESENCIAL') {
+      return 'Presencial';
+    }
+    if (normalized === 'HP' || normalized === 'CHP' || normalized === 'HIBRIDO PRESENCIAL') {
+      return 'Hibrido presencial';
+    }
+    if (normalized === 'HV' || normalized === 'CHV' || normalized === 'HIBRIDO VIRTUAL') {
+      return 'Hibrido virtual';
+    }
+    return value || 'Sin modalidad';
   }
 
   private syncSelectedRows() {

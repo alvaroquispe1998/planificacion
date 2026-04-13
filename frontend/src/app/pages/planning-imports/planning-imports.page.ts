@@ -71,6 +71,11 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     is_active: true,
     notes: '',
   };
+  compareFile: File | null = null;
+  compareSemesterId = '';
+  comparing = false;
+  compareExporting = false;
+  compareResult: any = null;
   readonly optionalFieldLabels = [
     'docente',
     'turno',
@@ -437,15 +442,103 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
     return this.optionalFieldLabels.join(', ');
   }
 
+  get compareSummary() {
+    return this.compareResult?.summary ?? {};
+  }
+
+  get compareOnlyInExcel() {
+    return Array.isArray(this.compareResult?.only_in_excel) ? this.compareResult.only_in_excel : [];
+  }
+
+  get compareOnlyInSystem() {
+    return Array.isArray(this.compareResult?.only_in_system) ? this.compareResult.only_in_system : [];
+  }
+
+  get compareDifferences() {
+    return Array.isArray(this.compareResult?.differences) ? this.compareResult.differences : [];
+  }
+
+  get compareWarnings() {
+    return Array.isArray(this.compareResult?.warnings) ? this.compareResult.warnings : [];
+  }
+
   onFileChange(event: Event) {
     const input = event.target as HTMLInputElement | null;
     this.selectedFile = input?.files?.[0] ?? null;
+  }
+
+  onCompareFileChange(event: Event) {
+    const input = event.target as HTMLInputElement | null;
+    this.compareFile = input?.files?.[0] ?? null;
   }
 
   setSourceMode(mode: 'AKADEMIC' | 'EXCEL') {
     this.sourceMode = this.akademicOnlyView ? 'AKADEMIC' : mode;
     this.error = '';
     this.message = '';
+  }
+
+  runExcelCompare() {
+    if (!this.compareFile) {
+      this.error = 'Selecciona un Excel antes de comparar.';
+      return;
+    }
+    if (!this.compareSemesterId) {
+      this.error = 'Selecciona el semestre contra el que quieres comparar.';
+      return;
+    }
+    this.comparing = true;
+    this.error = '';
+    this.message = '';
+    this.compareResult = null;
+    this.api
+      .comparePlanningExcelWithSystem(this.compareFile, this.compareSemesterId)
+      .pipe(finalize(() => (this.comparing = false)))
+      .subscribe({
+        next: (result) => {
+          this.compareResult = result;
+          this.message = 'Comparacion generada correctamente.';
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.error = err?.error?.message ?? 'No se pudo comparar el Excel con el sistema.';
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  exportCompareReport() {
+    if (!this.compareFile || !this.compareSemesterId) {
+      this.error = 'Selecciona semestre y archivo antes de descargar el reporte.';
+      return;
+    }
+    this.compareExporting = true;
+    this.error = '';
+    this.api
+      .exportPlanningExcelComparison(this.compareFile, this.compareSemesterId)
+      .pipe(finalize(() => (this.compareExporting = false)))
+      .subscribe({
+        next: (response: any) => {
+          if (!response?.body) {
+            return;
+          }
+          const fileName =
+            this.fileNameFromDisposition(response.headers?.get('content-disposition')) ||
+            `comparacion-planificacion-${this.compareSemesterId}.xlsx`;
+          const url = URL.createObjectURL(response.body);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = fileName;
+          anchor.click();
+          URL.revokeObjectURL(url);
+          this.message = 'Reporte de comparacion descargado correctamente.';
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.error = err?.error?.message ?? 'No se pudo descargar el reporte de comparacion.';
+          this.cdr.detectChanges();
+        },
+      });
   }
 
   onAkademicFacultyChange() {
@@ -1616,6 +1709,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
             semesters: this.mergeSemesterOptions(catalogSemesters, this.importCatalog.semesters),
           };
           this.ensureAkademicSemesterSelection();
+          this.ensureCompareSemesterSelection();
           this.cdr.detectChanges();
         },
         error: () => {
@@ -1654,6 +1748,7 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
         this.semesterOptionsLoading = false;
         this.semesterOptionsLoaded = true;
         this.ensureAkademicSemesterSelection();
+        this.ensureCompareSemesterSelection();
         this.cdr.detectChanges();
       },
       error: () => {
@@ -1701,6 +1796,25 @@ export class PlanningImportsPageComponent implements OnInit, OnDestroy {
       return;
     }
     this.akademicForm.semester_id = String(semesters[0]?.id ?? '').trim();
+  }
+
+  private ensureCompareSemesterSelection() {
+    const semesters = Array.isArray(this.importCatalog.semesters) ? this.importCatalog.semesters : [];
+    if (!semesters.length) {
+      this.compareSemesterId = '';
+      return;
+    }
+    const selectedSemesterId = String(this.compareSemesterId ?? '').trim();
+    if (selectedSemesterId && semesters.some((item: any) => item.id === selectedSemesterId)) {
+      return;
+    }
+    this.compareSemesterId = String(this.akademicForm.semester_id || semesters[0]?.id || '').trim();
+  }
+
+  private fileNameFromDisposition(contentDisposition: string | null) {
+    const value = `${contentDisposition ?? ''}`;
+    const match = value.match(/filename=\"?([^\";]+)\"?/i);
+    return match?.[1] ?? '';
   }
 
   private resolveSemesterName(value: unknown) {

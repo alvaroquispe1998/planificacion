@@ -119,8 +119,10 @@ const SOURCE_DEFINITIONS: Array<{
       base_url: 'https://aulavirtual2.autonomadeica.edu.pe',
       login_url: 'https://aulavirtual2.autonomadeica.edu.pe/account/login?ReturnUrl=%2F',
       validate_path: '/facultades/get',
-    },
-  ];
+  },
+];
+
+const BULK_FETCH_LENGTH = '5000';
 
 const RESOURCE_DEFINITIONS: Array<{
   code: ResourceCode;
@@ -912,7 +914,7 @@ export class SettingsSyncService {
     dto: RunSettingsSyncDto,
   ) {
     if (resource === 'semesters') {
-      return this.fetchRows(source, cookie, '/admin/periodos/get', { start: '0', length: '500' });
+      return this.fetchRows(source, cookie, '/admin/periodos/get', { start: '0', length: BULK_FETCH_LENGTH });
     }
     if (resource === 'campuses') {
       return this.fetchRows(source, cookie, '/admin/campus/get');
@@ -921,12 +923,12 @@ export class SettingsSyncService {
       return this.fetchRows(source, cookie, '/admin/carreras/get');
     }
     if (resource === 'sections') {
-      return this.fetchRows(source, cookie, '/admin/codigos-de-seccion/get', { length: '500' });
+      return this.fetchRows(source, cookie, '/admin/codigos-de-seccion/get', { length: BULK_FETCH_LENGTH });
     }
     if (resource === 'courses') {
       const programIds = await this.resolveProgramIds();
       const results = await runWithConcurrency(programIds, 4, async (careerId) => {
-        const partial = await this.fetchRows(source, cookie, '/cursos/get', { careerId, length: '500' });
+        const partial = await this.fetchRows(source, cookie, '/cursos/get', { careerId, length: BULK_FETCH_LENGTH });
         return partial.map((item) => ({
           ...(item as Record<string, unknown>),
           career_id: careerId,
@@ -935,10 +937,10 @@ export class SettingsSyncService {
       return results.flat();
     }
     if (resource === 'classroom_types') {
-      return this.fetchRows(source, cookie, '/admin/aulas/categorias/get', { length: '500' });
+      return this.fetchRows(source, cookie, '/admin/aulas/categorias/get', { length: BULK_FETCH_LENGTH });
     }
     if (resource === 'zoom_users') {
-      return this.fetchRows(source, cookie, '/web/conference/aulas/listar', { length: '500' });
+      return this.fetchRows(source, cookie, '/web/conference/aulas/listar', { length: BULK_FETCH_LENGTH });
     }
     if (resource === 'faculties') {
       return this.fetchRows(source, cookie, '/admin/facultades/get');
@@ -947,10 +949,10 @@ export class SettingsSyncService {
       return this.fetchStudyPlanSyncRows(source, cookie);
     }
     if (resource === 'teachers') {
-      return this.fetchRows(source, cookie, '/admin/docentes/get', { length: '1000' });
+      return this.fetchRows(source, cookie, '/admin/docentes/get', { length: BULK_FETCH_LENGTH });
     }
     if (resource === 'classrooms') {
-      return this.fetchRows(source, cookie, '/admin/aulas/get', { length: '1000' });
+      return this.fetchRows(source, cookie, '/admin/aulas/get', { length: BULK_FETCH_LENGTH });
     }
     if (resource === 'classroom_section_schedules') {
       const classroomIds = await this.resolveClassroomIds(dto.classroom_ids);
@@ -977,7 +979,7 @@ export class SettingsSyncService {
       const campusIds = await this.resolveCampusIds(dto.campus_ids);
       const results = await runWithConcurrency(campusIds, 4, async (campusId) => {
         const partial = await this.fetchRows(source, cookie, '/admin/campus/pabellones/get', {
-          length: '500',
+          length: BULK_FETCH_LENGTH,
           campus: campusId,
         });
         return partial.map((item) => ({
@@ -991,7 +993,7 @@ export class SettingsSyncService {
       const campusIds = await this.resolveCampusIds(dto.campus_ids);
       const results = await runWithConcurrency(campusIds, 4, async (campusId) => {
         const partial = await this.fetchRows(source, cookie, '/admin/campus/carreras/get', {
-          length: '500',
+          length: BULK_FETCH_LENGTH,
           campus: campusId,
         });
         return partial.map((item) => ({
@@ -1041,7 +1043,7 @@ export class SettingsSyncService {
     if (resource === 'vc_courses') {
       const programIds = await this.resolveVcProgramIds();
       const results = await runWithConcurrency(programIds, 6, async (careerId) => {
-        const partial = await this.fetchRows(source, cookie, '/cursos/get', { careerId, length: '1000' });
+        const partial = await this.fetchRows(source, cookie, '/cursos/get', { careerId, length: BULK_FETCH_LENGTH });
         return partial.map((item) => ({
           ...(item as Record<string, unknown>),
           __program_id: careerId,
@@ -1344,7 +1346,7 @@ export class SettingsSyncService {
     source: ExternalSourceEntity,
     cookie: string,
   ): Promise<Record<string, unknown>[]> {
-    const plans = await this.fetchRows(source, cookie, '/admin/plan-estudios/get', { length: '1000' });
+    const plans = await this.fetchRows(source, cookie, '/admin/plan-estudios/get', { length: BULK_FETCH_LENGTH });
     const rows: Record<string, unknown>[] = [];
     const validPlans = plans
       .map((plan) => ({

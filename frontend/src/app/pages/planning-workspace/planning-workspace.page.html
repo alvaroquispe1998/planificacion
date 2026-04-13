@@ -9,6 +9,9 @@
     </div>
 
     <div class="hero-actions">
+      <button type="button" class="btn btn-secondary" (click)="exportExcel()" [disabled]="loading || saving || exporting">
+        {{ exporting ? 'Exportando...' : 'Exportar Excel' }}
+      </button>
       <button type="button" class="btn btn-secondary" (click)="goBack()">Volver al resumen</button>
       <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="loading || saving">
         Actualizar
@@ -568,7 +571,7 @@
       <span>Fila origen</span>
       <select [(ngModel)]="replicateModal.source_row_id">
         <option *ngFor="let row of replicateSourceOptions()" [value]="row.row_id">
-          {{ courseLabel(row) }} | Grupo {{ row.group_code }} | {{ scheduleLabel(row) }}
+          {{ courseLabel(row) }} | Seccion {{ groupLabel(row) }} | {{ scheduleLabel(row) }}
         </option>
       </select>
     </label>
@@ -576,7 +579,7 @@
     <div class="target-list">
       <p class="alert-title">Grupos destino</p>
       <article *ngFor="let row of replicateTargetRows()" class="target-row">
-        <strong>{{ groupLabel(row) }} | Grupo {{ row.group_code }}</strong>
+        <strong>{{ groupLabel(row) }}</strong>
         <span>{{ row.primary_teacher_name || 'Sin docente' }}</span>
       </article>
     </div>

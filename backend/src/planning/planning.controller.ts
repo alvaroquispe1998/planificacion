@@ -8,9 +8,11 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ACTION_PERMISSIONS, WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { CurrentAuthUser } from '../auth/current-auth-user.decorator';
@@ -22,12 +24,14 @@ import {
   BulkAssignTeacherDto,
   BulkDuplicateDto,
   BulkSubmitPlanningPlanReviewDto,
+  ComparePlanningExcelDto,
   CreatePlanningImportAliasDto,
   CreatePlanningCyclePlanRuleDto,
   CreatePlanningOfferDto,
   CreatePlanningSectionDto,
   CreatePlanningSubsectionDto,
   CreatePlanningSubsectionScheduleDto,
+  ExportPlanningWorkspaceDto,
   PreviewPlanningAkademicImportDto,
   ApprovePlanningPlanDto,
   RecalculatePlanningVcMatchesDto,
@@ -108,6 +112,34 @@ export class PlanningController {
     const result = await this.planningImportService.previewExcelImport(file, idActor(authUser));
     this.assertImportBatchScopeAccess(authUser, result);
     return result;
+  }
+
+  @Post('imports/excel/compare')
+  @UseInterceptors(FileInterceptor('file'))
+  async comparePlanningExcel(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @UploadedFile() file: any,
+    @Body() dto: ComparePlanningExcelDto,
+  ) {
+    return this.planningImportService.compareExcelWithSystem(file, dto);
+  }
+
+  @Post('imports/excel/compare/report')
+  @UseInterceptors(FileInterceptor('file'))
+  async exportPlanningExcelCompareReport(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @UploadedFile() file: any,
+    @Body() dto: ComparePlanningExcelDto,
+    @Res() res: Response,
+  ) {
+    const report = await this.planningImportService.exportExcelComparisonReport(file, dto);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${report.file_name}"`);
+    res.setHeader('Content-Length', String(report.buffer.length));
+    res.end(report.buffer);
   }
 
   @Post('imports/akademic/preview')
@@ -806,6 +838,25 @@ export class PlanningController {
         academic_program_id: item.academic_program_id ?? null,
       })),
     }));
+  }
+
+  @Get('workspace/export')
+  async exportWorkspace(
+    @CurrentAuthUser() authUser: AuthenticatedRequestUser,
+    @Query() dto: ExportPlanningWorkspaceDto,
+    @Res() res: Response,
+  ) {
+    if (dto.faculty_id || dto.academic_program_id) {
+      this.authService.assertScopeAccess(authUser, dto.faculty_id, dto.academic_program_id);
+    }
+    const report = await this.planningImportService.exportWorkspaceExcel(dto);
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${report.file_name}"`);
+    res.setHeader('Content-Length', String(report.buffer.length));
+    res.end(report.buffer);
   }
 
   @Patch('workspace/rows/:rowId')
