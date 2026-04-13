@@ -45,7 +45,9 @@ import {
   StudyTypeEntity,
 } from '../entities/planning.entities';
 import {
+  ComparePlanningExcelDto,
   CreatePlanningImportAliasDto,
+  ExportPlanningWorkspaceDto,
   PreviewPlanningAkademicImportDto,
   UpdatePlanningImportAliasDto,
   UpdatePlanningImportScopeDecisionsDto,
@@ -135,6 +137,7 @@ type NormalizedImportRow = {
   campus_raw: string;
   faculty_code_raw: string;
   academic_program_code_raw: string;
+  academic_program_code_akademic_raw: string;
   cycle_raw: number | null;
   section_raw: string;
   course_code_raw: string;
@@ -296,6 +299,88 @@ type BatchComposition = {
   row_preview: Record<string, unknown>[];
 };
 
+type WorkspaceExportFilters = {
+  semester_id?: string;
+  campus_id?: string;
+  faculty_id?: string;
+  academic_program_id?: string;
+  study_plan_id?: string;
+  delivery_modality_id?: string;
+  shift_id?: string;
+  search?: string;
+};
+
+type ManualWorkspaceComparableRow = {
+  semester_id: string | null;
+  semester_name: string | null;
+  study_plan_code: string | null;
+  rcu: string | null;
+  campus_name: string | null;
+  faculty_code: string | null;
+  faculty_name: string | null;
+  academic_program_code: string | null;
+  academic_program_code_akademic: string | null;
+  cycle: number | null;
+  section_code: string | null;
+  subsection_code: string | null;
+  course_code: string | null;
+  course_name: string | null;
+  study_type: string | null;
+  plan_course_type: string | null;
+  course_modality_name: string | null;
+  theory_hours: number | null;
+  practical_hours: number | null;
+  total_hours: number | null;
+  credits: number | null;
+  projected_vacancies: number | null;
+  teacher_dni: string | null;
+  teacher_name: string | null;
+  delivery_modality_id: string | null;
+  delivery_modality_name: string | null;
+  shift: string | null;
+  shift_id: string | null;
+  assistant_name: string | null;
+  building_name: string | null;
+  classroom_name: string | null;
+  classroom_capacity: number | null;
+  laboratory_name: string | null;
+  laboratory_capacity: number | null;
+  second_shift: string | null;
+  subsection_kind_label: string | null;
+  day_of_week: string | null;
+  day_number: number | null;
+  start_hour: number | null;
+  start_minute: number | null;
+  end_hour: number | null;
+  end_minute: number | null;
+  academic_hours_value: number | null;
+  start_time_label: string | null;
+  end_time_label: string | null;
+  denomination: string | null;
+  source_row_id: string;
+  comparison_key: string;
+  row_label: string;
+};
+
+type ExcelComparisonDifference = {
+  key: string;
+  row_label: string;
+  fields: Array<{
+    field: string;
+    label: string;
+    excel_value: string;
+    system_value: string;
+  }>;
+};
+
+type ExcelComparisonResult = {
+  summary: Record<string, unknown>;
+  warnings: Array<Record<string, unknown>>;
+  only_in_excel: ManualWorkspaceComparableRow[];
+  only_in_system: ManualWorkspaceComparableRow[];
+  differences: ExcelComparisonDifference[];
+};
+
 type SnapshotEntry = {
   key: string;
   label: string;
@@ -420,6 +505,58 @@ export class PlanningImportService {
     await this.importBatchesRepo.save(batch);
     void this.processPreviewBatch(batch.id, Buffer.from(file.buffer));
     return this.getBatch(batch.id);
+  }
+
+  async exportWorkspaceExcel(dto: ExportPlanningWorkspaceDto) {
+    const rows = await this.buildWorkspaceComparableRows(dto);
+    const workbook = XLSX.utils.book_new();
+    const sheet = XLSX.utils.aoa_to_sheet([
+      this.exportWorkbookHeaders(),
+      ...rows.map((row) => this.exportWorkbookRow(row)),
+    ]);
+    XLSX.utils.book_append_sheet(workbook, sheet, 'planificacion');
+    const buffer = XLSX.write(workbook, {
+      type: 'buffer',
+      bookType: 'xlsx',
+    }) as Buffer;
+    const semesterLabel = sanitizeFileName(
+      rows[0]?.semester_name ??
+        (dto.semester_id
+          ? (await this.semestersRepo.findOne({ where: { id: dto.semester_id } }))?.name
+          : null) ??
+        'planning',
+    );
+    return {
+      file_name: `planificacion-${semesterLabel}.xlsx`,
+      buffer,
+    };
+  }
+
+  async compareExcelWithSystem(file: any, dto: ComparePlanningExcelDto): Promise<ExcelComparisonResult> {
+    if (!file?.buffer?.length) {
+      throw new BadRequestException('Debes adjuntar un archivo Excel para comparar.');
+    }
+    const semester = await this.requireEntity(this.semestersRepo, dto.semester_id, 'semester');
+    const excelRows = await this.parseComparisonExcelRows(file.buffer, dto.semester_id);
+    const systemRows = await this.buildWorkspaceComparableRows({ semester_id: dto.semester_id });
+    return this.compareComparableRows(excelRows, systemRows, {
+      semester_id: semester.id,
+      semester_name: semester.name,
+      file_name: file.originalname ?? 'planificacion.xlsx',
+    });
+  }
+
+  async exportExcelComparisonReport(file: any, dto: ComparePlanningExcelDto) {
+    const comparison = await this.compareExcelWithSystem(file, dto);
+    const workbook = this.buildComparisonWorkbook(comparison);
+    const semester = await this.requireEntity(this.semestersRepo, dto.semester_id, 'semester');
+    return {
+      file_name: `comparacion-planificacion-${sanitizeFileName(semester.name ?? dto.semester_id)}.xlsx`,
+      buffer: XLSX.write(workbook, {
+        type: 'buffer',
+        bookType: 'xlsx',
+      }) as Buffer,
+    };
   }
 
   async previewAkademicImport(
@@ -1148,27 +1285,22 @@ export class PlanningImportService {
   }
 
   private async fetchAkademicCourses(termId: string, search = ''): Promise<AkademicCourseRow[]> {
-    const pageSize = 250;
-    const rows = await this.fetchAkademicRowsPaged(
-      '/admin/secciones-profesores/cursos/get',
-      (start) => ({
-        draw: '1',
-        tid: termId,
-        acid: '0',
-        acaprog: 'null',
-        ayid: 'null',
-        onlyWithSections: 'true',
-        onlyWithoutCoordinator: 'false',
-        start: String(start),
-        length: String(pageSize),
-        'search[value]': '',
-        'search[regex]': 'false',
-        keyName: search || '',
-        curriculumId: 'null',
-        _: `${Date.now()}`,
-      }),
-      pageSize,
-    );
+    const rows = await this.fetchAkademicRows('/admin/secciones-profesores/cursos/get', {
+      draw: '1',
+      tid: termId,
+      acid: '0',
+      acaprog: 'null',
+      ayid: 'null',
+      onlyWithSections: 'true',
+      onlyWithoutCoordinator: 'false',
+      start: '0',
+      length: '5000',
+      'search[value]': '',
+      'search[regex]': 'false',
+      keyName: search || '',
+      curriculumId: 'null',
+      _: `${Date.now()}`,
+    });
     return deduplicateRows(rows)
       .map((row) => ({
         id: asString(row.id),
@@ -1197,7 +1329,7 @@ export class PlanningImportService {
         '/admin/cursos/get',
         {
           start: '0',
-          length: '10',
+          length: '5000',
           search: course.code,
           tid: termId,
         },
@@ -1225,15 +1357,13 @@ export class PlanningImportService {
   }
 
   private async fetchAkademicSections(courseId: string, termId: string): Promise<AkademicSectionRow[]> {
-    const pageSize = 200;
-    const rows = await this.fetchAkademicRowsPaged(
+    const rows = await this.fetchAkademicRows(
       `/admin/secciones-profesores/cursos/${encodeURIComponent(courseId)}/secciones/get`,
-      (start) => ({
+      {
         tid: termId,
-        start: String(start),
-        length: String(pageSize),
-      }),
-      pageSize,
+        start: '0',
+        length: '5000',
+      },
     );
     return deduplicateRows(rows)
       .map((row) => {
@@ -4258,43 +4388,66 @@ export class PlanningImportService {
   }
 
   private normalizeExcelRow(row: Record<string, unknown>, rowNumber: number) {
+    const startTimeFormatted = extractFormattedTime(firstCellValue(row, 'HORA INICIO_1', 'HORA INICIO 2'));
+    const endTimeFormatted = extractFormattedTime(firstCellValue(row, 'HORA FIN_1', 'HORA FIN 2'));
     const normalized: NormalizedImportRow = {
       row_number: rowNumber,
-      semester_raw: stringifyCell(row['SEMESTRE ']),
-      study_plan_code_raw: stringifyCell(row['CODIGO DE  PLAN']),
-      campus_raw: stringifyCell(row.LOCAL),
-      faculty_code_raw: stringifyCell(row['Cod Facultad:']),
-      academic_program_code_raw: stringifyCell(row['PROGRAMA ACADÉMICO']),
-      cycle_raw: numberFromCell(row.CICLO),
-      section_raw: stringifyCell(row['SECCIÓN']),
-      course_code_raw: stringifyCell(row['CÓDIGO']),
-      course_name_raw: stringifyCell(row['NOMBRE DE CURSO']),
-      study_type_raw: stringifyCell(row['TIPO DE ESTUDIOS']),
-      course_requirement_raw: stringifyCell(row['TIPO DE CURSO']),
-      course_modality_raw: stringifyCell(row['MODALIDAD DE CURSO']),
-      delivery_modality_raw: stringifyCell(row['MODALIDAD \r\n(Presenc./VIRTUAL/HIBRIDO)']),
-      theory_hours: safeNumber(numberFromCell(row['HORAS TEORÍA'])),
-      practical_hours: safeNumber(numberFromCell(row['HORAS PRÁCTICA'])),
-      total_hours: safeNumber(numberFromCell(row['TOTAL DE HORAS'])),
-      credits: numberFromCell(row['TOTAL DE CREDITOS']),
-      projected_vacancies: numberFromCell(row['NÚMERO VACANTES PROYECTADAS 2025-2']),
-      teacher_dni_raw: stringifyCell(row.DNI),
-      teacher_name_raw: stringifyCell(row['APELLIDOS Y NOMBRES']),
+      semester_raw: stringifyCell(firstCellValue(row, 'SEMESTRE ', 'SEMESTRE')),
+      study_plan_code_raw: stringifyCell(firstCellValue(row, 'CODIGO DE  PLAN', 'COD. PLAN')),
+      campus_raw: stringifyCell(firstCellValue(row, 'LOCAL')),
+      faculty_code_raw: stringifyCell(firstCellValue(row, 'Cod Facultad:', 'FACULTAD')),
+      academic_program_code_akademic_raw: '',
+      academic_program_code_raw: stringifyCell(
+        firstCellValue(row, 'PROGRAMA ACADÉMICO', 'PROGRAMA ACADÃ‰MICO', 'COD PROGRAMA AKDEMIC', 'COD PROGRAMA'),
+      ),
+      cycle_raw: numberFromCell(firstCellValue(row, 'CICLO')),
+      section_raw: stringifyCell(firstCellValue(row, 'SECCIÓN', 'SECCIÃ“N')),
+      course_code_raw: stringifyCell(firstCellValue(row, 'CÓDIGO', 'CÃ“DIGO', 'CODIGO CURSO')),
+      course_name_raw: stringifyCell(firstCellValue(row, 'NOMBRE DE CURSO')),
+      study_type_raw: stringifyCell(firstCellValue(row, 'TIPO DE ESTUDIOS')),
+      course_requirement_raw: stringifyCell(firstCellValue(row, 'TIPO DE CURSO PLAN', 'TIPO DE CURSO')),
+      course_modality_raw: stringifyCell(firstCellValue(row, 'MODALIDAD DE CURSO')),
+      delivery_modality_raw: stringifyCell(
+        firstCellValue(row, 'MODALIDAD \r\n(Presenc./VIRTUAL/HIBRIDO)', 'MODALIDAD'),
+      ),
+      theory_hours: safeNumber(numberFromCell(firstCellValue(row, 'HORAS TEORÍA', 'HORAS TEORIA'))),
+      practical_hours: safeNumber(numberFromCell(firstCellValue(row, 'HORAS PRÁCTICA', 'HORAS PRACTICA'))),
+      total_hours: safeNumber(numberFromCell(firstCellValue(row, 'TOTAL DE HORAS'))),
+      credits: numberFromCell(firstCellValue(row, 'TOTAL DE CREDITOS', 'TOTAL DE CRÉDITOS')),
+      projected_vacancies: numberFromCell(
+        firstCellValue(row, 'NÚMERO VACANTES PROYECTADAS 2025-2', 'VACANTES PROYECTADAS'),
+      ),
+      teacher_dni_raw: stringifyCell(firstCellValue(row, 'DNI')),
+      teacher_name_raw: stringifyCell(firstCellValue(row, 'APELLIDOS Y NOMBRES', 'DOCENTE')),
       shift_raw:
-        stringifyCell(row['TURNO\r\n(DIURNO/\r\nMAÑANA/ TARDE/NOCHE)']) ||
-        stringifyCell(row.TURNO),
-      building_raw: stringifyCell(row.PABELLON),
-      classroom_raw: stringifyCell(row.AULA),
-      laboratory_raw: stringifyCell(row.LABORATORIO),
-      day_raw: stringifyCell(row.DIA),
-      start_hour_raw: stringifyCell(row['HORA INICIO']),
-      start_minute_raw: stringifyCell(row['MINUTO INICIO']),
-      end_hour_raw: stringifyCell(row['HORA FIN']),
-      end_minute_raw: stringifyCell(row['MINUTO FIN']),
-      academic_hours_raw: numberFromCell(row['HORAS\r\nACADEM.']),
-      denomination_raw: stringifyCell(row['DENOMINACIÓN']),
+        stringifyCell(firstCellValue(row, 'TURNO\r\n(DIURNO/\r\nMAÑANA/ TARDE/NOCHE)', 'TURNO', 'TURNO_1')),
+      building_raw: stringifyCell(firstCellValue(row, 'PABELLON')),
+      classroom_raw: stringifyCell(firstCellValue(row, 'AULA')),
+      laboratory_raw: stringifyCell(firstCellValue(row, 'LABORATORIO')),
+      day_raw: stringifyCell(firstCellValue(row, 'DIA')),
+      start_hour_raw:
+        stringifyCell(firstCellValue(row, 'HORA INICIO')) ||
+        stringifyCell(startTimeFormatted?.hour),
+      start_minute_raw:
+        stringifyCell(firstCellValue(row, 'MINUTO INICIO')) ||
+        stringifyCell(startTimeFormatted?.minute),
+      end_hour_raw:
+        stringifyCell(firstCellValue(row, 'HORA FIN')) ||
+        stringifyCell(endTimeFormatted?.hour),
+      end_minute_raw:
+        stringifyCell(firstCellValue(row, 'MINUTO FIN')) ||
+        stringifyCell(endTimeFormatted?.minute),
+      academic_hours_raw: numberFromCell(firstCellValue(row, 'HORAS\r\nACADEM.', 'HORAS ACADEMICAS')),
+      denomination_raw: stringifyCell(firstCellValue(row, 'DENOMINACIÓN', 'DENOMINACIÃ“N', 'DENOMINACION')),
       raw_row: row,
     };
+    normalized.academic_program_code_akademic_raw = stringifyCell(
+      firstCellValue(row, 'COD PROGRAMA AKDEMIC', 'PROGRAMA ACADÃ‰MICO', 'PROGRAMA ACADÃƒâ€°MICO'),
+    );
+    const explicitProgramCode = stringifyCell(firstCellValue(row, 'COD PROGRAMA'));
+    if (explicitProgramCode) {
+      normalized.academic_program_code_raw = explicitProgramCode;
+    }
 
     if (shouldSkipExcelRow(normalized)) {
       return null;
@@ -5748,6 +5901,18 @@ export class PlanningImportService {
     };
   }
 
+  private async requireEntity<T extends ObjectLiteral & { id: string }>(
+    repo: Repository<T>,
+    id: string,
+    label: string,
+  ) {
+    const entity = await repo.findOne({ where: { id } as any });
+    if (!entity) {
+      throw new NotFoundException(`No existe ${label} ${id}.`);
+    }
+    return entity;
+  }
+
   private async requireBatch(batchId: string) {
     const batch = await this.importBatchesRepo.findOne({ where: { id: batchId } });
     if (!batch) {
@@ -6875,6 +7040,951 @@ export class PlanningImportService {
       details,
     };
   }
+
+  private async buildWorkspaceComparableRows(filters: WorkspaceExportFilters) {
+    const offers = await this.planningManualService.listExpandedOffers(
+      filters.semester_id,
+      undefined,
+      filters.campus_id,
+      filters.faculty_id,
+      filters.academic_program_id,
+      undefined,
+      filters.study_plan_id,
+      undefined,
+    );
+    if (!offers.length) {
+      return [] as ManualWorkspaceComparableRow[];
+    }
+
+    const catalog = await this.loadImportCatalog();
+    const studyPlanCourseById = new Map(catalog.studyPlanCourses.map((item) => [item.id, item] as const));
+    const studyTypeById = new Map(catalog.studyTypes.map((item) => [item.id, item] as const));
+    const teacherById = new Map(catalog.teachers.map((item) => [item.id, item] as const));
+    const rows = offers.flatMap((offer: any) =>
+      this.buildWorkspaceComparableRowsFromOffer(offer, {
+        studyPlanCourseById,
+        studyTypeById,
+        teacherById,
+      }),
+    );
+
+    return rows
+      .filter((row) => this.matchesWorkspaceComparableFilters(row, filters))
+      .sort((left, right) => this.compareWorkspaceComparableRows(left, right));
+  }
+
+  private buildWorkspaceComparableRowsFromOffer(
+    offer: any,
+    lookups: {
+      studyPlanCourseById: Map<string, StudyPlanCourseEntity>;
+      studyTypeById: Map<string, StudyTypeEntity>;
+      teacherById: Map<string, TeacherEntity>;
+    },
+  ) {
+    const sections = Array.isArray(offer?.sections) ? offer.sections : [];
+    return sections.flatMap((section: any) =>
+      (Array.isArray(section?.subsections) ? section.subsections : []).flatMap((subsection: any) => {
+        const schedules = Array.isArray(subsection?.schedules) ? subsection.schedules : [];
+        if (!schedules.length) {
+          return [this.makeWorkspaceComparableRow(offer, section, subsection, null, lookups)];
+        }
+        return schedules.map((schedule: any) =>
+          this.makeWorkspaceComparableRow(offer, section, subsection, schedule, lookups),
+        );
+      }),
+    );
+  }
+
+  private makeWorkspaceComparableRow(
+    offer: any,
+    section: any,
+    subsection: any,
+    schedule: any | null,
+    lookups: {
+      studyPlanCourseById: Map<string, StudyPlanCourseEntity>;
+      studyTypeById: Map<string, StudyTypeEntity>;
+      teacherById: Map<string, TeacherEntity>;
+    },
+  ): ManualWorkspaceComparableRow {
+    const effectiveTeacher =
+      schedule?.teacher ??
+      subsection?.responsible_teacher ??
+      lookups.teacherById.get(schedule?.teacher_id ?? subsection?.responsible_teacher_id ?? '') ??
+      null;
+    const effectiveBuilding = schedule?.building ?? subsection?.building ?? null;
+    const effectiveClassroom = schedule?.classroom ?? subsection?.classroom ?? null;
+    const studyPlan = offer?.study_plan ?? null;
+    const studyType = lookups.studyTypeById.get(offer?.study_type_id ?? '') ?? null;
+    const studyPlanCourse = lookups.studyPlanCourseById.get(offer?.study_plan_course_id ?? '') ?? null;
+    const parsedCourseCode = parseCompositePlanningCourseCode(offer?.course_code);
+    const parsedSection = parseAkademicExternalSectionCode(section?.external_code ?? null);
+    const modalityName = normalizePlanningModalityLabel(
+      parsedSection.modality_token,
+      subsection?.modality?.name ?? null,
+      subsection?.course_modality_id ?? null,
+    );
+    const sectionBaseCode = normalizePlanningSectionCode(
+      parsedSection.section_code ?? section?.code ?? subsection?.code ?? null,
+    );
+    const dayName = normalizeDayValue(schedule?.day_of_week ?? null);
+    const startParts = splitTimeParts(schedule?.start_time ?? null);
+    const endParts = splitTimeParts(schedule?.end_time ?? null);
+    const rowLabel = [
+      `${parsedCourseCode.course_code ?? offer?.course_code ?? ''}`.trim(),
+      `${offer?.course_name ?? ''}`.trim(),
+      `${sectionBaseCode ?? ''}`.trim(),
+      dayName ? `${dayName} ${schedule?.start_time ?? ''}-${schedule?.end_time ?? ''}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    return {
+      semester_id: offer?.semester_id ?? null,
+      semester_name: offer?.semester?.name ?? null,
+      study_plan_code: parsedCourseCode.study_plan_code ?? studyPlan?.year ?? studyPlan?.name ?? null,
+      rcu: studyPlan?.approve_resolution ?? studyPlan?.creation_resolution ?? null,
+      campus_name: normalizePlanningCampusName(offer?.campus?.name ?? null),
+      faculty_code: offer?.faculty?.code ?? offer?.faculty?.abbreviation ?? null,
+      faculty_name: offer?.faculty?.name ?? null,
+      academic_program_code: offer?.academic_program?.code ?? offer?.academic_program_code ?? null,
+      academic_program_code_akademic:
+        parsedCourseCode.academic_program_code ?? offer?.academic_program?.code ?? offer?.academic_program_code ?? null,
+      cycle: numberValue(offer?.cycle),
+      section_code: sectionBaseCode,
+      subsection_code: sectionBaseCode,
+      course_code: parsedCourseCode.course_code ?? emptyToNull(offer?.course_code),
+      course_name: emptyToNull(offer?.course_name),
+      study_type: studyType?.name ?? null,
+      plan_course_type: studyPlanCourse?.is_elective ? 'ELECTIVO' : 'OBLIGATORIO',
+      course_modality_name: modalityName,
+      theory_hours: safeNumber(numberValue(offer?.theoretical_hours)),
+      practical_hours: safeNumber(numberValue(offer?.practical_hours)),
+      total_hours: safeNumber(numberValue(offer?.total_hours)),
+      credits: safeNumber(numberValue(studyPlanCourse?.credits)),
+      projected_vacancies: numberValue(section?.projected_vacancies),
+      teacher_dni: emptyToNull(effectiveTeacher?.dni),
+      teacher_name: emptyToNull(effectiveTeacher?.full_name ?? effectiveTeacher?.name),
+      delivery_modality_id: subsection?.course_modality_id ?? null,
+      delivery_modality_name: modalityName,
+      shift: emptyToNull(subsection?.shift),
+      shift_id: emptyToNull(subsection?.shift),
+      assistant_name: null,
+      building_name: emptyToNull(effectiveBuilding?.name),
+      classroom_name: emptyToNull(effectiveClassroom?.name),
+      classroom_capacity: numberValue(effectiveClassroom?.capacity),
+      laboratory_name:
+        schedule?.session_type === 'LAB' ? emptyToNull(effectiveClassroom?.name ?? subsection?.classroom?.name) : null,
+      laboratory_capacity:
+        schedule?.session_type === 'LAB' ? numberValue(effectiveClassroom?.capacity) : null,
+      second_shift: emptyToNull(subsection?.shift),
+      subsection_kind_label: mapSubsectionKindLabel(subsection?.kind),
+      day_of_week: dayName,
+      day_number: dayName ? dayOfWeekToNumber(dayName) : null,
+      start_hour: startParts.hour,
+      start_minute: startParts.minute,
+      end_hour: endParts.hour,
+      end_minute: endParts.minute,
+      academic_hours_value:
+        safeNumber(numberValue(schedule?.academic_hours)) ??
+        safeNumber(numberValue(subsection?.assigned_total_hours)),
+      start_time_label: formatTimeLabel(schedule?.start_time ?? null),
+      end_time_label: formatTimeLabel(schedule?.end_time ?? null),
+      denomination: emptyToNull(subsection?.denomination),
+      source_row_id: schedule?.id ?? `subsection:${subsection?.id ?? newId()}`,
+      comparison_key: buildPlanningComparisonKey({
+        academic_program_code: offer?.academic_program?.code ?? offer?.academic_program_code ?? null,
+        cycle: numberValue(offer?.cycle),
+        section_code: sectionBaseCode,
+        course_code: parsedCourseCode.course_code ?? offer?.course_code ?? null,
+        faculty_code: offer?.faculty?.code ?? offer?.faculty?.abbreviation ?? null,
+        campus_name: offer?.campus?.name ?? null,
+        study_plan_code: parsedCourseCode.study_plan_code ?? studyPlan?.year ?? studyPlan?.name ?? null,
+      }),
+      row_label:
+        rowLabel ||
+        `${parsedCourseCode.course_code ?? offer?.course_code ?? ''}`.trim() ||
+        `fila ${schedule?.id ?? subsection?.id ?? ''}`,
+    };
+  }
+
+  private matchesWorkspaceComparableFilters(row: ManualWorkspaceComparableRow, filters: WorkspaceExportFilters) {
+    if (filters.delivery_modality_id) {
+      const requested = normalizeLoose(filters.delivery_modality_id);
+      const current = normalizeLoose(row.delivery_modality_id);
+      if (!current || current !== requested) {
+        return false;
+      }
+    }
+    if (filters.shift_id) {
+      const requested = normalizeLoose(filters.shift_id);
+      const current = normalizeLoose(row.shift_id);
+      if (!current || current !== requested) {
+        return false;
+      }
+    }
+    const query = normalizeLoose(filters.search);
+    if (!query) {
+      return true;
+    }
+    const haystack = normalizeLoose(
+      [
+        row.course_code,
+        row.course_name,
+        row.academic_program_code,
+        row.academic_program_code_akademic,
+        row.section_code,
+        row.subsection_code,
+        row.teacher_name,
+        row.classroom_name,
+        row.campus_name,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    );
+    return haystack.includes(query);
+  }
+
+  private compareWorkspaceComparableRows(left: ManualWorkspaceComparableRow, right: ManualWorkspaceComparableRow) {
+    const courseDelta = `${left.course_code ?? ''} ${left.course_name ?? ''}`.localeCompare(
+      `${right.course_code ?? ''} ${right.course_name ?? ''}`,
+      'es',
+      { sensitivity: 'base' },
+    );
+    if (courseDelta !== 0) {
+      return courseDelta;
+    }
+    const sectionDelta = `${left.section_code ?? ''}`.localeCompare(`${right.section_code ?? ''}`, 'es', {
+      sensitivity: 'base',
+    });
+    if (sectionDelta !== 0) {
+      return sectionDelta;
+    }
+    const groupDelta = `${left.subsection_code ?? ''}`.localeCompare(`${right.subsection_code ?? ''}`, 'es', {
+      sensitivity: 'base',
+    });
+    if (groupDelta !== 0) {
+      return groupDelta;
+    }
+    const dayDelta = (left.day_number ?? 99) - (right.day_number ?? 99);
+    if (dayDelta !== 0) {
+      return dayDelta;
+    }
+    const startDelta = `${left.start_time_label ?? ''}`.localeCompare(`${right.start_time_label ?? ''}`);
+    if (startDelta !== 0) {
+      return startDelta;
+    }
+    return `${left.end_time_label ?? ''}`.localeCompare(`${right.end_time_label ?? ''}`);
+  }
+
+  private exportWorkbookHeaders() {
+    return [
+      'SEMESTRE',
+      'RCU',
+      'COD. PLAN',
+      'LOCAL',
+      'FACULTAD',
+      'COD PROGRAMA',
+      'COD PROGRAMA AKDEMIC',
+      'CICLO',
+      'SECCIÓN',
+      'CODIGO CURSO',
+      'NOMBRE DE CURSO',
+      'TIPO DE ESTUDIOS',
+      'TIPO DE CURSO PLAN',
+      'MODALIDAD DE CURSO',
+      'HORAS TEORÍA',
+      'HORAS PRÁCTICA',
+      'TOTAL DE HORAS',
+      'TOTAL DE CREDITOS',
+      'VACANTES PROYECTADAS',
+      'DNI',
+      'DOCENTE',
+      'MODALIDAD',
+      'TURNO',
+      'JEFE DE PRACTICA',
+      'PABELLON',
+      'AULA',
+      'AFORO AULA',
+      'LABORATORIO',
+      'AFORO LAB',
+      'TURNO',
+      'TIPO DE CURSO',
+      'DIA',
+      'HORA INICIO',
+      'MINUTO INICIO',
+      'HORA FIN',
+      'MINUTO FIN',
+      'HORAS ACADEMICAS',
+      'HORA INICIO',
+      'HORA FIN',
+      'CRUCE DOCENTE',
+      'DENOMINACIÓN',
+      'CRUCE DE SECCIÓN',
+    ];
+  }
+
+  private exportWorkbookRow(row: ManualWorkspaceComparableRow) {
+    return [
+      row.semester_name ?? '',
+      row.rcu ?? '',
+      row.study_plan_code ?? '',
+      row.campus_name ?? '',
+      row.faculty_code ?? row.faculty_name ?? '',
+      row.academic_program_code ?? '',
+      row.academic_program_code_akademic ?? row.academic_program_code ?? '',
+      row.cycle ?? '',
+      row.subsection_code ?? row.section_code ?? '',
+      row.course_code ?? '',
+      row.course_name ?? '',
+      row.study_type ?? '',
+      row.plan_course_type ?? '',
+      row.course_modality_name ?? '',
+      row.theory_hours ?? '',
+      row.practical_hours ?? '',
+      row.total_hours ?? '',
+      row.credits ?? '',
+      row.projected_vacancies ?? '',
+      row.teacher_dni ?? '',
+      row.teacher_name ?? '',
+      row.delivery_modality_name ?? '',
+      row.shift ?? '',
+      row.assistant_name ?? '',
+      row.building_name ?? '',
+      row.classroom_name ?? '',
+      row.classroom_capacity ?? '',
+      row.laboratory_name ?? '',
+      row.laboratory_capacity ?? '',
+      row.second_shift ?? '',
+      row.subsection_kind_label ?? '',
+      row.day_number ?? '',
+      row.start_hour ?? '',
+      row.start_minute ?? '',
+      row.end_hour ?? '',
+      row.end_minute ?? '',
+      row.academic_hours_value ?? '',
+      row.start_time_label ?? '',
+      row.end_time_label ?? '',
+      '',
+      row.denomination ?? '',
+      '',
+    ];
+  }
+
+  private async parseComparisonExcelRows(fileBuffer: Buffer, requestedSemesterId: string) {
+    const semester = await this.requireEntity(this.semestersRepo, requestedSemesterId, 'semester');
+    const workbook = XLSX.read(fileBuffer, { type: 'buffer', raw: true });
+    const sheetName =
+      workbook.SheetNames.find((name) => normalizeLoose(name) === 'PLANIFICACION') ??
+      workbook.SheetNames.find((name) => name === IMPORT_SHEET_NAME) ??
+      workbook.SheetNames[0] ??
+      null;
+    const sheet = sheetName ? workbook.Sheets[sheetName] ?? null : null;
+    if (!sheet) {
+      throw new BadRequestException('No se encontro una hoja valida para comparar.');
+    }
+    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: null,
+      raw: true,
+    });
+    const catalog = await this.loadImportCatalog();
+    const normalizedRows = rawRows
+      .map((row, index) => this.normalizeExcelRow(row, index + 2))
+      .filter((row): row is NormalizedImportRow => Boolean(row));
+    const previewRows = normalizedRows.map((row) => this.resolvePreviewRow(row, catalog));
+    this.assignStructuralCodes(previewRows);
+
+    const warnings: Array<Record<string, unknown>> = [];
+    const comparableRows: ManualWorkspaceComparableRow[] = [];
+    for (let index = 0; index < previewRows.length; index += 1) {
+      const comparable = this.buildComparisonRowFromExcelPreview(
+        normalizedRows[index],
+        previewRows[index],
+        semester,
+        warnings,
+      );
+      if (comparable) {
+        comparableRows.push(comparable);
+      }
+    }
+    return { rows: comparableRows, warnings, raw_row_count: rawRows.length, sheet_name: sheetName };
+  }
+
+  private buildComparisonRowFromExcelPreview(
+    normalized: NormalizedImportRow,
+    previewRow: PreviewRow,
+    requestedSemester: SemesterEntity,
+    warnings: Array<Record<string, unknown>>,
+  ) {
+    const resolution = asRecord(previewRow.resolution_json);
+    const schedule = asRecord(recordValue(resolution, 'schedule'));
+    const parsedCourseCode = parseCompositePlanningCourseCode(normalized.course_code_raw);
+    const sectionToken = parseSectionToken(normalized.section_raw);
+    const semesterToken = normalizePeriodToken(normalized.semester_raw);
+    const requestedToken = normalizePeriodToken(requestedSemester.name);
+    if (semesterToken && requestedToken && semesterToken !== requestedToken) {
+      warnings.push({
+        row_number: previewRow.row_number,
+        type: 'SEMESTER_MISMATCH',
+        message: `La fila pertenece a ${normalized.semester_raw || 'otro semestre'} y se omitio del comparador para ${requestedSemester.name}.`,
+      });
+      return null;
+    }
+
+    const sectionCode =
+      recordString(resolution, 'import_section_code') ??
+      recordString(resolution, 'section_base_code') ??
+      sectionToken.section_code;
+    const normalizedSectionCode = normalizePlanningSectionCode(sectionCode);
+    const dayName = normalizeDayValue(recordString(schedule, 'day_of_week') ?? normalized.day_raw);
+    const startTime = formatImportedTime(
+      normalized.start_hour_raw,
+      normalized.start_minute_raw,
+      recordString(schedule, 'start_time'),
+    );
+    const endTime = formatImportedTime(
+      normalized.end_hour_raw,
+      normalized.end_minute_raw,
+      recordString(schedule, 'end_time'),
+    );
+    const comparisonKey = buildPlanningComparisonKey({
+      academic_program_code:
+        stringifyCell(firstCellValue(normalized.raw_row, 'COD PROGRAMA')) || normalized.academic_program_code_raw,
+      cycle: normalized.cycle_raw,
+      section_code: normalizedSectionCode,
+      course_code: parsedCourseCode.course_code ?? normalized.course_code_raw,
+      faculty_code: normalized.faculty_code_raw,
+      campus_name: normalized.campus_raw,
+      study_plan_code: normalized.study_plan_code_raw || parsedCourseCode.study_plan_code,
+    });
+    if (!comparisonKey) {
+      warnings.push({
+        row_number: previewRow.row_number,
+        type: 'INCOMPLETE_KEY',
+        message: 'La fila no tiene suficiente informacion para construir la clave de comparacion.',
+        issues: previewRow.issues.map((item) => item.message),
+      });
+      return null;
+    }
+
+    const modalityResolution = asRecord(recordValue(asRecord(recordValue(resolution, 'mapping_resolution')), 'course_modality'));
+    const modalityLabel = normalizePlanningModalityLabel(
+      null,
+      recordString(modalityResolution, 'target_label') ??
+        normalized.delivery_modality_raw ??
+        normalized.course_modality_raw,
+      recordString(modalityResolution, 'target_id') ?? null,
+    );
+    const rowLabel = [
+      parsedCourseCode.course_code ?? normalized.course_code_raw,
+      normalized.course_name_raw,
+      normalizedSectionCode,
+      dayName ? `${dayName} ${startTime ?? ''}-${endTime ?? ''}` : '',
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const nonBlockingIssues = previewRow.issues.filter((item) => item.severity !== 'BLOCKING');
+    if (nonBlockingIssues.length) {
+      warnings.push({
+        row_number: previewRow.row_number,
+        type: 'ROW_WARNING',
+        message: nonBlockingIssues.map((item) => item.message).join(' | '),
+      });
+    }
+
+    return {
+      semester_id: requestedSemester.id,
+      semester_name: requestedSemester.name,
+      study_plan_code: normalized.study_plan_code_raw || parsedCourseCode.study_plan_code || null,
+      rcu: null,
+      campus_name: normalizePlanningCampusName(normalized.campus_raw || null),
+      faculty_code: normalized.faculty_code_raw || null,
+      faculty_name: null,
+      academic_program_code:
+        stringifyCell(firstCellValue(normalized.raw_row, 'COD PROGRAMA')) || normalized.academic_program_code_raw || null,
+      academic_program_code_akademic:
+        normalized.academic_program_code_akademic_raw || parsedCourseCode.academic_program_code || null,
+      cycle: normalized.cycle_raw,
+      section_code: normalizedSectionCode,
+      subsection_code: normalizedSectionCode,
+      course_code: parsedCourseCode.course_code ?? normalized.course_code_raw ?? null,
+      course_name: normalized.course_name_raw || null,
+      study_type: normalized.study_type_raw || null,
+      plan_course_type: normalized.course_requirement_raw || null,
+      course_modality_name: normalized.course_modality_raw || null,
+      theory_hours: safeNumber(normalized.theory_hours),
+      practical_hours: safeNumber(normalized.practical_hours),
+      total_hours: safeNumber(normalized.total_hours),
+      credits: normalized.credits,
+      projected_vacancies: normalized.projected_vacancies,
+      teacher_dni: normalized.teacher_dni_raw || null,
+      teacher_name: normalized.teacher_name_raw || null,
+      delivery_modality_id: recordString(modalityResolution, 'target_id') ?? null,
+      delivery_modality_name: modalityLabel ?? null,
+      shift: normalized.shift_raw || null,
+      shift_id: normalized.shift_raw || null,
+      assistant_name: null,
+      building_name: normalized.building_raw || null,
+      classroom_name: normalized.classroom_raw || null,
+      classroom_capacity: null,
+      laboratory_name: normalized.laboratory_raw || null,
+      laboratory_capacity: null,
+      second_shift: normalized.shift_raw || null,
+      subsection_kind_label: normalized.course_requirement_raw || null,
+      day_of_week: dayName,
+      day_number: dayName ? dayOfWeekToNumber(dayName) : null,
+      start_hour: numberFromCell(normalized.start_hour_raw),
+      start_minute: numberFromCell(normalized.start_minute_raw),
+      end_hour: numberFromCell(normalized.end_hour_raw),
+      end_minute: numberFromCell(normalized.end_minute_raw),
+      academic_hours_value:
+        normalized.academic_hours_raw ?? safeNumber(numberValue(recordValue(schedule, 'academic_hours'))),
+      start_time_label: startTime,
+      end_time_label: endTime,
+      denomination: normalized.denomination_raw || null,
+      source_row_id: `excel:${previewRow.row_number}`,
+      comparison_key: comparisonKey,
+      row_label: rowLabel || `fila ${previewRow.row_number}`,
+    };
+  }
+
+  private compareComparableRows(
+    excelRowsInput:
+      | ManualWorkspaceComparableRow[]
+      | { rows: ManualWorkspaceComparableRow[]; warnings: Array<Record<string, unknown>> },
+    systemRows: ManualWorkspaceComparableRow[],
+    context: { semester_id: string; semester_name: string | null; file_name: string },
+  ): ExcelComparisonResult {
+    const excelRows = this.collapseComparableRowsByKey(
+      Array.isArray(excelRowsInput) ? excelRowsInput : excelRowsInput.rows,
+    );
+    const warnings = Array.isArray(excelRowsInput) ? [] : [...excelRowsInput.warnings];
+    const systemRowsCollapsed = this.collapseComparableRowsByKey(systemRows);
+    const excelByKey = new Map<string, ManualWorkspaceComparableRow>();
+    const systemByKey = new Map<string, ManualWorkspaceComparableRow>();
+
+    for (const row of excelRows) {
+      if (!row.comparison_key) {
+        continue;
+      }
+      if (excelByKey.has(row.comparison_key)) {
+        warnings.push({
+          type: 'DUPLICATE_IN_EXCEL',
+          key: row.comparison_key,
+          message: `Se encontro una fila duplicada en el Excel para ${row.row_label}.`,
+        });
+        continue;
+      }
+      excelByKey.set(row.comparison_key, row);
+    }
+    for (const row of systemRowsCollapsed) {
+      if (!row.comparison_key) {
+        continue;
+      }
+      if (systemByKey.has(row.comparison_key)) {
+        warnings.push({
+          type: 'DUPLICATE_IN_SYSTEM',
+          key: row.comparison_key,
+          message: `Se encontro una fila duplicada en el sistema para ${row.row_label}.`,
+        });
+        continue;
+      }
+      systemByKey.set(row.comparison_key, row);
+    }
+
+    const onlyInExcel: ManualWorkspaceComparableRow[] = [];
+    const onlyInSystem: ManualWorkspaceComparableRow[] = [];
+    const differences: ExcelComparisonDifference[] = [];
+    let matchedCount = 0;
+
+    const keys = uniqueIds([...excelByKey.keys(), ...systemByKey.keys()]).sort();
+    for (const key of keys) {
+      const excelRow = excelByKey.get(key) ?? null;
+      const systemRow = systemByKey.get(key) ?? null;
+      if (excelRow && !systemRow) {
+        onlyInExcel.push(excelRow);
+        continue;
+      }
+      if (!excelRow && systemRow) {
+        onlyInSystem.push(systemRow);
+        continue;
+      }
+      if (!excelRow || !systemRow) {
+        continue;
+      }
+      const fields = this.diffComparableRows(excelRow, systemRow);
+      if (!fields.length) {
+        matchedCount += 1;
+        continue;
+      }
+      differences.push({
+        key,
+        row_label: excelRow.row_label || systemRow.row_label,
+        fields,
+      });
+    }
+
+    return {
+      summary: {
+        semester_id: context.semester_id,
+        semester_name: context.semester_name,
+        file_name: context.file_name,
+        excel_rows: excelRows.length,
+        system_rows: systemRows.length,
+        coinciden: matchedCount,
+        solo_en_excel: onlyInExcel.length,
+        solo_en_sistema: onlyInSystem.length,
+        con_diferencias: differences.length,
+        warnings: warnings.length,
+      },
+      warnings,
+      only_in_excel: onlyInExcel,
+      only_in_system: onlyInSystem,
+      differences,
+    };
+  }
+
+  private diffComparableRows(excelRow: ManualWorkspaceComparableRow, systemRow: ManualWorkspaceComparableRow) {
+    const fields = [
+      { field: 'teacher_name', label: 'Docente', excel: excelRow.teacher_name, system: systemRow.teacher_name },
+      { field: 'teacher_dni', label: 'DNI', excel: excelRow.teacher_dni, system: systemRow.teacher_dni },
+      { field: 'delivery_modality_name', label: 'Modalidad', excel: excelRow.delivery_modality_name, system: systemRow.delivery_modality_name },
+      { field: 'shift', label: 'Turno', excel: excelRow.shift, system: systemRow.shift },
+      { field: 'building_name', label: 'Pabellon', excel: excelRow.building_name, system: systemRow.building_name },
+      { field: 'classroom_name', label: 'Aula', excel: excelRow.classroom_name, system: systemRow.classroom_name },
+      { field: 'laboratory_name', label: 'Laboratorio', excel: excelRow.laboratory_name, system: systemRow.laboratory_name },
+      { field: 'projected_vacancies', label: 'Vacantes', excel: excelRow.projected_vacancies, system: systemRow.projected_vacancies },
+      { field: 'start_time_label', label: 'Hora inicio', excel: excelRow.start_time_label, system: systemRow.start_time_label },
+      { field: 'end_time_label', label: 'Hora fin', excel: excelRow.end_time_label, system: systemRow.end_time_label },
+      { field: 'academic_hours_value', label: 'Horas academicas', excel: excelRow.academic_hours_value, system: systemRow.academic_hours_value },
+      { field: 'denomination', label: 'Denominacion', excel: excelRow.denomination, system: systemRow.denomination },
+    ];
+    return fields
+      .filter((item) => normalizeDiffValue(item.excel) !== normalizeDiffValue(item.system))
+      .map((item) => ({
+        field: item.field,
+        label: item.label,
+        excel_value: formatDiffValue(item.excel),
+        system_value: formatDiffValue(item.system),
+      }));
+  }
+
+  private buildComparisonWorkbook(result: ExcelComparisonResult) {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet([
+        {
+          semestre: result.summary.semester_name,
+          archivo: result.summary.file_name,
+          filas_excel: result.summary.excel_rows,
+          filas_sistema: result.summary.system_rows,
+          coinciden: result.summary.coinciden,
+          solo_en_excel: result.summary.solo_en_excel,
+          solo_en_sistema: result.summary.solo_en_sistema,
+          con_diferencias: result.summary.con_diferencias,
+          warnings: result.summary.warnings,
+        },
+      ]),
+      'resumen',
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(result.only_in_excel.map((row) => this.comparisonRowSheetEntry(row))),
+      'solo_en_excel',
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(result.only_in_system.map((row) => this.comparisonRowSheetEntry(row))),
+      'solo_en_sistema',
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(
+        result.differences.flatMap((item) =>
+          item.fields.map((field) => ({
+            key: item.key,
+            fila: item.row_label,
+            campo: field.label,
+            valor_excel: field.excel_value,
+            valor_sistema: field.system_value,
+          })),
+        ),
+      ),
+      'con_diferencias',
+    );
+    return workbook;
+  }
+
+  private comparisonRowSheetEntry(row: ManualWorkspaceComparableRow) {
+    return {
+      semestre: row.semester_name,
+      local: row.campus_name,
+      facultad: row.faculty_code ?? row.faculty_name,
+      cod_programa: row.academic_program_code,
+      cod_programa_akademic: row.academic_program_code_akademic,
+      cod_plan: row.study_plan_code,
+      ciclo: row.cycle,
+      curso_codigo: row.course_code,
+      curso_nombre: row.course_name,
+      seccion: row.section_code,
+      grupo: row.subsection_code,
+      dia: row.day_of_week,
+      hora_inicio: row.start_time_label,
+      hora_fin: row.end_time_label,
+      docente: row.teacher_name,
+      modalidad: row.delivery_modality_name,
+      turno: row.shift,
+      pabellon: row.building_name,
+      aula: row.classroom_name,
+      vacantes: row.projected_vacancies,
+      denominacion: row.denomination,
+    };
+  }
+
+  private collapseComparableRowsByKey(rows: ManualWorkspaceComparableRow[]) {
+    const grouped = new Map<string, ManualWorkspaceComparableRow[]>();
+    for (const row of rows) {
+      if (!row.comparison_key) {
+        continue;
+      }
+      const bucket = grouped.get(row.comparison_key) ?? [];
+      bucket.push(row);
+      grouped.set(row.comparison_key, bucket);
+    }
+    return [...grouped.values()].map((group) => this.mergeComparableRowGroup(group));
+  }
+
+  private mergeComparableRowGroup(group: ManualWorkspaceComparableRow[]) {
+    const base = { ...group[0] };
+    const mergeText = (selector: (row: ManualWorkspaceComparableRow) => string | null | undefined) => {
+      const values = uniqueIds(group.map((row) => `${selector(row) ?? ''}`.trim()).filter(Boolean));
+      return values.length ? values.join(' | ') : null;
+    };
+    const mergeNumber = (selector: (row: ManualWorkspaceComparableRow) => number | null | undefined) => {
+      const values = uniqueIds(
+        group
+          .map((row) => selector(row))
+          .filter((value): value is number => value !== null && value !== undefined)
+          .map((value) => `${value}`),
+      );
+      return values.length ? Number(values[0]) : null;
+    };
+
+    base.row_label = mergeText((row) => row.row_label) ?? base.row_label;
+    base.teacher_name = mergeText((row) => row.teacher_name);
+    base.teacher_dni = mergeText((row) => row.teacher_dni);
+    base.delivery_modality_name = mergeText((row) => row.delivery_modality_name);
+    base.shift = mergeText((row) => row.shift);
+    base.building_name = mergeText((row) => row.building_name);
+    base.classroom_name = mergeText((row) => row.classroom_name);
+    base.laboratory_name = mergeText((row) => row.laboratory_name);
+    base.day_of_week = mergeText((row) => row.day_of_week);
+    base.start_time_label = mergeText((row) => row.start_time_label);
+    base.end_time_label = mergeText((row) => row.end_time_label);
+    base.denomination = mergeText((row) => row.denomination);
+    base.projected_vacancies = mergeNumber((row) => row.projected_vacancies);
+    base.academic_hours_value = mergeNumber((row) => row.academic_hours_value);
+    return base;
+  }
+}
+
+function firstCellValue(row: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(row, key) && row[key] !== undefined) {
+      return row[key];
+    }
+  }
+  return undefined;
+}
+
+function extractFormattedTime(value: unknown) {
+  const raw = stringifyCell(value);
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  return {
+    hour: String(Number(match[1])),
+    minute: String(Number(match[2])),
+  };
+}
+
+function splitTimeParts(value: string | null | undefined) {
+  const match = `${value ?? ''}`.trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) {
+    return { hour: null, minute: null };
+  }
+  return {
+    hour: Number(match[1]),
+    minute: Number(match[2]),
+  };
+}
+
+function formatTimeLabel(value: string | null | undefined) {
+  const match = `${value ?? ''}`.trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!match) {
+    return null;
+  }
+  return `${match[1].padStart(2, '0')}:${match[2]}`;
+}
+
+function formatImportedTime(hourRaw: string | null | undefined, minuteRaw: string | null | undefined, fallback?: string | null) {
+  const hour = numberFromCell(hourRaw);
+  const minute = numberFromCell(minuteRaw);
+  if (hour !== null) {
+    return `${String(hour).padStart(2, '0')}:${String(minute ?? 0).padStart(2, '0')}`;
+  }
+  return formatTimeLabel(fallback ?? null);
+}
+
+function normalizeDayValue(value: string | null | undefined) {
+  const parsed = parseDayOfWeek(value);
+  return parsed ?? null;
+}
+
+function dayOfWeekToNumber(value: string | null | undefined) {
+  const normalized = normalizeLoose(value);
+  const map: Record<string, number> = {
+    LUNES: 1,
+    MARTES: 2,
+    MIERCOLES: 3,
+    JUEVES: 4,
+    VIERNES: 5,
+    SABADO: 6,
+    DOMINGO: 7,
+  };
+  return map[normalized] ?? null;
+}
+
+function mapSubsectionKindLabel(value: string | null | undefined) {
+  const normalized = normalizeLoose(value);
+  if (normalized === 'THEORY') {
+    return 'TEORIA';
+  }
+  if (normalized === 'PRACTICE') {
+    return 'PRACTICA';
+  }
+  if (normalized === 'LAB') {
+    return 'LABORATORIO';
+  }
+  if (normalized === 'MIXED') {
+    return 'MIXTO';
+  }
+  return `${value ?? ''}`.trim() || null;
+}
+
+function buildPlanningComparisonKey(input: {
+  academic_program_code: string | null | undefined;
+  cycle: number | null | undefined;
+  section_code: string | null | undefined;
+  course_code: string | null | undefined;
+  faculty_code: string | null | undefined;
+  campus_name: string | null | undefined;
+  study_plan_code: string | null | undefined;
+}) {
+  const parts = [
+    normalizeLoose(input.academic_program_code),
+    input.cycle !== null && input.cycle !== undefined ? String(input.cycle) : '',
+    normalizeLoose(input.section_code),
+    normalizeLoose(input.course_code),
+    normalizeLoose(input.faculty_code),
+    normalizeLoose(normalizePlanningCampusName(input.campus_name)),
+    normalizeLoose(input.study_plan_code),
+  ];
+  if (parts.some((item) => !item)) {
+    return '';
+  }
+  return parts.join('||');
+}
+
+function parseCompositePlanningCourseCode(value: string | null | undefined) {
+  const raw = `${value ?? ''}`.trim();
+  const parts = raw.split('-').map((item) => item.trim()).filter(Boolean);
+  if (parts.length < 3) {
+    return {
+      academic_program_code: null,
+      study_plan_code: null,
+      course_code: raw || null,
+    };
+  }
+  return {
+    academic_program_code: parts[0] || null,
+    study_plan_code: parts[1] || null,
+    course_code: parts.slice(2).join('-') || null,
+  };
+}
+
+function normalizePlanningCampusName(value: string | null | undefined) {
+  const raw = `${value ?? ''}`.trim();
+  if (!raw) {
+    return null;
+  }
+  return normalizeLoose(raw) === 'SEDE CENTRAL' ? 'PRINCIPAL' : raw;
+}
+
+function normalizePlanningSectionCode(value: string | null | undefined) {
+  const token = parseSectionToken(value);
+  return token.section_code ?? emptyToNull(value);
+}
+
+function normalizePlanningModalityLabel(
+  modalityToken: string | null | undefined,
+  fallbackLabel: string | null | undefined,
+  fallbackId: string | null | undefined,
+) {
+  const normalizedToken = normalizeLoose(modalityToken || fallbackId || '');
+  if (normalizedToken === 'V' || normalizedToken === 'CV') {
+    return 'Virtual';
+  }
+  if (normalizedToken === 'P' || normalizedToken === 'CP') {
+    return 'Presencial';
+  }
+  if (normalizedToken === 'HP' || normalizedToken === 'CHP') {
+    return 'Hibrido presencial';
+  }
+  if (normalizedToken === 'HV' || normalizedToken === 'CHV') {
+    return 'Hibrido virtual';
+  }
+  const normalizedLabel = normalizeLoose(fallbackLabel);
+  if (normalizedLabel === 'VIRTUAL') {
+    return 'Virtual';
+  }
+  if (normalizedLabel === 'PRESENCIAL') {
+    return 'Presencial';
+  }
+  if (normalizedLabel.includes('HIBRIDO') && normalizedLabel.includes('PRESENCIAL')) {
+    return 'Hibrido presencial';
+  }
+  if (normalizedLabel.includes('HIBRIDO') && normalizedLabel.includes('VIRTUAL')) {
+    return 'Hibrido virtual';
+  }
+  return `${fallbackLabel ?? ''}`.trim() || null;
+}
+
+function normalizeDiffValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : '';
+  }
+  return normalizeLoose(String(value));
+}
+
+function formatDiffValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '';
+  }
+  return typeof value === 'number' ? String(value) : `${value}`;
+}
+
+function sanitizeFileName(value: string | null | undefined) {
+  const raw = `${value ?? ''}`.trim();
+  if (!raw) {
+    return 'export';
+  }
+  return raw.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_');
 }
 
 function buildAliasMap(rows: PlanningImportAliasMappingEntity[]) {
@@ -7513,8 +8623,15 @@ function parseAkademicExternalSectionCode(value: string | null | undefined) {
   }
   const prefix = match[1];
   const locationToken = match[2];
-  const sectionCode = prefix.length > 1 ? prefix.slice(0, -1) : prefix;
-  const modalityToken = prefix.length > 1 ? prefix.slice(-1) : null;
+  let sectionCode = prefix;
+  let modalityToken: string | null = null;
+  for (const candidate of ['HV', 'HP', 'V', 'P']) {
+    if (prefix.endsWith(candidate) && prefix.length > candidate.length) {
+      sectionCode = prefix.slice(0, -candidate.length);
+      modalityToken = candidate;
+      break;
+    }
+  }
   return {
     section_code: sectionCode || null,
     modality_token: modalityToken,

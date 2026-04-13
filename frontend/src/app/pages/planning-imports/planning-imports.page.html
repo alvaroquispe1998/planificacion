@@ -99,6 +99,150 @@
     </div>
   </section>
 
+  <section class="panel compare-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Comparador</p>
+        <h2>Comparar Excel con sistema</h2>
+      </div>
+      <div class="upload-actions">
+        <button
+          class="btn btn-secondary btn-sm"
+          type="button"
+          (click)="exportCompareReport()"
+          [disabled]="compareExporting || !compareFile || !compareSemesterId">
+          {{ compareExporting ? 'Descargando...' : 'Descargar diferencias' }}
+        </button>
+        <button
+          class="btn btn-primary btn-sm"
+          type="button"
+          (click)="runExcelCompare()"
+          [disabled]="comparing">
+          {{ comparing ? 'Comparando...' : 'Comparar Excel' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="summary-grid">
+      <label class="field">
+        <span>Semestre a comparar</span>
+        <select [(ngModel)]="compareSemesterId" [disabled]="comparing">
+          <option value="">Selecciona un semestre</option>
+          <option *ngFor="let item of importCatalog.semesters || []" [value]="item.id">
+            {{ item.name }}
+          </option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>Archivo Excel</span>
+        <input type="file" accept=".xlsx,.xls" (change)="onCompareFileChange($event)" [disabled]="comparing" />
+        <small *ngIf="compareFile">{{ compareFile.name }}</small>
+      </label>
+    </div>
+
+    <p class="subtle">
+      Compara el Excel contra lo que hoy esta guardado en planificacion para el mismo semestre. No guarda nada ni modifica tablas.
+    </p>
+
+    <div class="stats-grid" *ngIf="compareResult">
+      <article class="stat-card">
+        <span>Coinciden</span>
+        <strong>{{ compareSummary.coinciden || 0 }}</strong>
+      </article>
+      <article class="stat-card">
+        <span>Solo en Excel</span>
+        <strong>{{ compareSummary.solo_en_excel || 0 }}</strong>
+      </article>
+      <article class="stat-card">
+        <span>Solo en sistema</span>
+        <strong>{{ compareSummary.solo_en_sistema || 0 }}</strong>
+      </article>
+      <article class="stat-card blocked">
+        <span>Con diferencias</span>
+        <strong>{{ compareSummary.con_diferencias || 0 }}</strong>
+      </article>
+    </div>
+
+    <div class="summary-grid" *ngIf="compareWarnings.length">
+      <article class="summary-card warning-tone">
+        <span>Warnings</span>
+        <strong>{{ compareWarnings.length }} avisos durante el analisis</strong>
+        <small>
+          Se omitieron filas sin clave suficiente o fuera del semestre seleccionado.
+        </small>
+      </article>
+    </div>
+
+    <div class="table-wrap" *ngIf="compareOnlyInExcel.length">
+      <h3>Solo en Excel</h3>
+      <table class="data-table compact">
+        <thead>
+          <tr>
+            <th>Curso</th>
+            <th>Seccion / Grupo</th>
+            <th>Horario</th>
+            <th>Docente</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let item of compareOnlyInExcel">
+            <td><strong>{{ item.course_code }}</strong><div class="muted">{{ item.course_name }}</div></td>
+            <td>{{ item.section_code }} / {{ item.subsection_code }}</td>
+            <td>{{ item.day_of_week }} {{ item.start_time_label }} - {{ item.end_time_label }}</td>
+            <td>{{ item.teacher_name || 'Sin docente' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap" *ngIf="compareOnlyInSystem.length">
+      <h3>Solo en sistema</h3>
+      <table class="data-table compact">
+        <thead>
+          <tr>
+            <th>Curso</th>
+            <th>Seccion / Grupo</th>
+            <th>Horario</th>
+            <th>Docente</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let item of compareOnlyInSystem">
+            <td><strong>{{ item.course_code }}</strong><div class="muted">{{ item.course_name }}</div></td>
+            <td>{{ item.section_code }} / {{ item.subsection_code }}</td>
+            <td>{{ item.day_of_week }} {{ item.start_time_label }} - {{ item.end_time_label }}</td>
+            <td>{{ item.teacher_name || 'Sin docente' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="table-wrap" *ngIf="compareDifferences.length">
+      <h3>Misma clave con diferencias</h3>
+      <table class="data-table compact">
+        <thead>
+          <tr>
+            <th>Fila</th>
+            <th>Cambios</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let item of compareDifferences">
+            <td><strong>{{ item.row_label }}</strong></td>
+            <td>
+              <div class="issue-list">
+                <span class="issue-line" *ngFor="let field of item.fields">
+                  <strong>{{ field.label }}:</strong> Excel = {{ field.excel_value || 'vacio' }} | Sistema = {{ field.system_value || 'vacio' }}
+                </span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="panel progress-panel" *ngIf="isPreviewProcessing">
     <div class="section-head">
       <div>

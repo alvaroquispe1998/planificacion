@@ -154,6 +154,11 @@
   margin-top: 1rem;
 }
 
+.table-wrap h3 {
+  margin: 0 0 0.75rem;
+  color: #12345b;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
