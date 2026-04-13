@@ -527,24 +527,32 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     if (this.saving || this.candidateSavingId) {
       return;
     }
+    const childSchedules = (item.children ?? [])
+      .map((child) => child.schedule_id)
+      .filter((value) => Boolean(value));
+    if (!childSchedules.length) {
+      this.error = 'La sugerencia no tiene horarios hijo para guardar.';
+      this.cdr.detectChanges();
+      return;
+    }
     this.candidateSavingId = item.id;
     this.error = '';
     this.message = '';
-    this.api
-      .createInheritance({
-        parentScheduleId: item.parent.schedule_id,
-        childScheduleId: item.child.schedule_id,
-        notes: 'Sugerencia aplicada desde preview de herencias.',
-        isActive: true,
-      })
-      .subscribe({
+    forkJoin(
+      childSchedules.map((childScheduleId) =>
+        this.api.createInheritance({
+          parentScheduleId: item.parent.schedule_id,
+          childScheduleId,
+          notes: 'Sugerencia aplicada desde preview de herencias.',
+          isActive: true,
+        }),
+      ),
+    ).subscribe({
         next: () => {
           this.candidateSavingId = '';
           this.message = 'Sugerencia guardada como herencia activa.';
           this.inheritanceCandidates = this.inheritanceCandidates.filter(
-            (candidate) =>
-              candidate.id !== item.id &&
-              candidate.child.schedule_id !== item.child.schedule_id,
+            (candidate) => candidate.id !== item.id,
           );
           this.resetForm();
           this.parentCourseDropdownOpen = false;
@@ -562,11 +570,7 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
 
   dismissCandidate(item: VideoconferenceInheritanceCandidateItem) {
     this.inheritanceCandidates = this.inheritanceCandidates.filter(
-      (candidate) =>
-        !(
-          candidate.parent.schedule_id === item.parent.schedule_id &&
-          candidate.child.schedule_id === item.child.schedule_id
-        ),
+      (candidate) => candidate.id !== item.id,
     );
     this.cdr.detectChanges();
   }

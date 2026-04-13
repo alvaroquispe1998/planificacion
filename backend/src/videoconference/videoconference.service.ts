@@ -739,8 +739,16 @@ export class VideoconferenceService {
                 continue;
             }
 
-            const ordered = [...groupRows].sort((left, right) => {
+            const distinctSections = new Set(groupRows.map((row) => row.section_id));
+            if (distinctSections.size < 2) {
+                continue;
+            }
+
+            const ranked = [...groupRows].sort((left, right) => {
+                const leftVacancies = left.section_projected_vacancies ?? 0;
+                const rightVacancies = right.section_projected_vacancies ?? 0;
                 const comparisons = [
+                    rightVacancies - leftVacancies,
                     (left.campus_name ?? '').localeCompare(right.campus_name ?? ''),
                     (left.program_name ?? '').localeCompare(right.program_name ?? ''),
                     left.course_label.localeCompare(right.course_label),
@@ -749,61 +757,55 @@ export class VideoconferenceService {
                 return comparisons.find((value) => value !== 0) || 0;
             });
 
-            for (let leftIndex = 0; leftIndex < ordered.length - 1; leftIndex += 1) {
-                for (let rightIndex = leftIndex + 1; rightIndex < ordered.length; rightIndex += 1) {
-                    const left = ordered[leftIndex];
-                    const right = ordered[rightIndex];
-                    if (left.section_id === right.section_id) {
-                        continue;
-                    }
+            const parent = ranked[0];
+            const children = ranked
+                .filter((row) => row.section_id !== parent.section_id)
+                .map((child) => ({
+                    schedule_id: child.owner_schedule_id,
+                    campus_id: child.campus_id,
+                    campus_name: child.campus_name,
+                    program_id: child.program_id,
+                    program_name: child.program_name,
+                    course_id: child.course_id,
+                    course_label: child.course_label,
+                    vc_section_name: child.vc_section_name,
+                    section_id: child.section_id,
+                    section_label: child.section_label,
+                    section_projected_vacancies: child.section_projected_vacancies,
+                    subsection_label: child.subsection_label,
+                    schedule_label: `${displayDay(child.day_of_week)} ${compactTime(child.start_time)}-${compactTime(child.end_time)}`,
+                }));
 
-                    const leftVacancies = left.section_projected_vacancies ?? 0;
-                    const rightVacancies = right.section_projected_vacancies ?? 0;
-                    const parent = leftVacancies >= rightVacancies ? left : right;
-                    const child = parent.owner_schedule_id === left.owner_schedule_id ? right : left;
-
-                    items.push({
-                        id: `${parent.owner_schedule_id}::${child.owner_schedule_id}`,
-                        teacher_name: parent.teacher_name,
-                        cycle: parent.cycle,
-                        day_of_week: parent.day_of_week,
-                        day_label: displayDay(parent.day_of_week),
-                        start_time: compactTime(parent.start_time),
-                        end_time: compactTime(parent.end_time),
-                        faculty_name: parent.faculty_name,
-                        parent: {
-                            schedule_id: parent.owner_schedule_id,
-                            campus_id: parent.campus_id,
-                            campus_name: parent.campus_name,
-                            program_id: parent.program_id,
-                            program_name: parent.program_name,
-                            course_id: parent.course_id,
-                            course_label: parent.course_label,
-                            vc_section_name: parent.vc_section_name,
-                            section_id: parent.section_id,
-                            section_label: parent.section_label,
-                            section_projected_vacancies: parent.section_projected_vacancies,
-                            subsection_label: parent.subsection_label,
-                            schedule_label: `${displayDay(parent.day_of_week)} ${compactTime(parent.start_time)}-${compactTime(parent.end_time)}`,
-                        },
-                        child: {
-                            schedule_id: child.owner_schedule_id,
-                            campus_id: child.campus_id,
-                            campus_name: child.campus_name,
-                            program_id: child.program_id,
-                            program_name: child.program_name,
-                            course_id: child.course_id,
-                            course_label: child.course_label,
-                            vc_section_name: child.vc_section_name,
-                            section_id: child.section_id,
-                            section_label: child.section_label,
-                            section_projected_vacancies: child.section_projected_vacancies,
-                            subsection_label: child.subsection_label,
-                            schedule_label: `${displayDay(child.day_of_week)} ${compactTime(child.start_time)}-${compactTime(child.end_time)}`,
-                        },
-                    });
-                }
+            if (!children.length) {
+                continue;
             }
+
+            items.push({
+                id: `${parent.owner_schedule_id}::${children.map((item) => item.schedule_id).join('|')}`,
+                teacher_name: parent.teacher_name,
+                cycle: parent.cycle,
+                day_of_week: parent.day_of_week,
+                day_label: displayDay(parent.day_of_week),
+                start_time: compactTime(parent.start_time),
+                end_time: compactTime(parent.end_time),
+                faculty_name: parent.faculty_name,
+                parent: {
+                    schedule_id: parent.owner_schedule_id,
+                    campus_id: parent.campus_id,
+                    campus_name: parent.campus_name,
+                    program_id: parent.program_id,
+                    program_name: parent.program_name,
+                    course_id: parent.course_id,
+                    course_label: parent.course_label,
+                    vc_section_name: parent.vc_section_name,
+                    section_id: parent.section_id,
+                    section_label: parent.section_label,
+                    section_projected_vacancies: parent.section_projected_vacancies,
+                    subsection_label: parent.subsection_label,
+                    schedule_label: `${displayDay(parent.day_of_week)} ${compactTime(parent.start_time)}-${compactTime(parent.end_time)}`,
+                },
+                children,
+            });
         }
 
         return {
