@@ -82,8 +82,12 @@ export class VideoconferencesPageComponent implements OnInit {
   assignmentPreview: VideoconferenceAssignmentPreviewResponse | null = null;
   generationResult: VideoconferenceGenerationResponse | null = null;
   loading = false;
+  generating = false;
+  generationProgress = 0;
   filterOptionsLoading = false;
   overrideSaving = false;
+
+  private generationProgressInterval: ReturnType<typeof setInterval> | null = null;
   assignmentUsersModalOpen = false;
   expandedAssignmentHostKey = '';
   hasSearched = false;
@@ -1308,8 +1312,10 @@ export class VideoconferencesPageComponent implements OnInit {
     hasConfirmedWarnings: boolean,
   ) {
     this.loading = true;
+    this.startGenerationProgress();
     this.api.generate(payload).subscribe({
       next: async (res) => {
+        this.finishGenerationProgress();
         this.generationResult = res;
         this.loading = false;
         await this.dialog.alert({
@@ -1319,6 +1325,7 @@ export class VideoconferencesPageComponent implements OnInit {
         });
       },
       error: async (error) => {
+        this.finishGenerationProgress();
         this.loading = false;
         const message = error?.error?.message ?? 'Error generando videoconferencias.';
         const shouldConfirmPoolWarning =
@@ -1344,6 +1351,34 @@ export class VideoconferencesPageComponent implements OnInit {
         });
       },
     });
+  }
+
+  private startGenerationProgress() {
+    this.generationProgress = 0;
+    this.generating = true;
+    this.cdr.detectChanges();
+    if (this.generationProgressInterval) {
+      clearInterval(this.generationProgressInterval);
+    }
+    this.generationProgressInterval = setInterval(() => {
+      // Exponential ease toward 90 % — never reaches 100 until the request finishes.
+      this.generationProgress += (90 - this.generationProgress) * 0.06;
+      this.cdr.detectChanges();
+    }, 300);
+  }
+
+  private finishGenerationProgress() {
+    if (this.generationProgressInterval) {
+      clearInterval(this.generationProgressInterval);
+      this.generationProgressInterval = null;
+    }
+    this.generationProgress = 100;
+    this.cdr.detectChanges();
+    setTimeout(() => {
+      this.generating = false;
+      this.generationProgress = 0;
+      this.cdr.detectChanges();
+    }, 500);
   }
 
   private blurActiveElement() {

@@ -1081,6 +1081,57 @@ h1 {
   background: #eaf3fc;
 }
 
+/* ── Generation progress bar ─────────────────────────── */
+.generation-progress-bar {
+  margin: 0.15rem 0 0.6rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #eef7ff 0%, #e8f4fd 100%);
+  border: 1px solid #c5e0f8;
+}
+
+.generation-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+}
+
+.generation-progress-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e5c9b;
+}
+
+.generation-progress-pct {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #2b78c8;
+  min-width: 3rem;
+  text-align: right;
+}
+
+.generation-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #c5e0f8;
+  overflow: hidden;
+}
+
+.generation-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3a8eec 0%, #1a6fd4 100%);
+  transition: width 0.28s ease-out;
+}
+
+.generation-progress-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.78rem;
+  color: #4f7499;
+  line-height: 1.45;
+}
+
 .modal-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
