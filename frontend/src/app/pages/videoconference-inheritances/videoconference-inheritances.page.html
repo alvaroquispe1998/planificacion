@@ -91,8 +91,12 @@
         </div>
 
         <div class="mapping-actions candidate-actions">
-          <button type="button" class="btn btn-primary btn-sm candidate-action-btn candidate-action-btn-primary" (click)="applyCandidate(item)">
-            Usar sugerencia
+          <button
+            type="button"
+            class="btn btn-primary btn-sm candidate-action-btn candidate-action-btn-primary"
+            (click)="applyCandidate(item)"
+            [disabled]="candidateSavingId === item.id || saving">
+            {{ candidateSavingId === item.id ? 'Guardando...' : 'Usar sugerencia' }}
           </button>
           <button type="button" class="btn btn-secondary btn-sm candidate-action-btn candidate-action-btn-secondary" (click)="dismissCandidate(item)">
             Descartar

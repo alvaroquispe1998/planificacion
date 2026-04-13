@@ -61,7 +61,9 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
 
   candidateLoading = false;
   cleaningLegacy = false;
+  candidateSavingId = '';
   parentCourseDropdownOpen = false;
+  private suppressCascadeReset = false;
 
   constructor(
     private readonly api: VideoconferenceApiService,
@@ -140,15 +142,25 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     if (!parent) {
       return [] as VideoconferenceInheritanceCatalogSchedule[];
     }
+    const blockMap = this.buildContinuousBlockMap(this.schedules);
+    const parentBlock = blockMap.get(parent.schedule_id) ?? {
+      start_time: parent.start_time,
+      end_time: parent.end_time,
+    };
     let schedules = this.schedules.filter((item) => {
       if (item.schedule_id === parent.schedule_id) {
         return false;
       }
       if (
-        item.day_of_week !== parent.day_of_week ||
-        item.start_time !== parent.start_time ||
-        item.end_time !== parent.end_time
+        item.day_of_week !== parent.day_of_week
       ) {
+        return false;
+      }
+      const itemBlock = blockMap.get(item.schedule_id) ?? {
+        start_time: item.start_time,
+        end_time: item.end_time,
+      };
+      if (itemBlock.start_time !== parentBlock.start_time || itemBlock.end_time !== parentBlock.end_time) {
         return false;
       }
       if (!item.is_child_inherited) {
@@ -299,6 +311,9 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   }
 
   onFormContextChange() {
+    if (this.suppressCascadeReset) {
+      return;
+    }
     this.resetFormSelections();
     this.inheritanceCandidates = [];
     this.cdr.detectChanges();
@@ -317,6 +332,9 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   }
 
   onParentSectionChange() {
+    if (this.suppressCascadeReset) {
+      return;
+    }
     this.form.parentScheduleId = '';
     this.form.childCampusId = '';
     this.form.childProgramId = '';
@@ -326,6 +344,9 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   }
 
   onParentScheduleChange() {
+    if (this.suppressCascadeReset) {
+      return;
+    }
     this.form.childCampusId = '';
     this.form.childProgramId = '';
     this.form.childCourseId = '';
@@ -334,17 +355,26 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   }
 
   onChildContextChange() {
+    if (this.suppressCascadeReset) {
+      return;
+    }
     this.form.childCourseId = '';
     this.form.childSectionId = '';
     this.form.childScheduleId = '';
   }
 
   onChildCourseChange() {
+    if (this.suppressCascadeReset) {
+      return;
+    }
     this.form.childSectionId = '';
     this.form.childScheduleId = '';
   }
 
   onChildSectionChange() {
+    if (this.suppressCascadeReset) {
+      return;
+    }
     this.form.childScheduleId = '';
   }
 
@@ -352,6 +382,7 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     const parent = this.schedules.find((row) => row.schedule_id === item.parent_schedule_id) ?? null;
     const child = this.schedules.find((row) => row.schedule_id === item.child_schedule_id) ?? null;
     const parentOption = parent ? this.buildCourseOptions([parent])[0] : null;
+    this.suppressCascadeReset = true;
     this.form = {
       id: item.id,
       parentCampusId: parent?.campus_id ?? '',
@@ -368,6 +399,10 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
       notes: item.notes ?? '',
       isActive: item.is_active,
     };
+    setTimeout(() => {
+      this.suppressCascadeReset = false;
+      this.cdr.detectChanges();
+    }, 0);
     this.inheritanceCandidates = [];
     this.message = '';
     this.error = '';
@@ -489,29 +524,40 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   }
 
   applyCandidate(item: VideoconferenceInheritanceCandidateItem) {
-    const parent = this.schedules.find((row) => row.schedule_id === item.parent.schedule_id) ?? null;
-    const child = this.schedules.find((row) => row.schedule_id === item.child.schedule_id) ?? null;
-    const parentOption = parent ? this.buildCourseOptions([parent])[0] : null;
-    this.form = {
-      id: '',
-      parentCampusId: parent?.campus_id ?? '',
-      parentProgramId: parent?.program_id ?? '',
-      parentCourseSearch: parentOption?.label ?? '',
-      parentCourseId: parent?.course_id ?? '',
-      parentSectionId: parent?.section_id ?? '',
-      parentScheduleId: item.parent.schedule_id,
-      childCampusId: child?.campus_id ?? '',
-      childProgramId: child?.program_id ?? '',
-      childCourseId: child?.course_id ?? '',
-      childSectionId: child?.section_id ?? '',
-      childScheduleId: item.child.schedule_id,
-      notes: '',
-      isActive: true,
-    };
-    this.parentCourseDropdownOpen = false;
-    this.message = 'Sugerencia aplicada. Revisa y guarda manualmente.';
+    if (this.saving || this.candidateSavingId) {
+      return;
+    }
+    this.candidateSavingId = item.id;
     this.error = '';
-    this.cdr.detectChanges();
+    this.message = '';
+    this.api
+      .createInheritance({
+        parentScheduleId: item.parent.schedule_id,
+        childScheduleId: item.child.schedule_id,
+        notes: 'Sugerencia aplicada desde preview de herencias.',
+        isActive: true,
+      })
+      .subscribe({
+        next: () => {
+          this.candidateSavingId = '';
+          this.message = 'Sugerencia guardada como herencia activa.';
+          this.inheritanceCandidates = this.inheritanceCandidates.filter(
+            (candidate) =>
+              candidate.id !== item.id &&
+              candidate.child.schedule_id !== item.child.schedule_id,
+          );
+          this.resetForm();
+          this.parentCourseDropdownOpen = false;
+          this.loadMappings();
+          this.loadCatalogSchedules();
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.candidateSavingId = '';
+          this.error = err?.error?.message ?? 'No se pudo guardar la sugerencia.';
+          this.cdr.detectChanges();
+        },
+      });
   }
 
   dismissCandidate(item: VideoconferenceInheritanceCandidateItem) {
@@ -683,10 +729,63 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
       .replace(/[\u0300-\u036f]/g, '');
   }
 
+  private buildContinuousBlockMap(items: VideoconferenceInheritanceCatalogSchedule[]) {
+    const groups = new Map<string, VideoconferenceInheritanceCatalogSchedule[]>();
+    for (const item of items) {
+      const teacherKey = String(item.teacher_name ?? '').trim().toUpperCase();
+      const key = [
+        item.section_id,
+        item.course_id,
+        item.day_of_week,
+        item.campus_id ?? '',
+        item.program_id ?? '',
+        teacherKey,
+      ].join('|');
+      const current = groups.get(key) ?? [];
+      current.push(item);
+      groups.set(key, current);
+    }
+
+    const blockMap = new Map<string, { start_time: string; end_time: string }>();
+    for (const groupRows of groups.values()) {
+      const ordered = [...groupRows].sort((left, right) => left.start_time.localeCompare(right.start_time));
+      let blockRows: VideoconferenceInheritanceCatalogSchedule[] = [ordered[0]];
+      for (let index = 1; index < ordered.length; index += 1) {
+        const previous = blockRows[blockRows.length - 1];
+        const row = ordered[index];
+        if (previous.end_time === row.start_time) {
+          blockRows.push(row);
+          continue;
+        }
+        this.assignBlockRows(blockMap, blockRows);
+        blockRows = [row];
+      }
+      this.assignBlockRows(blockMap, blockRows);
+    }
+    return blockMap;
+  }
+
+  private assignBlockRows(
+    blockMap: Map<string, { start_time: string; end_time: string }>,
+    blockRows: VideoconferenceInheritanceCatalogSchedule[],
+  ) {
+    if (!blockRows.length) {
+      return;
+    }
+    const blockStart = blockRows[0].start_time;
+    const blockEnd = blockRows[blockRows.length - 1].end_time;
+    for (const row of blockRows) {
+      blockMap.set(row.schedule_id, {
+        start_time: blockStart,
+        end_time: blockEnd,
+      });
+    }
+  }
+
   formatCandidateLine(
     side: Pick<
       VideoconferenceInheritanceCandidateItem['parent'],
-      'campus_name' | 'program_name' | 'course_label' | 'section_label'
+      'campus_name' | 'program_name' | 'course_label' | 'vc_section_name' | 'section_label' | 'subsection_label'
     >,
     item: Pick<VideoconferenceInheritanceCandidateItem, 'cycle' | 'day_label' | 'start_time' | 'end_time'>,
     vacancies?: number | null,
@@ -696,13 +795,24 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
       .map((part) => part.trim())
       .filter(Boolean)
       .pop() || side.section_label || '(Sin seccion)';
+    const subsectionRaw = String(side.subsection_label ?? '')
+      .replace(/grupo\s+/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const sectionFull = subsectionRaw
+      ? `${sectionOnly} (${subsectionRaw})`
+      : sectionOnly;
+    const vcSection = String(side.vc_section_name ?? '')
+      .replace(/\s*-\s*/g, '-')
+      .trim();
+    const sectionToShow = vcSection || sectionFull;
 
     return [
       side.campus_name || '(Sin sede)',
       side.program_name || '(Sin programa)',
       side.course_label,
       `Ciclo ${item.cycle ?? '-'}`,
-      sectionOnly,
+      sectionToShow,
       `Vacantes: ${vacancies ?? 0}`,
       item.day_label,
       `${item.start_time} - ${item.end_time}`,
