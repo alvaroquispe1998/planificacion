@@ -688,13 +688,22 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
       VideoconferenceInheritanceCandidateItem['parent'],
       'campus_name' | 'program_name' | 'course_label' | 'section_label'
     >,
-    item: Pick<VideoconferenceInheritanceCandidateItem, 'day_label' | 'start_time' | 'end_time'>,
+    item: Pick<VideoconferenceInheritanceCandidateItem, 'cycle' | 'day_label' | 'start_time' | 'end_time'>,
+    vacancies?: number | null,
   ) {
+    const sectionOnly = String(side.section_label ?? '')
+      .split('|')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .pop() || side.section_label || '(Sin seccion)';
+
     return [
       side.campus_name || '(Sin sede)',
       side.program_name || '(Sin programa)',
       side.course_label,
-      side.section_label,
+      `Ciclo ${item.cycle ?? '-'}`,
+      sectionOnly,
+      `Vacantes: ${vacancies ?? 0}`,
       item.day_label,
       `${item.start_time} - ${item.end_time}`,
     ]
