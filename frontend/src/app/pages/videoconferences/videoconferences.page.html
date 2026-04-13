@@ -545,6 +545,12 @@
             <button
               class="btn btn-secondary btn-sm"
               type="button"
+              (click)="$event.stopPropagation(); openPayloadPreview(item)">
+              Ver payload
+            </button>
+            <button
+              class="btn btn-secondary btn-sm"
+              type="button"
               (click)="$event.stopPropagation(); openOverrideEditor(item)"
               [disabled]="loading || !canManageOccurrence(item)">
               Reprogramar
@@ -622,6 +628,20 @@
           {{ overrideSaving ? 'Guardando...' : 'Guardar reprogramacion' }}
         </button>
       </div>
+    </article>
+  </section>
+
+  <section class="modal-backdrop" *ngIf="payloadPreviewOpen" (click)="closePayloadPreview()">
+    <article class="modal-card payload-preview-modal" (click)="$event.stopPropagation()">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Payload preview</p>
+          <h2>{{ payloadPreviewTitle || 'Payload de reunion' }}</h2>
+        </div>
+        <button class="btn btn-secondary btn-sm" type="button" (click)="closePayloadPreview()">Cerrar</button>
+      </div>
+
+      <pre class="payload-preview-content">{{ payloadPreviewJson }}</pre>
     </article>
   </section>
 </div>
