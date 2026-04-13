@@ -128,7 +128,7 @@
 
     <div class="filters-footer">
       <div class="filters-summary" *ngIf="hasActiveFilters; else filtersEmptyState">
-        <span class="summary-label">Filtros activos</span>
+        <span class="summary-label">{{ hasSearched ? 'Filtros aplicados' : 'Filtros activos' }}</span>
         <div class="filter-chips">
           <span class="filter-chip" *ngFor="let label of activeFilterLabels">{{ label }}</span>
         </div>
@@ -508,9 +508,12 @@
           </div>
 
           <div class="context-cell">
-            <strong>{{ getAvContextPrimary(item) }}</strong>
-            <span class="meta-inline">{{ getAvContextSecondary(item) }}</span>
+            <strong>{{ getContextPrimary(item) }}</strong>
+            <span class="meta-inline">{{ getContextSecondary(item) }}</span>
             <span class="meta-inline">{{ getVcContext(item) }}</span>
+            <span *ngIf="hasDifferentAvContext(item)" class="meta-inline">
+              AV: {{ getAvContextPrimary(item) }} | {{ getAvContextSecondary(item) }}
+            </span>
             <span *ngIf="getVcSourceLabel(item)" class="meta-inline meta-inline-accent">
               {{ getVcSourceLabel(item) }}
             </span>

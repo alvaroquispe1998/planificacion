@@ -51,13 +51,13 @@ const MEETING_MARGIN_MINUTES = 10;
 const DEFAULT_REMOTE_MEETING_DURATION_MINUTES = 60;
 const AULA_VIRTUAL_SOURCE_CODE = 'AULAVIRTUAL';
 const DAY_TO_AULA_VIRTUAL_NUMBER: Record<string, number> = {
-    LUNES: 0,
-    MARTES: 1,
-    MIERCOLES: 2,
-    JUEVES: 3,
-    VIERNES: 4,
-    SABADO: 5,
-    DOMINGO: 6,
+    LUNES: 2,
+    MARTES: 3,
+    MIERCOLES: 4,
+    JUEVES: 5,
+    VIERNES: 6,
+    SABADO: 7,
+    DOMINGO: 1,
 };
 const DAY_TO_JS_NUMBER: Record<string, number> = {
     LUNES: 1,
@@ -666,6 +666,7 @@ export class VideoconferenceService {
     async preview(filters: PreviewVideoconferenceDto) {
         const requestedRows = await this.getScheduleRows(filters);
         const requestedScheduleIds = requestedRows.map((row) => row.schedule_id);
+        const requestedScheduleIdSet = new Set<string>(requestedScheduleIds);
         const requestedInheritanceIndex = await this.buildInheritanceIndex(requestedScheduleIds);
         const expandedScheduleIds = new Set<string>(requestedScheduleIds);
         for (const scheduleId of requestedScheduleIds) {
@@ -678,7 +679,7 @@ export class VideoconferenceService {
                 expandedScheduleIds.add(item.child_schedule_id);
             }
         }
-        const rows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
+        const allRows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
         const inheritanceIndex = await this.buildInheritanceIndex(Array.from(expandedScheduleIds));
         const hasStartDate = Boolean(filters.startDate?.trim());
         const hasEndDate = Boolean(filters.endDate?.trim());
@@ -687,7 +688,10 @@ export class VideoconferenceService {
         }
 
         if (!hasStartDate || !hasEndDate) {
-            return rows.map((row) => this.serializeBasePreviewRow(row, this.resolveScheduleInheritance(row.schedule_id, inheritanceIndex, rows)));
+            // Only return the rows that matched the original filters; expanded rows are used only for inheritance resolution
+            return allRows
+                .filter((row) => requestedScheduleIdSet.has(row.schedule_id))
+                .map((row) => this.serializeBasePreviewRow(row, this.resolveScheduleInheritance(row.schedule_id, inheritanceIndex, allRows)));
         }
 
         const startDate = normalizeIsoDate(filters.startDate ?? '');
@@ -695,8 +699,10 @@ export class VideoconferenceService {
         if (startDate > endDate) {
             throw new BadRequestException('startDate no puede ser mayor que endDate.');
         }
-        const occurrences = await this.resolveOccurrences(rows, startDate, endDate, 'America/Lima', inheritanceIndex);
-        return occurrences.map((occurrence) => this.serializeOccurrencePreviewRow(occurrence));
+        const occurrences = await this.resolveOccurrences(allRows, startDate, endDate, 'America/Lima', inheritanceIndex);
+        // Only return occurrences whose schedule matched the original filters
+        const filteredOccurrences = occurrences.filter((occ) => requestedScheduleIdSet.has(occ.row.schedule_id));
+        return filteredOccurrences.map((occurrence) => this.serializeOccurrencePreviewRow(occurrence));
     }
 
     async assignmentPreview(payload: AssignmentPreviewVideoconferenceDto) {
@@ -2557,15 +2563,7 @@ export class VideoconferenceService {
     }
 
     private buildDayOptions(rows: FilterOptionRow[]) {
-        const options = new Map<string, string>([
-            ['LUNES', displayDay('LUNES')],
-            ['MARTES', displayDay('MARTES')],
-            ['MIERCOLES', displayDay('MIERCOLES')],
-            ['JUEVES', displayDay('JUEVES')],
-            ['VIERNES', displayDay('VIERNES')],
-            ['SABADO', displayDay('SABADO')],
-            ['DOMINGO', displayDay('DOMINGO')],
-        ]);
+        const options = new Map<string, string>();
         for (const row of rows) {
             const dayCode = (row.day_of_week ?? '').trim().toUpperCase();
             if (!dayCode) {
