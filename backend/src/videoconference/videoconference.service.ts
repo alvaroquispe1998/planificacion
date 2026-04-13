@@ -3490,8 +3490,10 @@ export class VideoconferenceService {
             });
 
             if (candidates.length === 1) {
+                const meetingDetail = await this.zoomAccountService.getMeeting(candidates[0].id);
                 return {
                     ...candidates[0],
+                    start_url: meetingDetail?.start_url ?? candidates[0].start_url ?? null,
                     attempts: attempt,
                 };
             }
