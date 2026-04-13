@@ -586,6 +586,18 @@ export class AuditService {
       throw new BadRequestException('La videoconferencia no tiene zoom_meeting_id conciliado.');
     }
 
+    if (!record.start_url) {
+      const activeMeeting = await this.zoomAccountService.getMeeting(record.zoom_meeting_id);
+      if (activeMeeting?.start_url) {
+        record.start_url = activeMeeting.start_url;
+        await this.planningVideoconferencesRepo.save(record);
+        if (record.id !== requestedRecord.id) {
+          requestedRecord.start_url = activeMeeting.start_url;
+          await this.planningVideoconferencesRepo.save(requestedRecord);
+        }
+      }
+    }
+
     try {
       const instances = await this.zoomAccountService.listPastMeetingInstances(record.zoom_meeting_id);
       const seenInstanceIds = new Set<string>();

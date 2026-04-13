@@ -71,6 +71,11 @@ export class AuditDetailPageComponent implements OnInit {
           '';
         this.loading = false;
         this.cdr.detectChanges();
+
+        const needsSync = this.record?.status === 'CREATED_UNMATCHED' || (this.record?.status === 'MATCHED' && !this.record?.start_url);
+        if (needsSync && this.record?.can_sync) {
+          this.syncZoomData();
+        }
       },
       error: (err) => {
         this.error = err?.error?.message ?? 'No se pudo cargar el detalle de auditoria.';

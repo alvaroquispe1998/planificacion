@@ -278,6 +278,17 @@ export class ZoomAccountService {
             .filter((item): item is ZoomPastMeetingInstanceSummary => Boolean(item));
     }
 
+
+    async getMeeting(meetingId: string) {
+        const response = await this.fetchZoomJsonOrNull<Record<string, unknown>>(
+            `/meetings/${this.encodeZoomIdPathSegment(meetingId)}`,
+        );
+        if (!response) {
+            return null;
+        }
+        return this.mapMeetingSummary(response);
+    }
+
     async getPastMeetingDetail(meetingUuid: string) {
         const response = await this.fetchZoomJsonOrNull<Record<string, unknown>>(
             `/past_meetings/${this.encodeZoomIdPathSegment(meetingUuid)}`,

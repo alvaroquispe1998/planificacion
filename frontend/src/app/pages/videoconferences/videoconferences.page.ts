@@ -724,7 +724,7 @@ export class VideoconferencesPageComponent implements OnInit {
       case 'INHERITED':
         return 'Heredado';
       case 'BLOCKED_EXISTING':
-        return 'Ya existente';
+        return 'Bloqueado: Ya fue generada';
       case 'VALIDATION_ERROR':
         return 'Validacion pendiente';
       case 'NO_AVAILABLE_ZOOM_USER':
@@ -740,9 +740,8 @@ export class VideoconferencesPageComponent implements OnInit {
       case 'INHERITED':
         return 'assignment-pill assignment-pill-success';
       case 'ASSIGNED_RISK':
-        return 'assignment-pill assignment-pill-warning';
       case 'BLOCKED_EXISTING':
-        return 'assignment-pill assignment-pill-neutral';
+        return 'assignment-pill assignment-pill-warning';
       case 'VALIDATION_ERROR':
       case 'NO_AVAILABLE_ZOOM_USER':
         return 'assignment-pill assignment-pill-danger';
