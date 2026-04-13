@@ -4,6 +4,7 @@ import { RequirePermissions } from '../auth/permissions.decorator';
 import { VideoconferenceService } from './videoconference.service';
 import {
     AssignmentPreviewVideoconferenceDto,
+    CheckExistingVideoconferencesDto,
     CreateVideoconferenceInheritanceDto,
     FilterOptionsDto,
     GenerateVideoconferenceDto,
@@ -99,6 +100,11 @@ export class VideoconferenceController {
     @Post('assignment-preview')
     async assignmentPreview(@Body() payload: AssignmentPreviewVideoconferenceDto) {
         return this.service.assignmentPreview(payload);
+    }
+
+    @Post('check-existing')
+    async checkExisting(@Body() payload: CheckExistingVideoconferencesDto) {
+        return this.service.checkExisting(payload);
     }
 
     @Post('generate')

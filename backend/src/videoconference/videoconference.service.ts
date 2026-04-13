@@ -1124,6 +1124,129 @@ export class VideoconferenceService {
         return mappedOccurrences;
     }
 
+    /**
+     * Given a list of occurrenceKeys (schedule_id::conference_date) OR scheduleIds + date range
+     * checks which ones already have an active (non-ERROR) videoconference record.
+     *
+     * Mode A – occurrence keys: used after "Ver ocurrencias" when each row has a specific date.
+     * Mode B – schedule IDs + date range: used on base-schedule view to count existing
+     *          conferences per schedule within the given range.
+     */
+    async checkExisting(payload: {
+        occurrenceKeys?: string[];
+        scheduleIds?: string[];
+        startDate?: string;
+        endDate?: string;
+    }): Promise<{
+        existing: Array<{
+            occurrence_key: string;
+            schedule_id: string;
+            conference_date: string;
+            status: string;
+            zoom_meeting_id: string | null;
+            zoom_user_email: string | null;
+            record_id: string;
+        }>;
+    }> {
+        const keys = normalizeIdArray(payload.occurrenceKeys);
+        const scheduleIds = normalizeIdArray(payload.scheduleIds);
+
+        // ── Mode A: occurrence keys ─────────────────────────────────────────
+        if (keys.length) {
+            const pairs = keys
+                .map((key) => {
+                    const sep = key.lastIndexOf('::');
+                    if (sep < 0) return null;
+                    const date = key.slice(sep + 2);
+                    if (!date) return null; // skip keys without a real date
+                    return { schedule_id: key.slice(0, sep), conference_date: date, occurrence_key: key };
+                })
+                .filter((item): item is NonNullable<typeof item> => item !== null);
+
+            if (!pairs.length) {
+                return { existing: [] };
+            }
+
+            const uniqueScheduleIds = [...new Set(pairs.map((p) => p.schedule_id))];
+            const conferenceDates = [...new Set(pairs.map((p) => p.conference_date))];
+
+            const rows = await this.planningVideoconferencesRepo
+                .createQueryBuilder('vc')
+                .where('vc.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds: uniqueScheduleIds })
+                .andWhere('vc.conference_date IN (:...conferenceDates)', { conferenceDates })
+                .andWhere("vc.status != 'ERROR'")
+                .select([
+                    'vc.id',
+                    'vc.planning_subsection_schedule_id',
+                    'vc.conference_date',
+                    'vc.status',
+                    'vc.zoom_meeting_id',
+                    'vc.zoom_user_email',
+                ])
+                .getMany();
+
+            const rowMap = new Map(rows.map((r) => [`${r.planning_subsection_schedule_id}::${r.conference_date}`, r]));
+
+            const existing = pairs
+                .map((p) => {
+                    const record = rowMap.get(`${p.schedule_id}::${p.conference_date}`);
+                    if (!record) return null;
+                    return {
+                        occurrence_key: p.occurrence_key,
+                        schedule_id: p.schedule_id,
+                        conference_date: p.conference_date,
+                        status: record.status,
+                        zoom_meeting_id: record.zoom_meeting_id,
+                        zoom_user_email: record.zoom_user_email,
+                        record_id: record.id,
+                    };
+                })
+                .filter((item): item is NonNullable<typeof item> => item !== null);
+
+            return { existing };
+        }
+
+        // ── Mode B: schedule IDs + date range ──────────────────────────────
+        if (!scheduleIds.length) {
+            return { existing: [] };
+        }
+
+        const startDate = payload.startDate?.trim();
+        const endDate = payload.endDate?.trim();
+        if (!startDate || !endDate) {
+            return { existing: [] };
+        }
+
+        const rows = await this.planningVideoconferencesRepo
+            .createQueryBuilder('vc')
+            .where('vc.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds })
+            .andWhere('vc.conference_date >= :startDate', { startDate })
+            .andWhere('vc.conference_date <= :endDate', { endDate })
+            .andWhere("vc.status != 'ERROR'")
+            .select([
+                'vc.id',
+                'vc.planning_subsection_schedule_id',
+                'vc.conference_date',
+                'vc.status',
+                'vc.zoom_meeting_id',
+                'vc.zoom_user_email',
+            ])
+            .orderBy('vc.conference_date', 'ASC')
+            .getMany();
+
+        const existing = rows.map((r) => ({
+            occurrence_key: `${r.planning_subsection_schedule_id}::${r.conference_date}`,
+            schedule_id: r.planning_subsection_schedule_id,
+            conference_date: r.conference_date,
+            status: r.status,
+            zoom_meeting_id: r.zoom_meeting_id,
+            zoom_user_email: r.zoom_user_email,
+            record_id: r.id,
+        }));
+
+        return { existing };
+    }
+
     async assignmentPreview(payload: AssignmentPreviewVideoconferenceDto) {
         const scheduleIds = normalizeIdArray(payload.scheduleIds);
         const occurrenceKeys = normalizeIdArray(payload.occurrenceKeys);
@@ -4061,10 +4184,24 @@ export class VideoconferenceService {
         const payloadBody = parseMaybeJson(bodyText) ?? { raw_text: bodyText.slice(0, 4000) };
         const redirectedToLogin =
             response.redirected && /login|signin|account\/login/i.test(response.url);
+        const redirectedToErrorPage =
+            response.redirected && /\/50[0-9](\.s?html?)?$/i.test(response.url);
         const htmlLooksLikeLogin =
             contentType.includes('text/html') && /login|iniciar sesi[oó]n|password/i.test(bodyText);
+        const bodyLooksLikeGatewayError =
+            /Cannot GET \/50[0-9]|Bad Gateway|Service Unavailable/i.test(bodyText);
 
-        if (!response.ok || redirectedToLogin || htmlLooksLikeLogin) {
+        if (redirectedToErrorPage || bodyLooksLikeGatewayError) {
+            throw new BadRequestException(
+                'Aula Virtual no esta disponible en este momento (error de servidor). Intenta nuevamente en unos minutos.',
+            );
+        }
+        if (redirectedToLogin) {
+            throw new BadRequestException(
+                'La sesion de Aula Virtual expiro. Renueva la cookie en Configuracion y vuelve a intentarlo.',
+            );
+        }
+        if (!response.ok || htmlLooksLikeLogin) {
             throw new BadRequestException(
                 `Aula Virtual rechazo la creacion (${response.status}): ${bodyText.slice(0, 300)}`,
             );

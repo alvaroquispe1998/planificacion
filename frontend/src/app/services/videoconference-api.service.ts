@@ -476,6 +476,25 @@ export class VideoconferenceApiService {
         return this.http.post<VideoconferenceGenerationResponse>(`${this.baseUrl}/generate`, payload);
     }
 
+    checkExisting(payload: {
+        occurrenceKeys?: string[];
+        scheduleIds?: string[];
+        startDate?: string;
+        endDate?: string;
+    }) {
+        return this.http.post<{
+            existing: Array<{
+                occurrence_key: string;
+                schedule_id: string;
+                conference_date: string;
+                status: string;
+                zoom_meeting_id: string | null;
+                zoom_user_email: string | null;
+                record_id: string;
+            }>;
+        }>(`${this.baseUrl}/check-existing`, payload);
+    }
+
     getZoomPool() {
         return this.http.get<ZoomPoolResponse>(`${API_BASE_URL}/settings/zoom/pool`);
     }

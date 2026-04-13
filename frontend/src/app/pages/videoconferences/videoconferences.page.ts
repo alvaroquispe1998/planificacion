@@ -86,6 +86,15 @@ export class VideoconferencesPageComponent implements OnInit {
   generationProgress = 0;
   filterOptionsLoading = false;
   overrideSaving = false;
+  checkingExisting = false;
+
+  /** occurrence_key -> existing record summary for already-created conferences */
+  existingByOccurrenceKey = new Map<string, {
+    status: string;
+    zoom_meeting_id: string | null;
+    zoom_user_email: string | null;
+    record_id: string;
+  }>();
 
   private generationProgressInterval: ReturnType<typeof setInterval> | null = null;
   assignmentUsersModalOpen = false;
@@ -191,6 +200,24 @@ export class VideoconferencesPageComponent implements OnInit {
     );
   }
 
+  get retryableFailedRows() {
+    return this.generationRows.filter((item) =>
+      ['ERROR', 'NO_AVAILABLE_ZOOM_USER'].includes(item.status) && Boolean(item.occurrence_key),
+    );
+  }
+
+  get canRetryFailed() {
+    return this.retryableFailedRows.length > 0 && !this.generating;
+  }
+
+  isAlreadyCreated(item: PreviewSelectionItem): boolean {
+    return this.existingByOccurrenceKey.has(item.occurrence_key);
+  }
+
+  getExistingRecord(item: PreviewSelectionItem) {
+    return this.existingByOccurrenceKey.get(item.occurrence_key) ?? null;
+  }
+
   get successfulResultRows() {
     return this.generationRows.filter((item) => item.status === 'MATCHED');
   }
@@ -251,7 +278,9 @@ export class VideoconferencesPageComponent implements OnInit {
     this.hasSearched = true;
     this.generationResult = null;
     this.closeOverrideEditor();
-    this.loadPreview(new Set<string>(), false);
+    // If dates are set, check existing conferences in that range even on base load
+    const afterLoad = (this.startDate && this.endDate) ? () => this.refreshExistingCheck() : undefined;
+    this.loadPreview(new Set<string>(), false, afterLoad);
   }
 
   async applyOperationalRange() {
@@ -274,7 +303,7 @@ export class VideoconferencesPageComponent implements OnInit {
     this.closeOverrideEditor();
     this.generationResult = null;
     this.hasSearched = true;
-    this.loadPreview();
+    this.loadPreview(undefined, undefined, () => this.refreshExistingCheck());
   }
 
   async exportCurrentRows() {
@@ -1104,6 +1133,7 @@ export class VideoconferencesPageComponent implements OnInit {
     this.hasSearched = false;
     this.retryingRecordId = '';
     this.appliedFilterSnapshot = null;
+    this.existingByOccurrenceKey = new Map();
   }
 
   private buildCatalogFilters(): FilterOptionsDto {
@@ -1138,7 +1168,11 @@ export class VideoconferencesPageComponent implements OnInit {
     await this.loadPreview(selectedKeys, this.usesOccurrenceRows);
   }
 
-  private loadPreview(selectedKeys = new Set<string>(), includeOperationalRange = true) {
+  private loadPreview(
+    selectedKeys = new Set<string>(),
+    includeOperationalRange = true,
+    afterLoad?: () => void,
+  ) {
     this.loading = true;
     const appliedSnapshot = this.captureFilterSnapshot();
     this.cdr.detectChanges();
@@ -1153,6 +1187,7 @@ export class VideoconferencesPageComponent implements OnInit {
         this.appliedFilterSnapshot = appliedSnapshot;
         this.loading = false;
         this.cdr.detectChanges();
+        afterLoad?.();
       },
       error: async () => {
         this.loading = false;
@@ -1164,6 +1199,140 @@ export class VideoconferencesPageComponent implements OnInit {
         });
       },
     });
+  }
+
+  private refreshExistingCheck() {
+    // ── Occurrence mode: each row has a real conference_date in its occurrence_key ──
+    if (this.usesOccurrenceRows) {
+      const occurrenceKeys = this.previewData
+        .filter((item) => item.selectable && item.occurrence_key && item.effective_conference_date)
+        .map((item) => item.occurrence_key);
+
+      if (!occurrenceKeys.length) {
+        this.existingByOccurrenceKey = new Map();
+        return;
+      }
+
+      this.checkingExisting = true;
+      this.cdr.detectChanges();
+      this.api.checkExisting({ occurrenceKeys }).subscribe({
+        next: (res) => this.applyExistingCheckResult(res.existing),
+        error: () => { this.checkingExisting = false; this.cdr.detectChanges(); },
+      });
+      return;
+    }
+
+    // ── Base schedule mode: check by schedule IDs + date range ────────────
+    if (!this.startDate || !this.endDate) {
+      this.existingByOccurrenceKey = new Map();
+      return;
+    }
+
+    const scheduleIds = [...new Set(
+      this.previewData
+        .filter((item) => item.selectable)
+        .flatMap((item) => item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id]),
+    )];
+
+    if (!scheduleIds.length) {
+      this.existingByOccurrenceKey = new Map();
+      return;
+    }
+
+    this.checkingExisting = true;
+    this.cdr.detectChanges();
+    this.api.checkExisting({ scheduleIds, startDate: this.startDate, endDate: this.endDate }).subscribe({
+      next: (res) => this.applyExistingCheckResult(res.existing),
+      error: () => { this.checkingExisting = false; this.cdr.detectChanges(); },
+    });
+  }
+
+  private applyExistingCheckResult(existing: Array<{
+    occurrence_key: string;
+    schedule_id: string;
+    conference_date: string;
+    status: string;
+    zoom_meeting_id: string | null;
+    zoom_user_email: string | null;
+    record_id: string;
+  }>) {
+    const map = new Map<string, { status: string; zoom_meeting_id: string | null; zoom_user_email: string | null; record_id: string }>();
+    for (const item of existing) {
+      map.set(item.occurrence_key, {
+        status: item.status,
+        zoom_meeting_id: item.zoom_meeting_id,
+        zoom_user_email: item.zoom_user_email,
+        record_id: item.record_id,
+      });
+    }
+    this.existingByOccurrenceKey = map;
+
+    if (this.usesOccurrenceRows) {
+      // Auto-deselect rows that are already created (occurrence mode)
+      this.previewData.forEach((item) => {
+        if (map.has(item.occurrence_key)) {
+          item.selected = false;
+        }
+      });
+    }
+    this.checkingExisting = false;
+    this.cdr.detectChanges();
+  }
+
+  /** Count conferences already created for a base schedule in the current date range */
+  getExistingCountForSchedule(item: PreviewSelectionItem): number {
+    const ids = new Set(item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id]);
+    let count = 0;
+    for (const key of this.existingByOccurrenceKey.keys()) {
+      const sep = key.lastIndexOf('::');
+      if (sep >= 0 && ids.has(key.slice(0, sep))) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  get existingScheduleIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const key of this.existingByOccurrenceKey.keys()) {
+      const sep = key.lastIndexOf('::');
+      if (sep >= 0) ids.add(key.slice(0, sep));
+    }
+    return ids;
+  }
+
+  isAnyCreatedForSchedule(item: PreviewSelectionItem): boolean {
+    const ids = new Set(item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id]);
+    const existing = this.existingScheduleIds;
+    return [...ids].some((id) => existing.has(id));
+  }
+
+  async retryFailed() {
+    const failed = this.retryableFailedRows;
+    if (!failed.length) return;
+
+    const confirmed = await this.dialog.confirm({
+      title: 'Reintentar fallidos',
+      message: `Se reintentara la creacion de ${failed.length} ocurrencia(s) con error. Deseas continuar?`,
+      confirmLabel: 'Reintentar',
+      cancelLabel: 'Cancelar',
+    });
+    if (!confirmed) return;
+
+    const occurrenceKeys = failed
+      .map((item) => item.occurrence_key)
+      .filter((k): k is string => Boolean(k));
+
+    const preferredHosts = this.buildPreferredHostsForGeneration(
+      this.previewData.filter((item) => occurrenceKeys.includes(item.occurrence_key)),
+    );
+
+    this.executeGeneration({
+      occurrenceKeys,
+      startDate: this.startDate,
+      endDate: this.endDate,
+      preferredHosts,
+    }, false);
   }
 
   private sortPreviewData(items: VideoconferencePreviewItem[]) {
