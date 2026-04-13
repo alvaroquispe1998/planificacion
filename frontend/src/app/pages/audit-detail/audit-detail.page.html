@@ -64,6 +64,10 @@
           <strong>{{ record.topic || 'Sin topic' }}</strong>
         </div>
         <div>
+          <span class="meta-label">Creada el</span>
+          <strong>{{ formatDateTime(record.created_at) }}</strong>
+        </div>
+        <div>
           <span class="meta-label">Tipo de enlace</span>
           <strong>{{ record.link_mode === 'INHERITED' ? 'Heredada' : 'Owner' }}</strong>
         </div>

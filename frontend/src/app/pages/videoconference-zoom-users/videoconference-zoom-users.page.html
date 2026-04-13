@@ -10,14 +10,51 @@
 
     <div class="hero-actions">
       <a class="btn btn-secondary" routerLink="/videoconferences/zoom-config">Configuracion Zoom</a>
-      <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="loading || saving">
+      <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="loading || saving || managingGroups">
         Actualizar
       </button>
-      <button type="button" class="btn btn-primary" (click)="save()" [disabled]="loading || saving || !isDirty">
+      <button type="button" class="btn btn-primary" (click)="save()" [disabled]="loading || saving || managingGroups || !isDirty || !hasSelectedGroup">
         {{ saving ? 'Guardando...' : 'Guardar cambios' }}
       </button>
     </div>
   </header>
+
+  <section class="panel group-panel">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Grupos Zoom</p>
+        <h2>Seleccion de grupo</h2>
+        <p class="panel-copy">El pool se edita por grupo. Al generar reuniones podras elegir cual usar.</p>
+      </div>
+    </div>
+
+    <div class="group-toolbar">
+      <label class="search-field">
+        <span>Grupo activo</span>
+        <select [ngModel]="selectedGroupId" (ngModelChange)="onGroupChange($event)" [disabled]="loading || saving || managingGroups || !groups.length">
+          <option value="">Selecciona grupo</option>
+          <option *ngFor="let group of groups" [value]="group.id">
+            {{ group.name }} ({{ group.code }}){{ group.is_active ? '' : ' - inactivo' }}
+          </option>
+        </select>
+      </label>
+
+      <div class="group-actions">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="createGroup()" [disabled]="loading || saving || managingGroups">
+          Nuevo grupo
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="editSelectedGroup()" [disabled]="loading || saving || managingGroups || !hasSelectedGroup">
+          Editar
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="toggleSelectedGroupActive()" [disabled]="loading || saving || managingGroups || !hasSelectedGroup">
+          {{ selectedGroup?.is_active ? 'Desactivar' : 'Activar' }}
+        </button>
+        <button type="button" class="btn btn-danger btn-sm" (click)="deleteSelectedGroup()" [disabled]="loading || saving || managingGroups || !hasSelectedGroup">
+          Eliminar
+        </button>
+      </div>
+    </div>
+  </section>
 
   <p *ngIf="message" class="flash success">{{ message }}</p>
   <p *ngIf="error" class="flash error">{{ error }}</p>
@@ -30,7 +67,7 @@
     <article class="stat-card">
       <span>Usuarios en pool</span>
       <strong>{{ selectedCount }}</strong>
-      <small>Quedaran disponibles para la cola de asignacion</small>
+      <small>Disponibles en el grupo {{ selectedGroup?.name || 'sin seleccionar' }}</small>
     </article>
     <article class="stat-card">
       <span>Activos</span>
@@ -56,7 +93,7 @@
           <p class="eyebrow">Pool activo</p>
           <h2>Usuarios que se usaran</h2>
           <p class="panel-copy">
-            El orden importa: el sistema intenta asignar primero los hosts superiores mientras esten activos y disponibles.
+            El orden importa: el sistema intenta asignar primero los hosts superiores mientras esten activos y disponibles en este grupo.
           </p>
         </div>
       </div>
@@ -67,7 +104,7 @@
 
       <div *ngIf="!loading && poolItems.length === 0" class="empty-state">
         <h3>No hay usuarios configurados en el pool</h3>
-        <p>Agrega usuarios desde la columna derecha para dejarlos listos para generacion automatica.</p>
+        <p>Agrega usuarios desde la columna derecha para dejarlos listos para este grupo.</p>
       </div>
 
       <div *ngIf="!loading && poolItems.length > 0" class="pool-list">

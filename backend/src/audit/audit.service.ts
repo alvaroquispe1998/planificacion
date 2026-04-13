@@ -60,6 +60,7 @@ type PlanningAuditListRow = {
   zoom_user_email: string | null;
   zoom_user_name: string | null;
   zoom_meeting_id: string | null;
+  created_at: Date;
   topic: string | null;
   aula_virtual_name: string | null;
   join_url: string | null;
@@ -399,6 +400,7 @@ export class AuditService {
         zoom_user_email: row.zoom_user_email,
         zoom_user_name: row.zoom_user_name,
         zoom_meeting_id: row.zoom_meeting_id,
+        created_at: row.created_at,
         topic: row.topic,
         aula_virtual_name: row.aula_virtual_name,
         join_url: row.join_url,
@@ -506,6 +508,7 @@ export class AuditService {
         zoom_user_email: row.zoom_user_email,
         zoom_user_name: row.zoom_user_name,
         zoom_meeting_id: row.zoom_meeting_id,
+        created_at: row.created_at,
         topic: row.topic,
         aula_virtual_name: row.aula_virtual_name,
         join_url: row.join_url,
@@ -668,6 +671,7 @@ export class AuditService {
       .addSelect('vc.zoom_user_email', 'zoom_user_email')
       .addSelect('vc.zoom_user_name', 'zoom_user_name')
       .addSelect('vc.zoom_meeting_id', 'zoom_meeting_id')
+      .addSelect('vc.created_at', 'created_at')
       .addSelect('vc.topic', 'topic')
       .addSelect('vc.aula_virtual_name', 'aula_virtual_name')
       .addSelect('vc.join_url', 'join_url')

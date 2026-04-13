@@ -43,6 +43,11 @@ export class VideoconferenceController {
         return this.service.getCourses(ids);
     }
 
+    @Get('zoom-groups')
+    async listActiveZoomGroups() {
+        return this.service.listActiveZoomGroups();
+    }
+
     @Post('filter-options')
     async getFilterOptions(@Body() filters: FilterOptionsDto) {
         return this.service.getFilterOptions(filters);

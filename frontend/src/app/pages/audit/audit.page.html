@@ -127,9 +127,6 @@
         <thead>
           <tr>
             <th>Fecha / hora</th>
-            <th>Curso</th>
-            <th>Seccion / grupo</th>
-            <th>Docente</th>
             <th>Contexto</th>
             <th>Zoom</th>
             <th>Estados</th>
@@ -143,24 +140,7 @@
               <div class="cell-stack">
                 <strong>{{ dateLabel(row) }}</strong>
                 <span>{{ timeLabel(row) }}</span>
-              </div>
-            </td>
-            <td>
-              <div class="cell-stack">
-                <strong>{{ row.course_code || 'Curso sin codigo' }}</strong>
-                <span>{{ row.course_name || 'Sin nombre' }}</span>
-              </div>
-            </td>
-            <td>
-              <div class="cell-stack">
-                <strong>{{ sectionLabel(row) }}</strong>
-                <span>{{ groupLabel(row) }}</span>
-              </div>
-            </td>
-            <td>
-              <div class="cell-stack">
-                <strong>{{ row.teacher_name || 'Sin docente' }}</strong>
-                <span>{{ row.teacher_dni || 'Sin DNI' }}</span>
+                <span>Creada: {{ formatDateTime(row.created_at) }}</span>
               </div>
             </td>
             <td>
@@ -173,7 +153,9 @@
             <td>
               <div class="cell-stack">
                 <strong>{{ row.zoom_meeting_id || 'Sin conciliacion Zoom' }}</strong>
+                <span>{{ row.topic || 'Sin nombre de reunion' }}</span>
                 <span>{{ row.zoom_user_name || row.zoom_user_email || 'Sin usuario asignado' }}</span>
+                <span>Generada: {{ statusLabel(row.status) }}</span>
                 <span *ngIf="row.link_mode === 'INHERITED'">{{ row.owner_label || 'Usa el Zoom del horario padre' }}</span>
               </div>
             </td>
