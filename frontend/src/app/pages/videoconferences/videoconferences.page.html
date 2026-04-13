@@ -283,7 +283,8 @@
       </div>
     </div>
 
-    <section class="assignment-summary-card" *ngIf="!isHybridGroup && (assignmentSummary as summary)">
+    <ng-container *ngIf="!isHybridGroup && assignmentSummary; let summary">
+    <section class="assignment-summary-card">
       <div class="assignment-summary-head">
         <div>
           <span class="eyebrow eyebrow-soft">Preview Zoom</span>
@@ -342,6 +343,7 @@
         </p>
       </div>
     </section>
+    </ng-container>
 
     <section class="modal-backdrop" *ngIf="assignmentUsersModalOpen" (click)="closeAssignmentUsersModal()">
       <article class="modal-card assignment-users-modal" (click)="$event.stopPropagation()">
