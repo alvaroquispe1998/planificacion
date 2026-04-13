@@ -312,6 +312,30 @@ type ContinuousBlockInfo = {
     grouped_subsection_labels: string[];
 };
 
+type InheritanceCandidateBlock = {
+    owner_schedule_id: string;
+    schedule_ids: string[];
+    semester_id: string | null;
+    faculty_id: string | null;
+    cycle: number | null;
+    day_of_week: string;
+    start_time: string;
+    end_time: string;
+    teacher_key: string;
+    teacher_name: string | null;
+    faculty_name: string | null;
+    campus_id: string | null;
+    campus_name: string | null;
+    program_id: string | null;
+    program_name: string | null;
+    course_id: string;
+    course_label: string;
+    section_id: string;
+    section_label: string;
+    section_projected_vacancies: number | null;
+    subsection_label: string;
+};
+
 type AssignmentPreviewMode = 'BASE' | 'OCCURRENCE';
 
 type AssignmentPreviewStatus =
@@ -680,29 +704,20 @@ export class VideoconferenceService {
         const blockedScheduleIds = new Set(
             activeMappings.flatMap((item) => [item.parent_schedule_id, item.child_schedule_id]),
         );
+        const blocks = this.buildInheritanceCandidateBlocks(rows, blockedScheduleIds);
 
-        const groups = new Map<string, ScheduleContextRow[]>();
-        for (const row of rows) {
-            if (blockedScheduleIds.has(row.schedule_id)) {
-                continue;
-            }
-
-            const teacher = resolveTeacher(row);
-            const teacherKey = String(teacher.id ?? teacher.name ?? '').trim().toUpperCase();
-            if (!teacherKey || teacherKey === 'POR ASIGNAR') {
-                continue;
-            }
-
+        const groups = new Map<string, InheritanceCandidateBlock[]>();
+        for (const block of blocks) {
             const key = [
-                row.semester_id ?? '',
-                row.faculty_id ?? '',
-                row.day_of_week,
-                compactTime(row.start_time),
-                compactTime(row.end_time),
-                teacherKey,
+                block.semester_id ?? '',
+                block.faculty_id ?? '',
+                block.day_of_week,
+                compactTime(block.start_time),
+                compactTime(block.end_time),
+                block.teacher_key,
             ].join('|');
             const current = groups.get(key) ?? [];
-            current.push(row);
+            current.push(block);
             groups.set(key, current);
         }
 
@@ -716,56 +731,61 @@ export class VideoconferenceService {
                 const comparisons = [
                     (left.campus_name ?? '').localeCompare(right.campus_name ?? ''),
                     (left.program_name ?? '').localeCompare(right.program_name ?? ''),
-                    buildCourseLabel(left.course_code, left.course_name).localeCompare(
-                        buildCourseLabel(right.course_code, right.course_name),
-                    ),
-                    (left.section_code ?? '').localeCompare(right.section_code ?? ''),
-                    (left.subsection_code ?? '').localeCompare(right.subsection_code ?? ''),
+                    left.course_label.localeCompare(right.course_label),
+                    left.section_label.localeCompare(right.section_label),
                 ];
                 return comparisons.find((value) => value !== 0) || 0;
             });
 
             for (let leftIndex = 0; leftIndex < ordered.length - 1; leftIndex += 1) {
                 for (let rightIndex = leftIndex + 1; rightIndex < ordered.length; rightIndex += 1) {
-                    const parent = ordered[leftIndex];
-                    const child = ordered[rightIndex];
-                    if (parent.section_id === child.section_id) {
+                    const left = ordered[leftIndex];
+                    const right = ordered[rightIndex];
+                    if (left.section_id === right.section_id) {
                         continue;
                     }
 
+                    const leftVacancies = left.section_projected_vacancies ?? 0;
+                    const rightVacancies = right.section_projected_vacancies ?? 0;
+                    const parent = leftVacancies >= rightVacancies ? left : right;
+                    const child = parent.owner_schedule_id === left.owner_schedule_id ? right : left;
+
                     items.push({
-                        id: `${parent.schedule_id}::${child.schedule_id}`,
-                        teacher_name: resolveTeacher(parent).name,
+                        id: `${parent.owner_schedule_id}::${child.owner_schedule_id}`,
+                        teacher_name: parent.teacher_name,
+                        cycle: parent.cycle,
                         day_of_week: parent.day_of_week,
                         day_label: displayDay(parent.day_of_week),
                         start_time: compactTime(parent.start_time),
                         end_time: compactTime(parent.end_time),
                         faculty_name: parent.faculty_name,
                         parent: {
-                            schedule_id: parent.schedule_id,
+                            schedule_id: parent.owner_schedule_id,
                             campus_id: parent.campus_id,
                             campus_name: parent.campus_name,
                             program_id: parent.program_id,
                             program_name: parent.program_name,
                             course_id: parent.course_id,
-                            course_label: buildCourseLabel(parent.course_code, parent.course_name),
+                            course_label: parent.course_label,
                             section_id: parent.section_id,
-                            section_label: buildSectionLabel(parent),
-                            subsection_label: buildGroupLabel(parent),
-                            schedule_label: buildScheduleLabel(parent),
+                            section_label: parent.section_label,
+                            section_projected_vacancies: parent.section_projected_vacancies,
+                            subsection_label: parent.subsection_label,
+                            schedule_label: `${displayDay(parent.day_of_week)} ${compactTime(parent.start_time)}-${compactTime(parent.end_time)}`,
                         },
                         child: {
-                            schedule_id: child.schedule_id,
+                            schedule_id: child.owner_schedule_id,
                             campus_id: child.campus_id,
                             campus_name: child.campus_name,
                             program_id: child.program_id,
                             program_name: child.program_name,
                             course_id: child.course_id,
-                            course_label: buildCourseLabel(child.course_code, child.course_name),
+                            course_label: child.course_label,
                             section_id: child.section_id,
-                            section_label: buildSectionLabel(child),
-                            subsection_label: buildGroupLabel(child),
-                            schedule_label: buildScheduleLabel(child),
+                            section_label: child.section_label,
+                            section_projected_vacancies: child.section_projected_vacancies,
+                            subsection_label: child.subsection_label,
+                            schedule_label: `${displayDay(child.day_of_week)} ${compactTime(child.start_time)}-${compactTime(child.end_time)}`,
                         },
                     });
                 }
@@ -776,6 +796,87 @@ export class VideoconferenceService {
             success: true,
             count: items.length,
             items,
+        };
+    }
+
+    private buildInheritanceCandidateBlocks(rows: ScheduleContextRow[], blockedScheduleIds: Set<string>) {
+        const groups = new Map<string, ScheduleContextRow[]>();
+        for (const row of rows) {
+            if (blockedScheduleIds.has(row.schedule_id)) {
+                continue;
+            }
+            const teacher = resolveTeacher(row);
+            const teacherKey = String(teacher.id ?? teacher.name ?? '').trim().toUpperCase();
+            if (!teacherKey || teacherKey === 'POR ASIGNAR') {
+                continue;
+            }
+            const key = [
+                row.semester_id ?? '',
+                row.faculty_id ?? '',
+                row.course_id,
+                row.section_id,
+                row.day_of_week,
+                row.campus_id ?? '',
+                row.program_id ?? '',
+                teacherKey,
+            ].join('|');
+            const current = groups.get(key) ?? [];
+            current.push(row);
+            groups.set(key, current);
+        }
+
+        const blocks: InheritanceCandidateBlock[] = [];
+        for (const groupRows of groups.values()) {
+            const ordered = [...groupRows].sort((left, right) =>
+                compactTime(left.start_time).localeCompare(compactTime(right.start_time)),
+            );
+            let currentBlockRows: ScheduleContextRow[] = [ordered[0]];
+            for (let index = 1; index < ordered.length; index += 1) {
+                const previous = currentBlockRows[currentBlockRows.length - 1];
+                const row = ordered[index];
+                if (compactTime(previous.end_time) === compactTime(row.start_time)) {
+                    currentBlockRows.push(row);
+                    continue;
+                }
+                blocks.push(this.buildCandidateBlock(currentBlockRows));
+                currentBlockRows = [row];
+            }
+            blocks.push(this.buildCandidateBlock(currentBlockRows));
+        }
+
+        return blocks;
+    }
+
+    private buildCandidateBlock(rows: ScheduleContextRow[]): InheritanceCandidateBlock {
+        const ordered = [...rows].sort((left, right) =>
+            compactTime(left.start_time).localeCompare(compactTime(right.start_time)),
+        );
+        const owner = ordered[0];
+        const teacher = resolveTeacher(owner);
+        const teacherKey = String(teacher.id ?? teacher.name ?? '').trim().toUpperCase();
+        const subsectionLabels = ordered.map((row) => buildGroupLabel(row)).filter(Boolean);
+        return {
+            owner_schedule_id: owner.schedule_id,
+            schedule_ids: ordered.map((row) => row.schedule_id),
+            semester_id: owner.semester_id,
+            faculty_id: owner.faculty_id,
+            cycle: owner.cycle,
+            day_of_week: owner.day_of_week,
+            start_time: ordered[0].start_time,
+            end_time: ordered[ordered.length - 1].end_time,
+            teacher_key: teacherKey,
+            teacher_name: teacher.name,
+            faculty_name: owner.faculty_name,
+            campus_id: owner.campus_id,
+            campus_name: owner.campus_name,
+            program_id: owner.program_id,
+            program_name: owner.program_name,
+            course_id: owner.course_id,
+            course_label: buildCourseLabel(owner.course_code, owner.course_name),
+            section_id: owner.section_id,
+            section_label: buildSectionLabel(owner),
+            section_projected_vacancies: owner.section_projected_vacancies,
+            subsection_label: subsectionLabels.join(' + ') || buildGroupLabel(owner),
         };
     }
 

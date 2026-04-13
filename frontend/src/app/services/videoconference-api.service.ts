@@ -295,6 +295,7 @@ export interface VideoconferenceInheritanceItem {
 export interface VideoconferenceInheritanceCandidateItem {
     id: string;
     teacher_name: string | null;
+    cycle: number | null;
     day_of_week: string;
     day_label: string;
     start_time: string;
@@ -310,6 +311,7 @@ export interface VideoconferenceInheritanceCandidateItem {
         course_label: string;
         section_id: string;
         section_label: string;
+        section_projected_vacancies: number | null;
         subsection_label: string;
         schedule_label: string;
     };
@@ -323,6 +325,7 @@ export interface VideoconferenceInheritanceCandidateItem {
         course_label: string;
         section_id: string;
         section_label: string;
+        section_projected_vacancies: number | null;
         subsection_label: string;
         schedule_label: string;
     };

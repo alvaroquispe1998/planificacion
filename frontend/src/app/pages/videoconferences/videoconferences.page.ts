@@ -269,6 +269,71 @@ export class VideoconferencesPageComponent implements OnInit {
     this.loadPreview();
   }
 
+  async exportCurrentRows() {
+    if (!this.previewData.length) {
+      await this.dialog.alert({
+        title: 'Sin datos',
+        message: 'No hay filas cargadas para exportar.',
+      });
+      return;
+    }
+
+    const header = [
+      'Curso',
+      'Curso / Nombre',
+      'Seccion',
+      'Grupo',
+      'Dia',
+      'Fecha',
+      'Hora inicio',
+      'Hora fin',
+      'Duracion (min)',
+      'Docente',
+      'DNI docente',
+      'Sede',
+      'Facultad',
+      'Programa',
+      'Ciclo',
+      'Modo fila',
+      'Estado herencia',
+      'Contexto AV',
+    ];
+
+    const rows = this.previewData.map((item) => [
+      item.course_code ?? '',
+      item.course_name ?? '',
+      item.section_code ?? '',
+      item.subsection_code ?? '',
+      item.day_label ?? '',
+      item.effective_conference_date || '',
+      item.start_time ?? '',
+      item.end_time ?? '',
+      `${item.duration_minutes ?? ''}`,
+      item.teacher_name ?? '',
+      item.teacher_dni ?? '',
+      item.campus_name ?? '',
+      item.faculty_name ?? '',
+      item.program_name ?? '',
+      `${item.cycle ?? ''}`,
+      item.effective_conference_date ? 'Ocurrencia' : 'Horario base',
+      item.inheritance?.is_inherited ? 'Hijo' : 'Padre',
+      item.vc_context_message ?? '',
+    ]);
+
+    const csv = [header, ...rows].map((line) => line.map((value) => this.escapeCsv(value)).join(',')).join('\r\n');
+    const content = `\uFEFF${csv}`;
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = this.buildExportTimestamp();
+    link.href = url;
+    link.download = `videoconferencias-${timestamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   toggleAll() {
     const nextValue = !this.allSelected;
     this.previewData.forEach((item) => {
@@ -1149,6 +1214,24 @@ export class VideoconferencesPageComponent implements OnInit {
     ]
       .filter(Boolean)
       .join(' | ');
+  }
+
+  private escapeCsv(value: unknown) {
+    const normalized = String(value ?? '');
+    if (/[",\r\n]/.test(normalized)) {
+      return `"${normalized.replace(/"/g, '""')}"`;
+    }
+    return normalized;
+  }
+
+  private buildExportTimestamp() {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = `${now.getMonth() + 1}`.padStart(2, '0');
+    const dd = `${now.getDate()}`.padStart(2, '0');
+    const hh = `${now.getHours()}`.padStart(2, '0');
+    const mi = `${now.getMinutes()}`.padStart(2, '0');
+    return `${yyyy}${mm}${dd}-${hh}${mi}`;
   }
 
   private replaceGenerationResultItem(nextItem: VideoconferenceGenerationResultItem) {

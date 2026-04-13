@@ -172,6 +172,9 @@
         <button class="btn btn-secondary" type="button" (click)="applyOperationalRange()" [disabled]="loading || !previewData.length">
           Ver ocurrencias
         </button>
+        <button class="btn btn-secondary" type="button" (click)="exportCurrentRows()" [disabled]="loading || !previewData.length">
+          Exportar CSV
+        </button>
         <button class="btn btn-secondary" type="button" (click)="previewAssignments()" [disabled]="loading || !selectedCount">
           Previsualizar asignacion Zoom
         </button>

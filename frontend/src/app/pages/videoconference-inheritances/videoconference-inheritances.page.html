@@ -77,11 +77,11 @@
         <div class="candidate-summary">
           <div>
             <span class="summary-label">Padre sugerido</span>
-            <strong class="candidate-line">{{ formatCandidateLine(item.parent, item) }}</strong>
+            <strong class="candidate-line">{{ formatCandidateLine(item.parent, item, item.parent.section_projected_vacancies) }}</strong>
           </div>
           <div>
             <span class="summary-label">Hijo sugerido</span>
-            <strong class="candidate-line">{{ formatCandidateLine(item.child, item) }}</strong>
+            <strong class="candidate-line">{{ formatCandidateLine(item.child, item, item.child.section_projected_vacancies) }}</strong>
           </div>
         </div>
 
