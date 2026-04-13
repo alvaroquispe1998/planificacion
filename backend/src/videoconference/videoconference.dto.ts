@@ -199,14 +199,24 @@ export class VideoconferenceInheritanceCatalogDto {
     @IsString()
     semesterId!: string;
 
+    @IsOptional()
     @IsString()
-    campusId!: string;
+    campusId?: string;
 
     @IsString()
     facultyId!: string;
 
+    @IsOptional()
     @IsString()
-    programId!: string;
+    programId?: string;
+}
+
+export class PreviewVideoconferenceInheritanceCandidatesDto {
+    @IsString()
+    semesterId!: string;
+
+    @IsString()
+    facultyId!: string;
 }
 
 export class CreateVideoconferenceInheritanceDto {

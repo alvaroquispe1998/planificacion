@@ -68,6 +68,7 @@ const DAY_TO_JS_NUMBER: Record<string, number> = {
     SABADO: 6,
     DOMINGO: 0,
 };
+const LEGACY_AUTO_INHERITANCE_NOTE = 'Agrupamiento automatico sucesivo por docente (Back-end).';
 
 type ScheduleContextRow = {
     offer_id: string;
@@ -282,7 +283,7 @@ type StoredOccurrenceOverride = {
 };
 
 type ScheduleInheritanceMapping = {
-    id: string;
+    id: string | null;
     parent_schedule_id: string;
     child_schedule_id: string;
     notes: string | null;
@@ -302,6 +303,13 @@ type ScheduleInheritanceInfo = {
 type InheritanceIndex = {
     byChild: Map<string, ScheduleInheritanceMapping>;
     childrenByParent: Map<string, ScheduleInheritanceMapping[]>;
+};
+
+type ContinuousBlockInfo = {
+    owner_schedule_id: string;
+    family_schedule_ids: string[];
+    grouped_subsection_codes: string[];
+    grouped_subsection_labels: string[];
 };
 
 type AssignmentPreviewMode = 'BASE' | 'OCCURRENCE';
@@ -534,23 +542,23 @@ export class VideoconferenceService {
 
     async getInheritanceCatalog(filters: {
         semesterId: string;
-        campusId: string;
+        campusId?: string;
         facultyId: string;
-        programId: string;
+        programId?: string;
     }) {
         const semesterId = String(filters.semesterId ?? '').trim();
         const campusId = String(filters.campusId ?? '').trim();
         const facultyId = String(filters.facultyId ?? '').trim();
         const programId = String(filters.programId ?? '').trim();
-        if (!semesterId || !campusId || !facultyId || !programId) {
-            throw new BadRequestException('Periodo, sede, facultad y programa son requeridos.');
+        if (!semesterId || !facultyId) {
+            throw new BadRequestException('Periodo y facultad son requeridos.');
         }
 
         const rows = await this.getScheduleRows({
             semesterId,
-            campusIds: [campusId],
+            campusIds: campusId ? [campusId] : undefined,
             facultyIds: [facultyId],
-            programIds: [programId],
+            programIds: programId ? [programId] : undefined,
         });
         const inheritances = await this.listInheritedMappings(rows.map((row) => row.schedule_id));
         const inheritanceMap = new Map(inheritances.map((item) => [item.child_schedule_id, item] as const));
@@ -560,6 +568,8 @@ export class VideoconferenceService {
                 const inheritance = inheritanceMap.get(row.schedule_id) ?? null;
                 return {
                     schedule_id: row.schedule_id,
+                    campus_id: row.campus_id,
+                    program_id: row.program_id,
                     subsection_id: row.subsection_id,
                     section_id: row.section_id,
                     section_code: row.section_code,
@@ -654,6 +664,223 @@ export class VideoconferenceService {
         return (await this.serializeInheritanceMappings([entity]))[0] ?? null;
     }
 
+    async previewInheritanceCandidates(payload: { semesterId: string; facultyId: string }) {
+        const semesterId = String(payload.semesterId ?? '').trim();
+        const facultyId = String(payload.facultyId ?? '').trim();
+        if (!semesterId || !facultyId) {
+            throw new BadRequestException('semesterId y facultyId son requeridos.');
+        }
+
+        const rows = await this.getScheduleRows({
+            semesterId,
+            facultyIds: [facultyId],
+        });
+        const activeMappings = (await this.listInheritedMappings(rows.map((row) => row.schedule_id)))
+            .filter((item) => item.is_active);
+        const blockedScheduleIds = new Set(
+            activeMappings.flatMap((item) => [item.parent_schedule_id, item.child_schedule_id]),
+        );
+
+        const groups = new Map<string, ScheduleContextRow[]>();
+        for (const row of rows) {
+            if (blockedScheduleIds.has(row.schedule_id)) {
+                continue;
+            }
+
+            const teacher = resolveTeacher(row);
+            const teacherKey = String(teacher.id ?? teacher.name ?? '').trim().toUpperCase();
+            if (!teacherKey || teacherKey === 'POR ASIGNAR') {
+                continue;
+            }
+
+            const key = [
+                row.semester_id ?? '',
+                row.faculty_id ?? '',
+                row.day_of_week,
+                compactTime(row.start_time),
+                compactTime(row.end_time),
+                teacherKey,
+            ].join('|');
+            const current = groups.get(key) ?? [];
+            current.push(row);
+            groups.set(key, current);
+        }
+
+        const items = [];
+        for (const groupRows of groups.values()) {
+            if (groupRows.length < 2) {
+                continue;
+            }
+
+            const ordered = [...groupRows].sort((left, right) => {
+                const comparisons = [
+                    (left.campus_name ?? '').localeCompare(right.campus_name ?? ''),
+                    (left.program_name ?? '').localeCompare(right.program_name ?? ''),
+                    buildCourseLabel(left.course_code, left.course_name).localeCompare(
+                        buildCourseLabel(right.course_code, right.course_name),
+                    ),
+                    (left.section_code ?? '').localeCompare(right.section_code ?? ''),
+                    (left.subsection_code ?? '').localeCompare(right.subsection_code ?? ''),
+                ];
+                return comparisons.find((value) => value !== 0) || 0;
+            });
+
+            for (let leftIndex = 0; leftIndex < ordered.length - 1; leftIndex += 1) {
+                for (let rightIndex = leftIndex + 1; rightIndex < ordered.length; rightIndex += 1) {
+                    const parent = ordered[leftIndex];
+                    const child = ordered[rightIndex];
+                    if (parent.section_id === child.section_id) {
+                        continue;
+                    }
+
+                    items.push({
+                        id: `${parent.schedule_id}::${child.schedule_id}`,
+                        teacher_name: resolveTeacher(parent).name,
+                        day_of_week: parent.day_of_week,
+                        day_label: displayDay(parent.day_of_week),
+                        start_time: compactTime(parent.start_time),
+                        end_time: compactTime(parent.end_time),
+                        faculty_name: parent.faculty_name,
+                        parent: {
+                            schedule_id: parent.schedule_id,
+                            campus_id: parent.campus_id,
+                            campus_name: parent.campus_name,
+                            program_id: parent.program_id,
+                            program_name: parent.program_name,
+                            course_id: parent.course_id,
+                            course_label: buildCourseLabel(parent.course_code, parent.course_name),
+                            section_id: parent.section_id,
+                            section_label: buildSectionLabel(parent),
+                            subsection_label: buildGroupLabel(parent),
+                            schedule_label: buildScheduleLabel(parent),
+                        },
+                        child: {
+                            schedule_id: child.schedule_id,
+                            campus_id: child.campus_id,
+                            campus_name: child.campus_name,
+                            program_id: child.program_id,
+                            program_name: child.program_name,
+                            course_id: child.course_id,
+                            course_label: buildCourseLabel(child.course_code, child.course_name),
+                            section_id: child.section_id,
+                            section_label: buildSectionLabel(child),
+                            subsection_label: buildGroupLabel(child),
+                            schedule_label: buildScheduleLabel(child),
+                        },
+                    });
+                }
+            }
+        }
+
+        return {
+            success: true,
+            count: items.length,
+            items,
+        };
+    }
+
+    async cleanupLegacyInheritances(filters?: { semesterId?: string; facultyId?: string }) {
+        const legacyMappings = await this.inheritanceRepo.find({
+            where: { notes: LEGACY_AUTO_INHERITANCE_NOTE },
+        });
+        if (!legacyMappings.length) {
+            return { success: true, count: 0 };
+        }
+
+        const semesterId = String(filters?.semesterId ?? '').trim();
+        const facultyId = String(filters?.facultyId ?? '').trim();
+        let candidateMappings = legacyMappings;
+
+        if (semesterId || facultyId) {
+            const serialized = await this.serializeInheritanceMappings(legacyMappings);
+            const scheduleIds = serialized.map((item) => item.parent_schedule_id);
+            const rows = await this.getScheduleRows(undefined, scheduleIds);
+            const rowMap = new Map(rows.map((row) => [row.schedule_id, row] as const));
+            candidateMappings = legacyMappings.filter((mapping) => {
+                const row = rowMap.get(mapping.parent_schedule_id);
+                if (!row) {
+                    return false;
+                }
+                if (semesterId && row.semester_id !== semesterId) {
+                    return false;
+                }
+                if (facultyId && row.faculty_id !== facultyId) {
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        const ids = candidateMappings.map((item) => item.id).filter(Boolean);
+        if (!ids.length) {
+            return { success: true, count: 0 };
+        }
+
+        await this.inheritanceRepo.delete({ id: In(ids) });
+        return { success: true, count: ids.length };
+    }
+
+    async autoDetectInheritances(semesterId: string) {
+        const normalizedId = String(semesterId ?? '').trim();
+        if (!normalizedId) throw new BadRequestException('semesterId es requerido.');
+
+        // Se carga TODO el semestre sin filtrar por facultad, programa ni sede.
+        const rows = await this.getScheduleRows({ semesterId: normalizedId });
+        
+        // Cargar herencias existentes para poder saltarlas
+        const inheritances = await this.listInheritedMappings(rows.map((row) => row.schedule_id));
+        const childScheduleIds = new Set(inheritances.map((item) => item.child_schedule_id));
+
+        const groups = new Map<string, ScheduleContextRow[]>();
+        for (const item of rows) {
+            const hasTeacher = resolveTeacher(item).name && resolveTeacher(item).name !== 'Por asignar';
+            if (!hasTeacher || childScheduleIds.has(item.schedule_id)) continue; 
+            const teacherName = resolveTeacher(item).name;
+            // Se asume continuidad por curso, seccion, dia y docente
+            const key = `${item.course_id}|${item.section_id}|${item.day_of_week}|${teacherName}`;
+            const curr = groups.get(key) ?? [];
+            curr.push(item);
+            groups.set(key, curr);
+        }
+
+        const toCreate: PlanningSubsectionScheduleVcInheritanceEntity[] = [];
+        const parseMinutes = (time: string) => {
+            const [h, m] = compactTime(time).split(':').map(Number);
+            return (h || 0) * 60 + (m || 0);
+        };
+
+        for (const group of groups.values()) {
+            if (group.length < 2) continue;
+            group.sort((a,b) => compactTime(a.start_time).localeCompare(compactTime(b.start_time)));
+            for(let i=0; i < group.length -1; i++) {
+                const parent = group[i];
+                const child = group[i+1];
+                const pTime = parseMinutes(parent.end_time);
+                const cTime = parseMinutes(child.start_time);
+                const diffMs = cTime - pTime;
+                // Si la diferencia entre termino e inicio es de 0 a 20 minutos
+                if (diffMs >= 0 && diffMs <= 20) {
+                   const entity = new PlanningSubsectionScheduleVcInheritanceEntity();
+                   entity.id = newId();
+                   entity.parent_schedule_id = parent.schedule_id;
+                   entity.child_schedule_id = child.schedule_id;
+                   entity.notes = LEGACY_AUTO_INHERITANCE_NOTE;
+                   entity.is_active = true;
+                   entity.created_at = new Date();
+                   entity.updated_at = new Date();
+                   toCreate.push(entity);
+                   // Como ya se emparejo este hijo, agregar al set para no tomarlo como padre si sobran mas
+                   childScheduleIds.add(child.schedule_id);
+                }
+            }
+        }
+
+        if (toCreate.length > 0) {
+            await this.inheritanceRepo.save(toCreate);
+        }
+        return { success: true, count: toCreate.length };
+    }
+
     async deleteVideoconferenceInheritance(id: string) {
         const normalizedId = String(id ?? '').trim();
         if (!normalizedId) {
@@ -667,7 +894,7 @@ export class VideoconferenceService {
         const requestedRows = await this.getScheduleRows(filters);
         const requestedScheduleIds = requestedRows.map((row) => row.schedule_id);
         const requestedScheduleIdSet = new Set<string>(requestedScheduleIds);
-        const requestedInheritanceIndex = await this.buildInheritanceIndex(requestedScheduleIds);
+        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(requestedRows);
         const expandedScheduleIds = new Set<string>(requestedScheduleIds);
         for (const scheduleId of requestedScheduleIds) {
             const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
@@ -680,7 +907,7 @@ export class VideoconferenceService {
             }
         }
         const allRows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
-        const inheritanceIndex = await this.buildInheritanceIndex(Array.from(expandedScheduleIds));
+        const inheritanceIndex = await this.buildOperationalInheritanceIndex(allRows);
         const hasStartDate = Boolean(filters.startDate?.trim());
         const hasEndDate = Boolean(filters.endDate?.trim());
         if (hasStartDate !== hasEndDate) {
@@ -688,10 +915,40 @@ export class VideoconferenceService {
         }
 
         if (!hasStartDate || !hasEndDate) {
-            // Only return the rows that matched the original filters; expanded rows are used only for inheritance resolution
-            return allRows
-                .filter((row) => requestedScheduleIdSet.has(row.schedule_id))
-                .map((row) => this.serializeBasePreviewRow(row, this.resolveScheduleInheritance(row.schedule_id, inheritanceIndex, allRows)));
+            const continuousBlockMap = this.buildContinuousBlockMap(allRows, inheritanceIndex);
+            const mappedBaseRows = [];
+            for (const row of allRows) {
+                if (!requestedScheduleIdSet.has(row.schedule_id)) continue;
+                const inheritance = this.resolveScheduleInheritance(row.schedule_id, inheritanceIndex, allRows);
+                if (inheritance.is_inherited) continue; // Omitir hijos de la vista
+
+                const familyRows = allRows.filter((r) => 
+                    this.resolveScheduleInheritance(r.schedule_id, inheritanceIndex, allRows).family_owner_schedule_id === row.schedule_id
+                );
+                const maxEndTime = familyRows.reduce(
+                    (max, r) => (compactTime(r.end_time) > compactTime(max) ? r.end_time : max),
+                    row.end_time,
+                );
+                const blockInfo = continuousBlockMap.get(row.schedule_id) ?? null;
+                const clonedRow = {
+                    ...row,
+                    end_time: maxEndTime,
+                    duration_minutes: calculateDurationMinutes(row.start_time, maxEndTime),
+                    subsection_code:
+                        blockInfo?.grouped_subsection_codes.length
+                            ? blockInfo.grouped_subsection_codes.join(' + ')
+                            : row.subsection_code,
+                };
+                mappedBaseRows.push(
+                    this.serializeBasePreviewRow(
+                        clonedRow,
+                        inheritance,
+                        blockInfo?.family_schedule_ids ?? [row.schedule_id],
+                        blockInfo?.grouped_subsection_labels ?? [buildGroupLabel(row)],
+                    ),
+                );
+            }
+            return mappedBaseRows;
         }
 
         const startDate = normalizeIsoDate(filters.startDate ?? '');
@@ -700,9 +957,47 @@ export class VideoconferenceService {
             throw new BadRequestException('startDate no puede ser mayor que endDate.');
         }
         const occurrences = await this.resolveOccurrences(allRows, startDate, endDate, 'America/Lima', inheritanceIndex);
-        // Only return occurrences whose schedule matched the original filters
-        const filteredOccurrences = occurrences.filter((occ) => requestedScheduleIdSet.has(occ.row.schedule_id));
-        return filteredOccurrences.map((occurrence) => this.serializeOccurrencePreviewRow(occurrence));
+        const continuousBlockMap = this.buildContinuousBlockMap(allRows, inheritanceIndex);
+        
+        const mappedOccurrences = [];
+        for (const occ of occurrences) {
+            if (!requestedScheduleIdSet.has(occ.row.schedule_id)) continue;
+            if (occ.inheritance.is_inherited) continue; // Omitir hijos de la vista
+
+            const familyOccurrences = occurrences.filter((r) => 
+                r.inheritance.family_owner_schedule_id === occ.inheritance.family_owner_schedule_id &&
+                r.base_conference_date === occ.base_conference_date
+            );
+            const maxEndTime = familyOccurrences.reduce(
+                (max, r) => (compactTime(r.effective_end_time) > compactTime(max) ? r.effective_end_time : max),
+                occ.effective_end_time,
+            );
+            const blockInfo = continuousBlockMap.get(occ.row.schedule_id) ?? null;
+            const clonedOcc = {
+                ...occ,
+                effective_end_time: maxEndTime,
+                scheduled_end: familyOccurrences.reduce(
+                    (max, r) => (r.scheduled_end > max ? r.scheduled_end : max),
+                    occ.scheduled_end,
+                ),
+                row: {
+                    ...occ.row,
+                    duration_minutes: calculateDurationMinutes(occ.effective_start_time, maxEndTime),
+                    subsection_code:
+                        blockInfo?.grouped_subsection_codes.length
+                            ? blockInfo.grouped_subsection_codes.join(' + ')
+                            : occ.row.subsection_code,
+                },
+            };
+            mappedOccurrences.push(
+                this.serializeOccurrencePreviewRow(
+                    clonedOcc,
+                    blockInfo?.family_schedule_ids ?? [occ.row.schedule_id],
+                    blockInfo?.grouped_subsection_labels ?? [buildGroupLabel(occ.row)],
+                ),
+            );
+        }
+        return mappedOccurrences;
     }
 
     async assignmentPreview(payload: AssignmentPreviewVideoconferenceDto) {
@@ -802,7 +1097,7 @@ export class VideoconferenceService {
 
     private async buildExpandedScheduleContextFromRequestedRows(requestedRows: ScheduleContextRow[]) {
         const requestedScheduleIds = uniqueIds(requestedRows.map((row) => row.schedule_id));
-        const requestedInheritanceIndex = await this.buildInheritanceIndex(requestedScheduleIds);
+        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(requestedRows);
         const expandedScheduleIds = new Set<string>(requestedScheduleIds);
         for (const scheduleId of requestedScheduleIds) {
             const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
@@ -815,7 +1110,7 @@ export class VideoconferenceService {
             }
         }
         const rows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
-        const inheritanceIndex = await this.buildInheritanceIndex(Array.from(expandedScheduleIds));
+        const inheritanceIndex = await this.buildOperationalInheritanceIndex(rows);
         return {
             requestedRows,
             rows,
@@ -899,6 +1194,10 @@ export class VideoconferenceService {
                 continue;
             }
 
+            const maxEndTime = selectedFamilyRows.reduce(
+                (max, r) => (compactTime(r.end_time) > compactTime(max) ? r.end_time : max),
+                ownerRow.end_time,
+            );
             const validationError = this.validateScheduleForGeneration(ownerRow);
             let host: PreviewZoomPoolUser | null = null;
             let ownerStatus: AssignmentPreviewStatus = 'NO_AVAILABLE_ZOOM_USER';
@@ -908,7 +1207,7 @@ export class VideoconferenceService {
                 ownerMessage = validationError;
             } else {
                 const slotStart = buildWeeklyScheduleDateTime(ownerRow.day_of_week, ownerRow.start_time);
-                const slotEnd = buildWeeklyScheduleDateTime(ownerRow.day_of_week, ownerRow.end_time);
+                const slotEnd = buildWeeklyScheduleDateTime(ownerRow.day_of_week, maxEndTime);
                 host = this.findAvailableZoomUserForBaseSlot(
                     slotStart,
                     slotEnd,
@@ -933,7 +1232,7 @@ export class VideoconferenceService {
 
             if (ownerStatus === 'NO_AVAILABLE_ZOOM_USER') {
                 const slotStart = buildWeeklyScheduleDateTime(ownerRow.day_of_week, ownerRow.start_time);
-                const slotEnd = buildWeeklyScheduleDateTime(ownerRow.day_of_week, ownerRow.end_time);
+                const slotEnd = buildWeeklyScheduleDateTime(ownerRow.day_of_week, maxEndTime);
                 assignReservationToVirtualHost(slotStart, slotEnd, maxConcurrent, virtualReservations, () => {
                     virtualHostCounter += 1;
                     return `virtual:${virtualHostCounter}`;
@@ -950,7 +1249,7 @@ export class VideoconferenceService {
                             occurrenceKey: `schedule:${row.schedule_id}`,
                             scheduleId: row.schedule_id,
                             conferenceDate: null,
-                            row,
+                            row: { ...row, end_time: maxEndTime },
                             previewStatus: ownerStatus,
                             message: ownerMessage,
                             host,
@@ -961,60 +1260,8 @@ export class VideoconferenceService {
                     );
                     continue;
                 }
-
-                if (host) {
-                    items.push(
-                        this.buildAssignmentPreviewItem({
-                            id: `schedule:${row.schedule_id}`,
-                            mode: 'BASE',
-                            occurrenceKey: `schedule:${row.schedule_id}`,
-                            scheduleId: row.schedule_id,
-                            conferenceDate: null,
-                            row,
-                            previewStatus: 'INHERITED',
-                            message: 'Hereda el host sugerido del horario padre para el calculo semanal.',
-                            host,
-                            consumesCapacity: false,
-                            inheritance: {
-                                is_inherited: inheritance?.is_inherited ?? true,
-                                mapping_id: inheritance?.mapping?.id ?? null,
-                                parent_schedule_id: inheritance?.parent_schedule_id ?? ownerId,
-                                parent_occurrence_key: `schedule:${ownerId}`,
-                                parent_label: inheritance?.parent_label ?? null,
-                                family_owner_schedule_id: inheritance?.family_owner_schedule_id ?? ownerId,
-                            },
-                            ownerOccurrenceKey: `schedule:${ownerId}`,
-                        }),
-                    );
-                    continue;
-                }
-
-                items.push(
-                    this.buildAssignmentPreviewItem({
-                        id: `schedule:${row.schedule_id}`,
-                        mode: 'BASE',
-                        occurrenceKey: `schedule:${row.schedule_id}`,
-                        scheduleId: row.schedule_id,
-                        conferenceDate: null,
-                        row,
-                        previewStatus: ownerStatus,
-                        message:
-                            ownerStatus === 'VALIDATION_ERROR'
-                                ? 'No se puede heredar porque el horario padre tiene validaciones pendientes.'
-                                : 'No se puede heredar porque el horario padre no encontro host disponible.',
-                        host: null,
-                        consumesCapacity: false,
-                        inheritance: {
-                            is_inherited: inheritance?.is_inherited ?? true,
-                            mapping_id: inheritance?.mapping?.id ?? null,
-                            parent_schedule_id: inheritance?.parent_schedule_id ?? ownerId,
-                            parent_occurrence_key: `schedule:${ownerId}`,
-                            parent_label: inheritance?.parent_label ?? null,
-                            family_owner_schedule_id: inheritance?.family_owner_schedule_id ?? ownerId,
-                        },
-                        ownerOccurrenceKey: `schedule:${ownerId}`,
-                    }),
-                );
+                // Se omiten los hijos de la vista (según el rediseño) ya que el padre absorbe el bloque completo.
+                continue;
             }
         }
 
@@ -1071,6 +1318,18 @@ export class VideoconferenceService {
                 continue;
             }
 
+            const maxEndTime = familyItems.reduce(
+                (max, occ) => (compactTime(occ.effective_end_time) > compactTime(max) ? occ.effective_end_time : max),
+                ownerOccurrence.effective_end_time,
+            );
+            const maxScheduledEnd = familyItems.reduce(
+                (max, occ) => (occ.scheduled_end > max ? occ.scheduled_end : max),
+                ownerOccurrence.scheduled_end,
+            );
+
+            ownerOccurrence.effective_end_time = maxEndTime;
+            ownerOccurrence.scheduled_end = maxScheduledEnd;
+
             const ownerResult = await this.previewOwnerOccurrenceAssignment(
                 ownerOccurrence,
                 input.zoomUsers,
@@ -1099,58 +1358,8 @@ export class VideoconferenceService {
                     items.push(ownerResult);
                     continue;
                 }
-
-                if (ownerResult.zoom_user_id || ownerResult.zoom_user_email) {
-                    items.push(
-                        this.buildAssignmentPreviewItem({
-                            id: occurrence.occurrence_key,
-                            mode: 'OCCURRENCE',
-                            occurrenceKey: occurrence.occurrence_key,
-                            scheduleId: occurrence.row.schedule_id,
-                            conferenceDate: occurrence.effective_conference_date,
-                            row: occurrence.row,
-                            dayOfWeek: dayCodeForDate(occurrence.effective_conference_date),
-                            startTime: occurrence.effective_start_time,
-                            endTime: occurrence.effective_end_time,
-                            previewStatus: 'INHERITED',
-                            message: 'Hereda el host del horario padre para esta ocurrencia.',
-                            host: this.resolvePreviewZoomUser(
-                                ownerResult.zoom_user_id,
-                                ownerResult.zoom_user_email,
-                                ownerResult.zoom_user_name,
-                                input.zoomUsers,
-                                input.licenseSnapshot,
-                            ),
-                            consumesCapacity: false,
-                            inheritance: occurrence.inheritance,
-                            ownerOccurrenceKey: ownerOccurrence.occurrence_key,
-                        }),
-                    );
-                    continue;
-                }
-
-                items.push(
-                    this.buildAssignmentPreviewItem({
-                        id: occurrence.occurrence_key,
-                        mode: 'OCCURRENCE',
-                        occurrenceKey: occurrence.occurrence_key,
-                        scheduleId: occurrence.row.schedule_id,
-                        conferenceDate: occurrence.effective_conference_date,
-                        row: occurrence.row,
-                        dayOfWeek: dayCodeForDate(occurrence.effective_conference_date),
-                        startTime: occurrence.effective_start_time,
-                        endTime: occurrence.effective_end_time,
-                        previewStatus: ownerResult.preview_status,
-                        message:
-                            ownerResult.preview_status === 'VALIDATION_ERROR'
-                                ? 'No se puede heredar porque el horario padre tiene validaciones pendientes.'
-                                : 'No se puede heredar porque el horario padre no tiene host disponible.',
-                        host: null,
-                        consumesCapacity: false,
-                        inheritance: occurrence.inheritance,
-                        ownerOccurrenceKey: ownerOccurrence.occurrence_key,
-                    }),
-                );
+                // Se omiten los hijos de la vista (según el rediseño) ya que el padre absorbe el bloque completo.
+                continue;
             }
         }
 
@@ -1643,7 +1852,7 @@ export class VideoconferenceService {
         const missingScheduleIds = requestedScheduleIds.filter(
             (scheduleId) => !requestedRows.some((row) => row.schedule_id === scheduleId),
         );
-        const requestedInheritanceIndex = await this.buildInheritanceIndex(requestedScheduleIds);
+        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(requestedRows);
         const expandedScheduleIds = new Set<string>(requestedScheduleIds);
         for (const scheduleId of requestedScheduleIds) {
             const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
@@ -1658,7 +1867,7 @@ export class VideoconferenceService {
 
         const rows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
         const rowMap = new Map(rows.map((row) => [row.schedule_id, row] as const));
-        const inheritanceIndex = await this.buildInheritanceIndex(Array.from(expandedScheduleIds));
+        const inheritanceIndex = await this.buildOperationalInheritanceIndex(Array.from(rowMap.values()));
 
         const aulaVirtualContext = await this.getAulaVirtualRequestContext();
         const zoomConfig = await this.zoomAccountService.requireConfiguredConfig();
@@ -2697,19 +2906,25 @@ export class VideoconferenceService {
         return repo.find({ where: { id: In(normalizedIds) } as never });
     }
 
-    private serializeBasePreviewRow(row: ScheduleContextRow, inheritance: ScheduleInheritanceInfo) {
+    private serializeBasePreviewRow(
+        row: ScheduleContextRow,
+        inheritance: ScheduleInheritanceInfo,
+        groupedScheduleIds: string[] = [row.schedule_id],
+        groupedSubsectionLabels: string[] = [buildGroupLabel(row)],
+    ) {
         const teacher = resolveTeacher(row);
         const modality = resolveModality(row);
         return {
             id: row.schedule_id,
             occurrence_key: `schedule:${row.schedule_id}`,
             schedule_id: row.schedule_id,
+            grouped_schedule_ids: groupedScheduleIds,
             section_id: row.section_id,
             section_code: row.section_code,
             section_label: buildSectionLabel(row),
             subsection_id: row.subsection_id,
             subsection_code: row.subsection_code,
-            subsection_label: buildGroupLabel(row),
+            subsection_label: groupedSubsectionLabels.filter(Boolean).join(' + ') || buildGroupLabel(row),
             campus_id: row.campus_id,
             campus_name: row.campus_name,
             faculty_id: row.faculty_id,
@@ -2762,7 +2977,11 @@ export class VideoconferenceService {
         };
     }
 
-    private serializeOccurrencePreviewRow(occurrence: ExpandedOccurrence) {
+    private serializeOccurrencePreviewRow(
+        occurrence: ExpandedOccurrence,
+        groupedScheduleIds: string[] = [occurrence.row.schedule_id],
+        groupedSubsectionLabels: string[] = [buildGroupLabel(occurrence.row)],
+    ) {
         const row = occurrence.row;
         const teacher = resolveTeacher(row);
         const modality = resolveModality(row);
@@ -2770,12 +2989,13 @@ export class VideoconferenceService {
             id: occurrence.occurrence_key,
             occurrence_key: occurrence.occurrence_key,
             schedule_id: row.schedule_id,
+            grouped_schedule_ids: groupedScheduleIds,
             section_id: row.section_id,
             section_code: row.section_code,
             section_label: buildSectionLabel(row),
             subsection_id: row.subsection_id,
             subsection_code: row.subsection_code,
-            subsection_label: buildGroupLabel(row),
+            subsection_label: groupedSubsectionLabels.filter(Boolean).join(' + ') || buildGroupLabel(row),
             campus_id: row.campus_id,
             campus_name: row.campus_name,
             faculty_id: row.faculty_id,
@@ -2951,7 +3171,7 @@ export class VideoconferenceService {
         inheritanceIndex?: InheritanceIndex,
     ) {
         const effectiveInheritanceIndex =
-            inheritanceIndex ?? (await this.buildInheritanceIndex(rows.map((row) => row.schedule_id)));
+            inheritanceIndex ?? (await this.buildOperationalInheritanceIndex(rows));
         const ownerRows = rows.filter(
             (row) => !this.resolveScheduleInheritance(row.schedule_id, effectiveInheritanceIndex, rows).is_inherited,
         );
@@ -3100,6 +3320,121 @@ export class VideoconferenceService {
         return { byChild, childrenByParent };
     }
 
+    private async buildOperationalInheritanceIndex(rows: ScheduleContextRow[]): Promise<InheritanceIndex> {
+        const baseIndex = await this.buildInheritanceIndex(rows.map((row) => row.schedule_id));
+        const byChild = new Map(baseIndex.byChild);
+        const childrenByParent = new Map<string, ScheduleInheritanceMapping[]>();
+        for (const [parentId, mappings] of baseIndex.childrenByParent.entries()) {
+            childrenByParent.set(parentId, [...mappings]);
+        }
+
+        const continuousMappings = this.buildContinuousBlockMappings(rows, baseIndex);
+        for (const mapping of continuousMappings) {
+            byChild.set(mapping.child_schedule_id, mapping);
+            const siblings = childrenByParent.get(mapping.parent_schedule_id) ?? [];
+            siblings.push(mapping);
+            childrenByParent.set(mapping.parent_schedule_id, siblings);
+        }
+
+        return { byChild, childrenByParent };
+    }
+
+    private buildContinuousBlockMappings(rows: ScheduleContextRow[], inheritanceIndex: InheritanceIndex) {
+        const explicitChildIds = new Set(inheritanceIndex.byChild.keys());
+        const groups = new Map<string, ScheduleContextRow[]>();
+
+        for (const row of rows) {
+            if (explicitChildIds.has(row.schedule_id)) {
+                continue;
+            }
+
+            const teacher = resolveTeacher(row);
+            const teacherKey = String(teacher.id ?? teacher.name ?? '').trim().toUpperCase();
+            if (!teacherKey || teacherKey === 'POR ASIGNAR') {
+                continue;
+            }
+
+            const key = [
+                row.section_id,
+                row.course_id,
+                row.day_of_week,
+                row.campus_id ?? '',
+                row.faculty_id ?? '',
+                row.program_id ?? '',
+                teacherKey,
+            ].join('|');
+            const current = groups.get(key) ?? [];
+            current.push(row);
+            groups.set(key, current);
+        }
+
+        const mappings: ScheduleInheritanceMapping[] = [];
+        for (const groupRows of groups.values()) {
+            if (groupRows.length < 2) {
+                continue;
+            }
+
+            const ordered = [...groupRows].sort((left, right) =>
+                compactTime(left.start_time).localeCompare(compactTime(right.start_time)),
+            );
+            let owner = ordered[0];
+            let previous = ordered[0];
+
+            for (let index = 1; index < ordered.length; index += 1) {
+                const current = ordered[index];
+                if (compactTime(previous.end_time) === compactTime(current.start_time)) {
+                    mappings.push({
+                        id: null,
+                        parent_schedule_id: owner.schedule_id,
+                        child_schedule_id: current.schedule_id,
+                        notes: 'Bloque continuo consolidado automaticamente.',
+                        is_active: true,
+                        created_at: new Date(0),
+                        updated_at: new Date(0),
+                    });
+                    previous = current;
+                    continue;
+                }
+
+                owner = current;
+                previous = current;
+            }
+        }
+
+        return mappings;
+    }
+
+    private buildContinuousBlockMap(rows: ScheduleContextRow[], inheritanceIndex: InheritanceIndex) {
+        const infoByOwner = new Map<string, ContinuousBlockInfo>();
+
+        for (const row of rows) {
+            const inheritance = this.resolveScheduleInheritance(row.schedule_id, inheritanceIndex, rows);
+            const ownerId = inheritance.family_owner_schedule_id;
+            const current = infoByOwner.get(ownerId) ?? {
+                owner_schedule_id: ownerId,
+                family_schedule_ids: [],
+                grouped_subsection_codes: [],
+                grouped_subsection_labels: [],
+            };
+
+            current.family_schedule_ids.push(row.schedule_id);
+
+            const code = String(row.subsection_code ?? '').trim();
+            if (code && !current.grouped_subsection_codes.includes(code)) {
+                current.grouped_subsection_codes.push(code);
+            }
+
+            const label = buildGroupLabel(row);
+            if (label && !current.grouped_subsection_labels.includes(label)) {
+                current.grouped_subsection_labels.push(label);
+            }
+
+            infoByOwner.set(ownerId, current);
+        }
+
+        return infoByOwner;
+    }
+
     private resolveScheduleInheritance(
         scheduleId: string,
         inheritanceIndex: InheritanceIndex,
@@ -3144,12 +3479,10 @@ export class VideoconferenceService {
 
         if (
             parent.semester_id !== child.semester_id ||
-            parent.campus_id !== child.campus_id ||
-            parent.faculty_id !== child.faculty_id ||
-            parent.program_id !== child.program_id
+            parent.faculty_id !== child.faculty_id
         ) {
             throw new BadRequestException(
-                'Padre e hijo deben pertenecer al mismo periodo, sede, facultad y programa academico.',
+                'Padre e hijo deben pertenecer al mismo periodo y facultad.',
             );
         }
         if (
