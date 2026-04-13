@@ -309,6 +309,7 @@ export interface VideoconferenceInheritanceCandidateItem {
         program_name: string | null;
         course_id: string;
         course_label: string;
+        vc_section_name: string | null;
         section_id: string;
         section_label: string;
         section_projected_vacancies: number | null;
@@ -323,6 +324,7 @@ export interface VideoconferenceInheritanceCandidateItem {
         program_name: string | null;
         course_id: string;
         course_label: string;
+        vc_section_name: string | null;
         section_id: string;
         section_label: string;
         section_projected_vacancies: number | null;
