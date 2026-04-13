@@ -111,6 +111,24 @@ export class GenerateVideoconferenceDto {
     @Type(() => Boolean)
     @IsBoolean()
     allowPoolWarnings?: boolean;
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => GeneratePreferredHostDto)
+    preferredHosts?: GeneratePreferredHostDto[];
+}
+
+export class GeneratePreferredHostDto {
+    @IsString()
+    scheduleId!: string;
+
+    @IsOptional()
+    @IsDateString()
+    conferenceDate?: string;
+
+    @IsString()
+    zoomUserId!: string;
 }
 
 export class UpsertVideoconferenceOverrideDto {

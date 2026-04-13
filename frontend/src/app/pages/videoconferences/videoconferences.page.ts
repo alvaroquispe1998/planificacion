@@ -100,6 +100,10 @@ export class VideoconferencesPageComponent implements OnInit {
     notes: '',
   };
 
+  payloadPreviewOpen = false;
+  payloadPreviewTitle = '';
+  payloadPreviewJson = '';
+
   private filterOptionsRequestId = 0;
 
   constructor(
@@ -708,18 +712,42 @@ export class VideoconferencesPageComponent implements OnInit {
       return;
     }
 
+    const preferredHosts = this.buildPreferredHostsForGeneration(selected);
     const payload = this.usesOccurrenceRows
       ? {
           occurrenceKeys: selected.map((item) => item.occurrence_key),
           startDate: this.startDate,
           endDate: this.endDate,
+          preferredHosts,
         }
       : {
-          scheduleIds: selected.map((item) => item.schedule_id),
+          scheduleIds: Array.from(
+            new Set(
+              selected.flatMap((item) =>
+                item.grouped_schedule_ids?.length
+                  ? item.grouped_schedule_ids
+                  : [item.schedule_id],
+              ),
+            ),
+          ),
           startDate: this.startDate,
           endDate: this.endDate,
+          preferredHosts,
         };
     this.executeGeneration(payload, false);
+  }
+
+  openPayloadPreview(item: PreviewSelectionItem) {
+    const payload = this.buildCreationPayloadPreview(item);
+    this.payloadPreviewTitle = item.course_label || 'Payload de reunion';
+    this.payloadPreviewJson = JSON.stringify(payload, null, 2);
+    this.payloadPreviewOpen = true;
+  }
+
+  closePayloadPreview() {
+    this.payloadPreviewOpen = false;
+    this.payloadPreviewTitle = '';
+    this.payloadPreviewJson = '';
   }
 
   async previewAssignments() {
@@ -1067,6 +1095,7 @@ export class VideoconferencesPageComponent implements OnInit {
     this.previewData = [];
     this.assignmentPreview = null;
     this.assignmentUsersModalOpen = false;
+    this.closePayloadPreview();
     this.generationResult = null;
     this.hasSearched = false;
     this.retryingRecordId = '';
@@ -1270,6 +1299,11 @@ export class VideoconferencesPageComponent implements OnInit {
       startDate: string;
       endDate: string;
       allowPoolWarnings?: boolean;
+      preferredHosts?: Array<{
+        scheduleId: string;
+        conferenceDate?: string;
+        zoomUserId: string;
+      }>;
     },
     hasConfirmedWarnings: boolean,
   ) {
@@ -1319,6 +1353,29 @@ export class VideoconferencesPageComponent implements OnInit {
     }
   }
 
+  private buildPreferredHostsForGeneration(selectedRows: PreviewSelectionItem[]) {
+    if (!this.assignmentPreview) {
+      return [] as Array<{ scheduleId: string; conferenceDate?: string; zoomUserId: string }>;
+    }
+    const selectedKeys = new Set(selectedRows.map((item) => item.occurrence_key));
+    const preferred = this.assignmentPreviewRows
+      .filter((item) => selectedKeys.has(item.preview?.occurrence_key || ''))
+      .filter((item) => item.zoom_user_id)
+      .filter((item) => item.preview_status === 'ASSIGNED_LICENSED' || item.preview_status === 'ASSIGNED_RISK')
+      .map((item) => ({
+        scheduleId: item.schedule_id,
+        conferenceDate: item.mode === 'OCCURRENCE' ? (item.conference_date || undefined) : undefined,
+        zoomUserId: item.zoom_user_id as string,
+      }));
+
+    const dedup = new Map<string, { scheduleId: string; conferenceDate?: string; zoomUserId: string }>();
+    for (const item of preferred) {
+      const key = `${item.scheduleId}|${item.conferenceDate || ''}`;
+      dedup.set(key, item);
+    }
+    return Array.from(dedup.values());
+  }
+
   private buildSelectionLabel(label: string, selectedIds: string[], options: MultiSelectOption[]) {
     if (!selectedIds.length) {
       return null;
@@ -1350,5 +1407,108 @@ export class VideoconferencesPageComponent implements OnInit {
 
   trackPreviewItem(_index: number, item: PreviewSelectionItem) {
     return item.occurrence_key;
+  }
+
+  private buildCreationPayloadPreview(item: PreviewSelectionItem) {
+    const assignment = this.getAssignmentPreview(item);
+    const dayCode = this.resolveDayCode(item);
+    const startTime = (item.effective_start_time || item.start_time || '').trim();
+    const endTime = (item.effective_end_time || item.end_time || '').trim();
+    const conferenceDate = (item.effective_conference_date || item.base_conference_date || '').trim();
+    const topic = this.buildTopicPreview(item, dayCode, startTime, endTime);
+    const minutes = this.calculateDurationMinutes(startTime, endTime);
+    const formattedDate = conferenceDate ? this.formatDateForAulaVirtual(conferenceDate) : '';
+
+    return {
+      courseCode: item.course_code?.trim() || '',
+      courseName: item.course_name?.trim() || '',
+      section: item.vc_section_name?.trim() || '',
+      dni: item.teacher_dni?.trim() || '',
+      teacher: item.teacher_name?.trim() || '',
+      day: dayCode,
+      startTime,
+      endTime,
+      termId: item.vc_period_id?.trim() || '',
+      facultyId: item.vc_faculty_id?.trim() || '',
+      careerId: item.vc_academic_program_id?.trim() || '',
+      courseId: item.vc_course_id?.trim() || '',
+      name: topic,
+      sectionId: item.vc_section_id?.trim() || '',
+      start: formattedDate ? `${formattedDate} ${startTime}` : '',
+      end: formattedDate ? `${formattedDate} ${endTime}` : '',
+      minutes: String(minutes),
+      'daysOfWeek[0]': String(this.dayToAulaVirtual(dayCode)),
+      credentialId: assignment?.zoom_user_id || '',
+      _meta: {
+        scheduleId: item.schedule_id,
+        occurrenceKey: item.occurrence_key,
+        inherited: item.inheritance?.is_inherited ?? false,
+        hostPreview: assignment?.zoom_user_email || assignment?.zoom_user_name || assignment?.zoom_user_id || null,
+        hostFixedFromPreview: Boolean(assignment?.zoom_user_id),
+      },
+    };
+  }
+
+  private buildTopicPreview(
+    item: PreviewSelectionItem,
+    dayCode: string,
+    startTime: string,
+    endTime: string,
+  ) {
+    const parts = [
+      item.course_name?.trim() || '',
+      item.vc_section_name?.trim() || '',
+      item.teacher_dni?.trim() || '',
+      item.teacher_name?.trim() || '',
+      `${dayCode} ${startTime}-${endTime}`,
+    ];
+    const courseCode = item.course_code?.trim() || '';
+    if (courseCode) {
+      parts.unshift(courseCode);
+    }
+    if (item.occurrence_type === 'RESCHEDULED') {
+      parts.unshift('REP');
+    }
+    return parts.join('|');
+  }
+
+  private resolveDayCode(item: PreviewSelectionItem) {
+    const day = (item.day_of_week || '').trim().toUpperCase();
+    return day || 'LUNES';
+  }
+
+  private dayToAulaVirtual(dayCode: string) {
+    switch (dayCode) {
+      case 'LUNES':
+        return 2;
+      case 'MARTES':
+        return 3;
+      case 'MIERCOLES':
+        return 4;
+      case 'JUEVES':
+        return 5;
+      case 'VIERNES':
+        return 6;
+      case 'SABADO':
+        return 7;
+      case 'DOMINGO':
+        return 1;
+      default:
+        return 2;
+    }
+  }
+
+  private formatDateForAulaVirtual(value: string) {
+    const [year, month, day] = (value || '').split('-');
+    if (!year || !month || !day) {
+      return value || '';
+    }
+    return `${day}/${month}/${year}`;
+  }
+
+  private calculateDurationMinutes(startTime: string, endTime: string) {
+    const [startHour, startMinute] = (startTime || '00:00').split(':').map((part) => Number(part));
+    const [endHour, endMinute] = (endTime || '00:00').split(':').map((part) => Number(part));
+    return endHour * 60 + endMinute - (startHour * 60 + startMinute);
   }
 }

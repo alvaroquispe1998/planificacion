@@ -1129,6 +1129,26 @@ h1 {
   margin-top: 1rem;
 }
 
+.payload-preview-modal {
+  width: min(920px, 100%);
+}
+
+.payload-preview-content {
+  margin: 0.9rem 0 0;
+  padding: 0.85rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid #d7e5f4;
+  background: #f7fbff;
+  color: #284666;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 62vh;
+  overflow: auto;
+}
+
 @media (max-width: 1360px) {
   .filters-layout {
     grid-template-columns: 1fr;

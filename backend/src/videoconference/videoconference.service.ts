@@ -397,6 +397,12 @@ type AssignmentPreviewSummary = {
     licenses_by_day: AssignmentPreviewDaySummary[];
 };
 
+type PreferredHostSelection = {
+    schedule_id: string;
+    conference_date: string | null;
+    zoom_user_id: string;
+};
+
 type ExistingConferenceLookup = Map<string, PlanningSubsectionVideoconferenceEntity>;
 
 type SimulatedReservation = {
@@ -1215,7 +1221,8 @@ export class VideoconferenceService {
 
     private async buildExpandedScheduleContextFromRequestedRows(requestedRows: ScheduleContextRow[]) {
         const requestedScheduleIds = uniqueIds(requestedRows.map((row) => row.schedule_id));
-        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(requestedRows);
+        const scopedRows = await this.getRowsForRequestedScope(requestedRows);
+        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(scopedRows);
         const expandedScheduleIds = new Set<string>(requestedScheduleIds);
         for (const scheduleId of requestedScheduleIds) {
             const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
@@ -1227,13 +1234,45 @@ export class VideoconferenceService {
                 expandedScheduleIds.add(item.child_schedule_id);
             }
         }
-        const rows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
+        const rows = scopedRows.filter((row) => expandedScheduleIds.has(row.schedule_id));
         const inheritanceIndex = await this.buildOperationalInheritanceIndex(rows);
         return {
             requestedRows,
             rows,
             inheritanceIndex,
         };
+    }
+
+    private async getRowsForRequestedScope(requestedRows: ScheduleContextRow[]) {
+        if (!requestedRows.length) {
+            return [] as ScheduleContextRow[];
+        }
+
+        const scopes = new Map<string, { semesterId: string | undefined; facultyId: string | undefined }>();
+        for (const row of requestedRows) {
+            const semesterId = row.semester_id ?? undefined;
+            const facultyId = row.faculty_id ?? undefined;
+            const key = `${semesterId ?? ''}|${facultyId ?? ''}`;
+            if (!scopes.has(key)) {
+                scopes.set(key, { semesterId, facultyId });
+            }
+        }
+
+        const rowsById = new Map<string, ScheduleContextRow>();
+        for (const scope of scopes.values()) {
+            const scopeRows = await this.getScheduleRows({
+                semesterId: scope.semesterId,
+                facultyIds: scope.facultyId ? [scope.facultyId] : undefined,
+            });
+            for (const row of scopeRows) {
+                rowsById.set(row.schedule_id, row);
+            }
+        }
+
+        for (const row of requestedRows) {
+            rowsById.set(row.schedule_id, row);
+        }
+        return Array.from(rowsById.values());
     }
 
     private extractAssignmentPreviewFilters(payload: AssignmentPreviewVideoconferenceDto): FilterOptionsDto | undefined {
@@ -1261,6 +1300,36 @@ export class VideoconferenceService {
             filters.days = normalizeIdArray(payload.days);
         }
         return Object.keys(filters).length ? filters : undefined;
+    }
+
+    private normalizePreferredHosts(input?: Array<{ scheduleId?: string; conferenceDate?: string; zoomUserId?: string }>) {
+        const items = Array.isArray(input) ? input : [];
+        return items
+            .map((item) => ({
+                schedule_id: String(item?.scheduleId ?? '').trim(),
+                conference_date: item?.conferenceDate ? normalizeIsoDate(item.conferenceDate) : null,
+                zoom_user_id: String(item?.zoomUserId ?? '').trim(),
+            }))
+            .filter((item) => item.schedule_id && item.zoom_user_id) as PreferredHostSelection[];
+    }
+
+    private findPreferredZoomUserId(
+        ownerOccurrence: ExpandedOccurrence,
+        preferredHosts: PreferredHostSelection[],
+    ) {
+        const byExact = preferredHosts.find(
+            (item) =>
+                item.schedule_id === ownerOccurrence.row.schedule_id &&
+                item.conference_date === ownerOccurrence.effective_conference_date,
+        );
+        if (byExact?.zoom_user_id) {
+            return byExact.zoom_user_id;
+        }
+
+        const bySchedule = preferredHosts.find(
+            (item) => item.schedule_id === ownerOccurrence.row.schedule_id && !item.conference_date,
+        );
+        return bySchedule?.zoom_user_id ?? null;
     }
 
     private async simulateBaseAssignmentPreview(
@@ -1311,8 +1380,12 @@ export class VideoconferenceService {
             if (!selectedFamilyRows.length) {
                 continue;
             }
+            const fullFamilyRows = sortBaseRowsForSimulation(rowsByOwnerId.get(ownerId) ?? []);
+            if (!fullFamilyRows.length) {
+                continue;
+            }
 
-            const maxEndTime = selectedFamilyRows.reduce(
+            const maxEndTime = fullFamilyRows.reduce(
                 (max, r) => (compactTime(r.end_time) > compactTime(max) ? r.end_time : max),
                 ownerRow.end_time,
             );
@@ -1966,26 +2039,15 @@ export class VideoconferenceService {
         const requestedScheduleIds = scheduleIds.length
             ? scheduleIds
             : Array.from(new Set(occurrenceKeys.map((item) => parseOccurrenceKey(item).schedule_id).filter(Boolean)));
-        const requestedRows = await this.getScheduleRows(undefined, requestedScheduleIds);
+        const expanded = await this.buildExpandedScheduleContext(requestedScheduleIds);
+        const requestedRows = expanded.requestedRows;
         const missingScheduleIds = requestedScheduleIds.filter(
             (scheduleId) => !requestedRows.some((row) => row.schedule_id === scheduleId),
         );
-        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(requestedRows);
-        const expandedScheduleIds = new Set<string>(requestedScheduleIds);
-        for (const scheduleId of requestedScheduleIds) {
-            const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
-            if (inherited?.parent_schedule_id) {
-                expandedScheduleIds.add(inherited.parent_schedule_id);
-            }
-            const childMappings = requestedInheritanceIndex.childrenByParent.get(scheduleId) ?? [];
-            for (const item of childMappings) {
-                expandedScheduleIds.add(item.child_schedule_id);
-            }
-        }
-
-        const rows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
+        const rows = expanded.rows;
         const rowMap = new Map(rows.map((row) => [row.schedule_id, row] as const));
         const inheritanceIndex = await this.buildOperationalInheritanceIndex(Array.from(rowMap.values()));
+        const preferredHosts = this.normalizePreferredHosts(payload.preferredHosts);
 
         const aulaVirtualContext = await this.getAulaVirtualRequestContext();
         const zoomConfig = await this.zoomAccountService.requireConfiguredConfig();
@@ -2061,6 +2123,7 @@ export class VideoconferenceService {
                 zoomConfig.maxConcurrent,
                 zoomUsers,
                 remoteMeetingsCache,
+                this.findPreferredZoomUserId(ownerOccurrence, preferredHosts),
             );
             results.push(ownerResult);
 
@@ -2198,6 +2261,7 @@ export class VideoconferenceService {
         maxConcurrent: number,
         zoomUsers: ZoomPoolUser[],
         remoteMeetingsCache: Map<string, ZoomMeetingSummary[] | null>,
+        preferredZoomUserId: string | null,
     ): Promise<GenerateResultItem> {
         const validationError = this.validateScheduleForGeneration(occurrence.row);
         if (validationError) {
@@ -2240,13 +2304,34 @@ export class VideoconferenceService {
             };
         }
 
-        const selectedZoomUser = await this.findAvailableZoomUser(
-            occurrence.scheduled_start,
-            occurrence.scheduled_end,
-            zoomUsers,
-            maxConcurrent,
-            remoteMeetingsCache,
-        );
+        let selectedZoomUser: ZoomPoolUser | null = null;
+        if (preferredZoomUserId) {
+            selectedZoomUser = zoomUsers.find((item) => item.zoom_user_id === preferredZoomUserId) ?? null;
+            if (!selectedZoomUser) {
+                return {
+                    schedule_id: occurrence.row.schedule_id,
+                    occurrence_key: occurrence.occurrence_key,
+                    conference_date: occurrence.effective_conference_date,
+                    status: 'ERROR',
+                    message: `El host sugerido (${preferredZoomUserId}) ya no esta activo en el pool Zoom.`,
+                    record_id: null,
+                    zoom_user_id: null,
+                    zoom_user_email: null,
+                    zoom_meeting_id: null,
+                    link_mode: 'OWNED',
+                    owner_videoconference_id: null,
+                    inheritance: occurrence.inheritance,
+                };
+            }
+        } else {
+            selectedZoomUser = await this.findAvailableZoomUser(
+                occurrence.scheduled_start,
+                occurrence.scheduled_end,
+                zoomUsers,
+                maxConcurrent,
+                remoteMeetingsCache,
+            );
+        }
         if (!selectedZoomUser) {
             return {
                 schedule_id: occurrence.row.schedule_id,
@@ -2333,7 +2418,10 @@ export class VideoconferenceService {
                 selectedZoomUser.email ?? '',
                 topic,
                 occurrence.scheduled_start,
-                occurrence.row.duration_minutes,
+                calculateDurationMinutes(
+                    occurrence.effective_start_time,
+                    occurrence.effective_end_time,
+                ),
             );
             if (matched) {
                 record.zoom_meeting_id = matched.id;
@@ -3339,8 +3427,24 @@ export class VideoconferenceService {
                 if (!parentOccurrence) {
                     continue;
                 }
+                const childBaseOccurrence = buildOccurrence(
+                    row,
+                    conferenceDate,
+                    null,
+                    timezone,
+                    {
+                        is_inherited: true,
+                        mapping_id: inheritance.mapping?.id ?? null,
+                        parent_schedule_id: inheritance.parent_schedule_id,
+                        parent_occurrence_key: parentOccurrence.occurrence_key,
+                        parent_label: parentRow ? `${buildSectionLabel(parentRow)} | ${buildScheduleLabel(parentRow)}` : null,
+                        family_owner_schedule_id: inheritance.family_owner_schedule_id,
+                    },
+                );
+
+                const shouldMirrorParentWindow = parentOccurrence.occurrence_type !== 'BASE';
                 occurrences.push({
-                    ...parentOccurrence,
+                    ...(shouldMirrorParentWindow ? parentOccurrence : childBaseOccurrence),
                     occurrence_key: buildOccurrenceKey(row.schedule_id, conferenceDate),
                     row,
                     inheritance: {

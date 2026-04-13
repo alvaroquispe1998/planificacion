@@ -467,6 +467,11 @@ export class VideoconferenceApiService {
         startDate: string;
         endDate: string;
         allowPoolWarnings?: boolean;
+        preferredHosts?: Array<{
+            scheduleId: string;
+            conferenceDate?: string;
+            zoomUserId: string;
+        }>;
     }) {
         return this.http.post<VideoconferenceGenerationResponse>(`${this.baseUrl}/generate`, payload);
     }
