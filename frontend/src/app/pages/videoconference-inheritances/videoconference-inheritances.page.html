@@ -80,8 +80,10 @@
             <strong class="candidate-line">{{ formatCandidateLine(item.parent, item, item.parent.section_projected_vacancies) }}</strong>
           </div>
           <div>
-            <span class="summary-label">Hijo sugerido</span>
-            <strong class="candidate-line">{{ formatCandidateLine(item.child, item, item.child.section_projected_vacancies) }}</strong>
+            <span class="summary-label">Hijos sugeridos ({{ item.children.length }})</span>
+            <strong class="candidate-line" *ngFor="let child of item.children">
+              {{ formatCandidateLine(child, item, child.section_projected_vacancies) }}
+            </strong>
           </div>
         </div>
 

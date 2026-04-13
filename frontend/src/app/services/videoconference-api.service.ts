@@ -316,7 +316,7 @@ export interface VideoconferenceInheritanceCandidateItem {
         subsection_label: string;
         schedule_label: string;
     };
-    child: {
+    children: Array<{
         schedule_id: string;
         campus_id: string | null;
         campus_name: string | null;
@@ -330,7 +330,7 @@ export interface VideoconferenceInheritanceCandidateItem {
         section_projected_vacancies: number | null;
         subsection_label: string;
         schedule_label: string;
-    };
+    }>;
 }
 
 @Injectable({ providedIn: 'root' })
