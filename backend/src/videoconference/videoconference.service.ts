@@ -53,6 +53,11 @@ const ZOOM_MATCH_ATTEMPTS = 5;
 const ZOOM_MATCH_DELAY_MS = 3000;
 const MEETING_MARGIN_MINUTES = 10;
 const DEFAULT_REMOTE_MEETING_DURATION_MINUTES = 60;
+// For live Zoom meetings the API returns the *scheduled* duration, which may be
+// shorter than how long the meeting actually runs. Use a 12-hour ceiling so that
+// a same-day live meeting (e.g. started at 15:10) is still detected as a conflict
+// even if its scheduled duration ends before the window being evaluated.
+const LIVE_MEETING_FALLBACK_DURATION_MINUTES = 720;
 const AULA_VIRTUAL_SOURCE_CODE = 'AULAVIRTUAL';
 const DAY_TO_AULA_VIRTUAL_NUMBER: Record<string, number> = {
     LUNES: 2,
@@ -1520,7 +1525,29 @@ export class VideoconferenceService implements OnModuleInit {
             }
         }
 
+        // Pre-seed simulatedReservations with already-scheduled DB meetings for all pool users.
+        // Without this, BASE mode has no knowledge of existing conferences and can over-assign a user
+        // who already has maxConcurrent meetings in a given time window.
         const simulatedReservations = new Map<string, SimulatedReservation[]>();
+        const poolUserIds = zoomUsers.map((u) => u.zoom_user_id).filter(Boolean);
+        if (poolUserIds.length) {
+            const existingConferences = await this.planningVideoconferencesRepo.find({
+                where: {
+                    zoom_user_id: In(poolUserIds),
+                    status: In([...ACTIVE_CONFERENCE_STATUSES]),
+                },
+                select: ['zoom_user_id', 'scheduled_start', 'scheduled_end'],
+            });
+            for (const conf of existingConferences) {
+                if (!conf.zoom_user_id) {
+                    continue;
+                }
+                const current = simulatedReservations.get(conf.zoom_user_id) ?? [];
+                current.push({ scheduled_start: conf.scheduled_start, scheduled_end: conf.scheduled_end });
+                simulatedReservations.set(conf.zoom_user_id, current);
+            }
+        }
+
         const virtualReservations = new Map<string, SimulatedReservation[]>();
         const items: AssignmentPreviewItem[] = [];
         let virtualHostCounter = 0;
@@ -4628,10 +4655,16 @@ export class VideoconferenceService implements OnModuleInit {
                 if (!remoteStart) {
                     return false;
                 }
-                const remoteEnd = addMinutes(
-                    remoteStart,
-                    meeting.duration_minutes ?? DEFAULT_REMOTE_MEETING_DURATION_MINUTES,
-                );
+                // For live meetings the scheduled duration may be shorter than the
+                // actual running time. Use a generous fallback so a live meeting that
+                // started before the window is not incorrectly dismissed as finished.
+                const isLive = meeting.source_type === 'live';
+                const effectiveDuration = meeting.duration_minutes
+                    ? (isLive
+                        ? Math.max(meeting.duration_minutes, LIVE_MEETING_FALLBACK_DURATION_MINUTES)
+                        : meeting.duration_minutes)
+                    : (isLive ? LIVE_MEETING_FALLBACK_DURATION_MINUTES : DEFAULT_REMOTE_MEETING_DURATION_MINUTES);
+                const remoteEnd = addMinutes(remoteStart, effectiveDuration);
                 return doesOverlap(windowStart, windowEnd, remoteStart, remoteEnd);
             }).length;
 

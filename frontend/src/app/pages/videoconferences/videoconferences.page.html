@@ -188,7 +188,7 @@
         <button class="btn btn-secondary" type="button" (click)="exportCurrentRows()" [disabled]="loading || !previewData.length">
           Exportar CSV
         </button>
-        <button class="btn btn-secondary" type="button" (click)="previewAssignments()" [disabled]="loading || !selectedCount || !selectedZoomGroupId">
+        <button *ngIf="!isHybridGroup" class="btn btn-secondary" type="button" (click)="previewAssignments()" [disabled]="loading || !selectedCount || !selectedZoomGroupId">
           Previsualizar asignacion Zoom
         </button>
         <button
@@ -283,7 +283,7 @@
       </div>
     </div>
 
-    <section class="assignment-summary-card" *ngIf="assignmentSummary as summary">
+    <section class="assignment-summary-card" *ngIf="!isHybridGroup && (assignmentSummary as summary)">
       <div class="assignment-summary-head">
         <div>
           <span class="eyebrow eyebrow-soft">Preview Zoom</span>
@@ -586,18 +586,30 @@
           </div>
 
           <div class="zoom-host-cell">
-            <strong>{{ assignmentHostLabel(getAssignmentPreview(item)) }}</strong>
-            <span [class]="assignmentStatusClass(getAssignmentPreview(item))">
-              {{ assignmentStatusLabel(getAssignmentPreview(item)) }}
-            </span>
-            <span
-              *ngIf="getAssignmentPreview(item)?.license_label"
-              [class]="assignmentLicenseClass(getAssignmentPreview(item))">
-              {{ getAssignmentPreview(item)?.license_label }}
-            </span>
-            <span *ngIf="getAssignmentPreview(item)?.message" class="meta-inline">
-              {{ getAssignmentPreview(item)?.message }}
-            </span>
+            <ng-container *ngIf="isHybridGroup && hybridZoomUsers.length; else defaultHostCell">
+              <select
+                class="form-control form-control-compact hybrid-host-select"
+                [(ngModel)]="item.manualZoomUserId"
+                (click)="$event.stopPropagation()">
+                <option value="">— Asignar host —</option>
+                <option *ngFor="let user of hybridZoomUsers" [value]="user.id">{{ user.label }}</option>
+              </select>
+              <span *ngIf="item.manualZoomUserId" class="meta-inline meta-inline-accent">Asignado manualmente</span>
+            </ng-container>
+            <ng-template #defaultHostCell>
+              <strong>{{ assignmentHostLabel(getAssignmentPreview(item)) }}</strong>
+              <span [class]="assignmentStatusClass(getAssignmentPreview(item))">
+                {{ assignmentStatusLabel(getAssignmentPreview(item)) }}
+              </span>
+              <span
+                *ngIf="getAssignmentPreview(item)?.license_label"
+                [class]="assignmentLicenseClass(getAssignmentPreview(item))">
+                {{ getAssignmentPreview(item)?.license_label }}
+              </span>
+              <span *ngIf="getAssignmentPreview(item)?.message" class="meta-inline">
+                {{ getAssignmentPreview(item)?.message }}
+              </span>
+            </ng-template>
           </div>
 
           <div class="actions-cell">
