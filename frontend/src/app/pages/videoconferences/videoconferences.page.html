@@ -10,6 +10,7 @@
       <div class="hero-pills">
         <span class="hero-pill">{{ totalSchedules || 0 }} ocurrencias cargadas</span>
         <span class="hero-pill hero-pill-accent">{{ selectedCount }} seleccionadas</span>
+        <span *ngIf="selectedZoomGroupId" class="hero-pill">Grupo Zoom: {{ selectedZoomGroupLabel }}</span>
         <span *ngIf="hasActiveFilters" class="hero-pill">{{ activeFilterLabels.length }} filtros activos</span>
         <span *ngIf="filterOptionsLoading" class="hero-pill">Actualizando filtros</span>
       </div>
@@ -162,6 +163,18 @@
 
       <div class="generation-panel">
         <div class="input-group">
+          <label>Grupo Zoom</label>
+          <select
+            class="form-control form-control-compact"
+            [ngModel]="selectedZoomGroupId"
+            (ngModelChange)="onZoomGroupChange($event)">
+            <option value="">Selecciona grupo</option>
+            <option *ngFor="let group of zoomGroups" [value]="group.id">
+              {{ group.name }} ({{ group.code }})
+            </option>
+          </select>
+        </div>
+        <div class="input-group">
           <label>Fecha inicio</label>
           <input type="date" [(ngModel)]="startDate" class="form-control form-control-compact" />
         </div>
@@ -175,7 +188,7 @@
         <button class="btn btn-secondary" type="button" (click)="exportCurrentRows()" [disabled]="loading || !previewData.length">
           Exportar CSV
         </button>
-        <button class="btn btn-secondary" type="button" (click)="previewAssignments()" [disabled]="loading || !selectedCount">
+        <button class="btn btn-secondary" type="button" (click)="previewAssignments()" [disabled]="loading || !selectedCount || !selectedZoomGroupId">
           Previsualizar asignacion Zoom
         </button>
         <button
@@ -186,11 +199,14 @@
           [disabled]="generating">
           Reintentar {{ retryableFailedRows.length }} fallidas
         </button>
-        <button class="btn btn-success" (click)="generate()" [disabled]="loading || !selectedCount">
+        <button class="btn btn-success" (click)="generate()" [disabled]="loading || !selectedCount || !selectedZoomGroupId">
           {{ generating ? 'Generando...' : 'Generar videoconferencias' }}
         </button>
       </div>
     </div>
+    <p class="filters-note" *ngIf="!selectedZoomGroupId">
+      Debes seleccionar un grupo Zoom para previsualizar asignacion y generar reuniones.
+    </p>
 
     <div class="existing-check-banner" *ngIf="checkingExisting">
       Verificando clases ya creadas en el rango&hellip;

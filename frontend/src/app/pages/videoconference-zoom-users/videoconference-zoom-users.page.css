@@ -94,6 +94,24 @@ h1 {
   margin-bottom: 1rem;
 }
 
+.group-panel {
+  margin-bottom: 1rem;
+}
+
+.group-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 420px) 1fr;
+  gap: 0.9rem;
+  align-items: end;
+}
+
+.group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: flex-start;
+}
+
 .stat-card,
 .panel {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(249, 252, 255, 0.98));
@@ -393,6 +411,10 @@ h1 {
   }
 
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .group-toolbar {
     grid-template-columns: 1fr;
   }
 

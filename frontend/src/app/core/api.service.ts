@@ -497,6 +497,42 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/settings/zoom/pool`);
   }
 
+  listZoomGroups() {
+    return this.http.get<any[]>(`${this.baseUrl}/settings/zoom/groups`);
+  }
+
+  createZoomGroup(payload: { name: string; code?: string; is_active?: boolean }) {
+    return this.http.post<any>(`${this.baseUrl}/settings/zoom/groups`, payload);
+  }
+
+  updateZoomGroup(id: string, payload: { name?: string; code?: string; is_active?: boolean }) {
+    return this.http.patch<any>(`${this.baseUrl}/settings/zoom/groups/${encodeURIComponent(id)}`, payload);
+  }
+
+  deleteZoomGroup(id: string) {
+    return this.http.delete<any>(`${this.baseUrl}/settings/zoom/groups/${encodeURIComponent(id)}`);
+  }
+
+  getZoomGroupPool(id: string) {
+    return this.http.get<any>(`${this.baseUrl}/settings/zoom/groups/${encodeURIComponent(id)}/pool`);
+  }
+
+  updateZoomGroupPool(
+    id: string,
+    payload: {
+      items: Array<{
+        zoom_user_id: string;
+        sort_order: number;
+        is_active: boolean;
+      }>;
+    },
+  ) {
+    return this.http.put<any>(
+      `${this.baseUrl}/settings/zoom/groups/${encodeURIComponent(id)}/pool`,
+      payload,
+    );
+  }
+
   getZoomConfig() {
     return this.http.get<any>(`${this.baseUrl}/settings/zoom/config`);
   }

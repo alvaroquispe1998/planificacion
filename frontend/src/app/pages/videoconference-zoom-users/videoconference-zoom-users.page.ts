@@ -28,10 +28,26 @@ type ZoomPoolUser = {
 };
 
 type ZoomPoolResponse = {
+  group?: {
+    id: string;
+    name: string;
+    code: string;
+    is_active: boolean;
+  };
   items: ZoomPoolItem[];
   users: ZoomPoolUser[];
   license_sync_ok: boolean;
   license_sync_error: string | null;
+};
+
+type ZoomGroup = {
+  id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+  is_default?: boolean;
+  members_count?: number;
+  active_members_count?: number;
 };
 
 type LicenseFilter = 'ALL' | 'NOT_FOUND' | 'BASIC' | 'LICENSED';
@@ -46,6 +62,7 @@ type LicenseFilter = 'ALL' | 'NOT_FOUND' | 'BASIC' | 'LICENSED';
 export class VideoconferenceZoomUsersPageComponent implements OnInit {
   loading = true;
   saving = false;
+  managingGroups = false;
   message = '';
   error = '';
   search = '';
@@ -55,6 +72,8 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
 
   poolItems: ZoomPoolItem[] = [];
   users: ZoomPoolUser[] = [];
+  groups: ZoomGroup[] = [];
+  selectedGroupId = '';
 
   private initialFingerprint = '[]';
 
@@ -70,6 +89,14 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
 
   get hasUsers() {
     return this.users.length > 0;
+  }
+
+  get selectedGroup() {
+    return this.groups.find((item) => item.id === this.selectedGroupId) ?? null;
+  }
+
+  get hasSelectedGroup() {
+    return Boolean(this.selectedGroupId);
   }
 
   get selectedCount() {
@@ -114,15 +141,169 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
     this.loading = true;
     this.error = '';
     this.message = '';
-    this.api.getZoomPool().subscribe({
+    this.api.listZoomGroups().subscribe({
+      next: (groups) => {
+        this.groups = Array.isArray(groups) ? groups : [];
+        if (!this.groups.length) {
+          this.poolItems = [];
+          this.users = [];
+          this.selectedGroupId = '';
+          this.loading = false;
+          this.cdr.detectChanges();
+          return;
+        }
+        if (!this.selectedGroupId || !this.groups.some((item) => item.id === this.selectedGroupId)) {
+          this.selectedGroupId = this.groups[0]?.id || '';
+        }
+        this.loadSelectedGroupPool();
+      },
+      error: (err) => {
+        this.error = err?.error?.message ?? 'No se pudo cargar los grupos Zoom.';
+        this.loading = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  onGroupChange(value: string) {
+    this.selectedGroupId = value;
+    this.loadSelectedGroupPool();
+  }
+
+  private loadSelectedGroupPool() {
+    if (!this.selectedGroupId) {
+      this.poolItems = [];
+      this.users = [];
+      this.loading = false;
+      this.cdr.detectChanges();
+      return;
+    }
+    this.loading = true;
+    this.api.getZoomGroupPool(this.selectedGroupId).subscribe({
       next: (response) => {
         this.applyResponse(response);
         this.loading = false;
         this.cdr.detectChanges();
       },
       error: (err) => {
-        this.error = err?.error?.message ?? 'No se pudo cargar la configuracion de usuarios Zoom.';
+        this.error = err?.error?.message ?? 'No se pudo cargar el pool del grupo Zoom.';
         this.loading = false;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  async createGroup() {
+    const name = window.prompt('Nombre del grupo Zoom');
+    if (!name?.trim()) {
+      return;
+    }
+    const code = window.prompt('Codigo del grupo (opcional)');
+    this.managingGroups = true;
+    this.error = '';
+    this.message = '';
+    this.api.createZoomGroup({
+      name: name.trim(),
+      code: code?.trim() || undefined,
+      is_active: true,
+    }).subscribe({
+      next: (created) => {
+        this.managingGroups = false;
+        this.selectedGroupId = created?.id || this.selectedGroupId;
+        this.message = 'Grupo Zoom creado.';
+        this.loadPage();
+      },
+      error: (err) => {
+        this.managingGroups = false;
+        this.error = err?.error?.message ?? 'No se pudo crear el grupo Zoom.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  async editSelectedGroup() {
+    if (!this.selectedGroup) {
+      return;
+    }
+    const current = this.selectedGroup;
+    const nextName = window.prompt('Nombre del grupo Zoom', current.name || '');
+    if (!nextName?.trim()) {
+      return;
+    }
+    const nextCode = window.prompt('Codigo del grupo', current.code || '') ?? current.code;
+    this.managingGroups = true;
+    this.error = '';
+    this.message = '';
+    this.api.updateZoomGroup(current.id, {
+      name: nextName.trim(),
+      code: nextCode.trim(),
+    }).subscribe({
+      next: () => {
+        this.managingGroups = false;
+        this.message = 'Grupo Zoom actualizado.';
+        this.loadPage();
+      },
+      error: (err) => {
+        this.managingGroups = false;
+        this.error = err?.error?.message ?? 'No se pudo actualizar el grupo Zoom.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  async toggleSelectedGroupActive() {
+    if (!this.selectedGroup) {
+      return;
+    }
+    const target = this.selectedGroup;
+    this.managingGroups = true;
+    this.error = '';
+    this.message = '';
+    this.api.updateZoomGroup(target.id, {
+      is_active: !target.is_active,
+    }).subscribe({
+      next: () => {
+        this.managingGroups = false;
+        this.message = 'Estado del grupo Zoom actualizado.';
+        this.loadPage();
+      },
+      error: (err) => {
+        this.managingGroups = false;
+        this.error = err?.error?.message ?? 'No se pudo actualizar el grupo Zoom.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  async deleteSelectedGroup() {
+    if (!this.selectedGroup) {
+      return;
+    }
+    const target = this.selectedGroup;
+    const confirmed = await this.dialog.confirm({
+      title: 'Eliminar grupo Zoom',
+      message: `Se eliminara el grupo ${target.name}. Esta accion no elimina usuarios Zoom, solo su agrupacion. Deseas continuar?`,
+      confirmLabel: 'Eliminar',
+      cancelLabel: 'Cancelar',
+      tone: 'danger',
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.managingGroups = true;
+    this.error = '';
+    this.message = '';
+    this.api.deleteZoomGroup(target.id).subscribe({
+      next: () => {
+        this.managingGroups = false;
+        this.message = 'Grupo Zoom eliminado.';
+        this.selectedGroupId = '';
+        this.loadPage();
+      },
+      error: (err) => {
+        this.managingGroups = false;
+        this.error = err?.error?.message ?? 'No se pudo eliminar el grupo Zoom.';
         this.cdr.detectChanges();
       },
     });
@@ -196,6 +377,11 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
     if (this.saving) {
       return;
     }
+    if (!this.selectedGroupId) {
+      this.error = 'Selecciona un grupo Zoom para guardar su pool.';
+      this.cdr.detectChanges();
+      return;
+    }
 
     const activeUnlicensed = this.poolItems.filter(
       (item) => item.is_active && item.is_licensed !== true,
@@ -216,7 +402,7 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
     this.error = '';
     this.message = '';
     this.api
-      .updateZoomPool({
+      .updateZoomGroupPool(this.selectedGroupId, {
         items: this.poolItems.map((item, index) => ({
           zoom_user_id: item.zoom_user_id,
           sort_order: index + 1,
@@ -239,7 +425,7 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
   }
 
   reload() {
-    if (this.loading || this.saving) {
+    if (this.loading || this.saving || this.managingGroups) {
       return;
     }
     this.loadPage();
@@ -269,6 +455,9 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
   }
 
   private applyResponse(response: ZoomPoolResponse) {
+    if (response?.group?.id) {
+      this.selectedGroupId = response.group.id;
+    }
     const users = Array.isArray(response?.users) ? response.users : [];
     const userMap = new Map(users.map((user) => [user.id, user]));
     const items = Array.isArray(response?.items) ? response.items : [];

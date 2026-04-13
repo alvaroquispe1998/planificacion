@@ -322,6 +322,14 @@ export class AuditPageComponent implements OnInit {
     return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString();
   }
 
+  formatDateTime(value: string | Date | null | undefined) {
+    if (!value) {
+      return '--';
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  }
+
   private apiFilters() {
     return {
       ...this.filters,

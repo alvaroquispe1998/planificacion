@@ -224,6 +224,54 @@ export class VideoconferenceZoomPoolUserEntity {
     updated_at!: Date;
 }
 
+@Entity({ name: 'zoom_groups' })
+@Index(['code'], { unique: true })
+export class ZoomGroupEntity {
+    @PrimaryColumn({ type: 'varchar', length: 36 })
+    id!: string;
+
+    @Column({ type: 'varchar', length: 80 })
+    name!: string;
+
+    @Column({ type: 'varchar', length: 40 })
+    code!: string;
+
+    @Column({ type: 'boolean', default: true })
+    is_active!: boolean;
+
+    @Column({ type: 'datetime' })
+    created_at!: Date;
+
+    @Column({ type: 'datetime' })
+    updated_at!: Date;
+}
+
+@Entity({ name: 'zoom_group_users' })
+@Index(['group_id', 'zoom_user_id'], { unique: true })
+@Index(['group_id', 'sort_order'])
+export class ZoomGroupUserEntity {
+    @PrimaryColumn({ type: 'varchar', length: 36 })
+    id!: string;
+
+    @Column({ type: 'varchar', length: 36 })
+    group_id!: string;
+
+    @Column({ type: 'varchar', length: 36 })
+    zoom_user_id!: string;
+
+    @Column({ type: 'int', unsigned: true, default: 1 })
+    sort_order!: number;
+
+    @Column({ type: 'boolean', default: true })
+    is_active!: boolean;
+
+    @Column({ type: 'datetime' })
+    created_at!: Date;
+
+    @Column({ type: 'datetime' })
+    updated_at!: Date;
+}
+
 @Entity({ name: 'planning_subsection_schedule_vc_inheritances' })
 @Index(['parent_schedule_id'])
 @Index(['child_schedule_id'], { unique: true })

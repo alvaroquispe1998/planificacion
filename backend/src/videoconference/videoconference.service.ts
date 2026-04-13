@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, SelectQueryBuilder } from 'typeorm';
 import { newId } from '../common';
@@ -21,9 +21,11 @@ import {
 import { SettingsSyncService } from '../settings/settings-sync.service';
 import {
     AssignmentPreviewVideoconferenceDto,
+    CreateZoomGroupDto,
     FilterOptionsDto,
     GenerateVideoconferenceDto,
     PreviewVideoconferenceDto,
+    UpdateZoomGroupDto,
     UpsertVideoconferenceOverrideDto,
     UpdateZoomPoolDto,
 } from './videoconference.dto';
@@ -37,6 +39,8 @@ import {
     VcFacultyEntity,
     VcSectionEntity,
     VideoconferenceZoomPoolUserEntity,
+    ZoomGroupEntity,
+    ZoomGroupUserEntity,
 } from './videoconference.entity';
 import {
     ZoomAccountService,
@@ -69,6 +73,8 @@ const DAY_TO_JS_NUMBER: Record<string, number> = {
     DOMINGO: 0,
 };
 const LEGACY_AUTO_INHERITANCE_NOTE = 'Agrupamiento automatico sucesivo por docente (Back-end).';
+const DEFAULT_ZOOM_GROUP_REGULAR_CODE = 'REGULAR';
+const DEFAULT_ZOOM_GROUP_HIBRIDO_CODE = 'HIBRIDO';
 
 type ScheduleContextRow = {
     offer_id: string;
@@ -411,7 +417,9 @@ type SimulatedReservation = {
 };
 
 @Injectable()
-export class VideoconferenceService {
+export class VideoconferenceService implements OnModuleInit {
+    private zoomGroupBootstrapPromise: Promise<void> | null = null;
+
     constructor(
         @InjectRepository(PlanningOfferEntity)
         private readonly offersRepo: Repository<PlanningOfferEntity>,
@@ -427,6 +435,10 @@ export class VideoconferenceService {
         private readonly schedulesRepo: Repository<PlanningSubsectionScheduleEntity>,
         @InjectRepository(VideoconferenceZoomPoolUserEntity)
         private readonly zoomPoolRepo: Repository<VideoconferenceZoomPoolUserEntity>,
+        @InjectRepository(ZoomGroupEntity)
+        private readonly zoomGroupsRepo: Repository<ZoomGroupEntity>,
+        @InjectRepository(ZoomGroupUserEntity)
+        private readonly zoomGroupUsersRepo: Repository<ZoomGroupUserEntity>,
         @InjectRepository(PlanningSubsectionScheduleVcInheritanceEntity)
         private readonly inheritanceRepo: Repository<PlanningSubsectionScheduleVcInheritanceEntity>,
         @InjectRepository(PlanningSubsectionVideoconferenceEntity)
@@ -440,6 +452,10 @@ export class VideoconferenceService {
         private readonly settingsSyncService: SettingsSyncService,
         private readonly zoomAccountService: ZoomAccountService,
     ) { }
+
+    async onModuleInit() {
+        await this.ensureZoomGroupsBootstrap();
+    }
 
     async getCampuses() {
         const rows = await this.offersRepo
@@ -1248,6 +1264,10 @@ export class VideoconferenceService {
     }
 
     async assignmentPreview(payload: AssignmentPreviewVideoconferenceDto) {
+        const zoomGroupId = String(payload.zoomGroupId ?? '').trim();
+        if (!zoomGroupId) {
+            throw new BadRequestException('zoomGroupId es requerido.');
+        }
         const scheduleIds = normalizeIdArray(payload.scheduleIds);
         const occurrenceKeys = normalizeIdArray(payload.occurrenceKeys);
         const useCurrentFilters = Boolean(payload.selectAllVisible);
@@ -1262,9 +1282,11 @@ export class VideoconferenceService {
         }
 
         const zoomConfig = await this.zoomAccountService.requireConfiguredConfig();
-        const poolValidation = await this.getActiveZoomPoolUsers(true);
+        const poolValidation = await this.getActiveZoomPoolUsers(zoomGroupId, true);
         if (!poolValidation.users.length) {
-            throw new BadRequestException('No hay usuarios Zoom activos en el pool de videoconferencias.');
+            throw new BadRequestException(
+                `No hay usuarios Zoom activos en el grupo ${poolValidation.group.name}.`,
+            );
         }
         const licenseSnapshot = await this.loadZoomPoolLicenseSnapshot();
         const zoomUsers: PreviewZoomPoolUser[] = poolValidation.users.map((item) => ({
@@ -1294,6 +1316,11 @@ export class VideoconferenceService {
             return {
                 mode: 'BASE' as const,
                 ...result,
+                zoom_group: {
+                    id: poolValidation.group.id,
+                    name: poolValidation.group.name,
+                    code: poolValidation.group.code,
+                },
                 pool_warnings: poolValidation.warnings,
                 license_sync_ok: licenseSnapshot.ok,
                 license_sync_error: licenseSnapshot.error,
@@ -1326,6 +1353,11 @@ export class VideoconferenceService {
         return {
             mode: 'OCCURRENCE' as const,
             ...result,
+            zoom_group: {
+                id: poolValidation.group.id,
+                name: poolValidation.group.name,
+                code: poolValidation.group.code,
+            },
             pool_warnings: poolValidation.warnings,
             license_sync_ok: licenseSnapshot.ok,
             license_sync_error: licenseSnapshot.error,
@@ -1515,7 +1547,8 @@ export class VideoconferenceService {
             const validationError = this.validateScheduleForGeneration(ownerRow);
             let host: PreviewZoomPoolUser | null = null;
             let ownerStatus: AssignmentPreviewStatus = 'NO_AVAILABLE_ZOOM_USER';
-            let ownerMessage = 'No se encontro un usuario Zoom disponible para este horario base.';
+            let ownerMessage =
+                'No se asigno host Zoom para este horario base. Aunque haya varios usuarios en el grupo, todos pueden estar ocupados en ese bloque horario o superar la concurrencia maxima.';
             if (validationError) {
                 ownerStatus = 'VALIDATION_ERROR';
                 ownerMessage = validationError;
@@ -1533,8 +1566,8 @@ export class VideoconferenceService {
                     ownerStatus = host.is_licensed === true ? 'ASSIGNED_LICENSED' : 'ASSIGNED_RISK';
                     ownerMessage =
                         host.is_licensed === true
-                            ? 'Host Zoom sugerido para este horario base.'
-                            : 'Host Zoom sugerido, pero depende de licencia basica o no verificada.';
+                            ? 'Host Zoom sugerido. Puede repetirse en varias filas si los horarios no se traslapan; el sistema prioriza reutilizar hosts antes de consumir otro.'
+                            : 'Host Zoom sugerido, pero depende de licencia basica o no verificada. Puede repetirse en varias filas si los horarios no se traslapan.';
                     const currentReservations = simulatedReservations.get(host.zoom_user_id) ?? [];
                     currentReservations.push({
                         scheduled_start: slotStart,
@@ -1767,7 +1800,7 @@ export class VideoconferenceService {
                 startTime: occurrence.effective_start_time,
                 endTime: occurrence.effective_end_time,
                 previewStatus: 'NO_AVAILABLE_ZOOM_USER',
-                message: 'No se encontro un usuario Zoom disponible para la fecha y horario indicados.',
+                message: 'No se asigno host Zoom para esta ocurrencia. Aunque haya varios usuarios en el grupo, todos pueden estar ocupados en ese bloque horario o superar la concurrencia maxima.',
                 host: null,
                 consumesCapacity: false,
                 inheritance: occurrence.inheritance,
@@ -1794,8 +1827,8 @@ export class VideoconferenceService {
             previewStatus: selectedZoomUser.is_licensed === true ? 'ASSIGNED_LICENSED' : 'ASSIGNED_RISK',
             message:
                 selectedZoomUser.is_licensed === true
-                    ? 'Host Zoom sugerido para esta ocurrencia.'
-                    : 'Host Zoom sugerido, pero depende de licencia basica o no verificada.',
+                    ? 'Host Zoom sugerido para esta ocurrencia. Puede repetirse en otras filas si no hay traslape de horarios.'
+                    : 'Host Zoom sugerido, pero depende de licencia basica o no verificada. Puede repetirse en otras filas si no hay traslape de horarios.',
             host: selectedZoomUser,
             consumesCapacity: true,
             inheritance: occurrence.inheritance,
@@ -1951,17 +1984,164 @@ export class VideoconferenceService {
         );
     }
 
-    async getZoomPool() {
-        const poolRows = await this.zoomPoolRepo
-            .createQueryBuilder('pool')
-            .leftJoin(ZoomUserEntity, 'zoom_user', 'zoom_user.id = pool.zoom_user_id')
-            .select('pool.id', 'pool_id')
-            .addSelect('pool.zoom_user_id', 'zoom_user_id')
-            .addSelect('pool.sort_order', 'sort_order')
-            .addSelect('pool.is_active', 'is_active')
+    async listZoomGroups() {
+        await this.ensureZoomGroupsBootstrap();
+        const groups = await this.zoomGroupsRepo.find({
+            order: { name: 'ASC', code: 'ASC' },
+        });
+        if (!groups.length) {
+            return [];
+        }
+        const rows = await this.zoomGroupUsersRepo
+            .createQueryBuilder('group_user')
+            .select('group_user.group_id', 'group_id')
+            .addSelect('COUNT(*)', 'members_count')
+            .addSelect('SUM(CASE WHEN group_user.is_active = 1 THEN 1 ELSE 0 END)', 'active_members_count')
+            .where('group_user.group_id IN (:...groupIds)', { groupIds: groups.map((item) => item.id) })
+            .groupBy('group_user.group_id')
+            .getRawMany<Record<string, unknown>>();
+        const countByGroup = new Map(
+            rows.map((row) => [
+                readNullableString(row.group_id) ?? '',
+                {
+                    members_count: readNumber(row.members_count),
+                    active_members_count: readNumber(row.active_members_count),
+                },
+            ]),
+        );
+        return groups.map((group) => ({
+            id: group.id,
+            name: group.name,
+            code: group.code,
+            is_active: group.is_active,
+            is_default:
+                group.code === DEFAULT_ZOOM_GROUP_REGULAR_CODE ||
+                group.code === DEFAULT_ZOOM_GROUP_HIBRIDO_CODE,
+            members_count: countByGroup.get(group.id)?.members_count ?? 0,
+            active_members_count: countByGroup.get(group.id)?.active_members_count ?? 0,
+            created_at: group.created_at,
+            updated_at: group.updated_at,
+        }));
+    }
+
+    async listActiveZoomGroups() {
+        const groups = await this.listZoomGroups();
+        return groups
+            .filter((item) => item.is_active)
+            .map((item) => ({
+                id: item.id,
+                name: item.name,
+                code: item.code,
+                is_active: item.is_active,
+                members_count: item.members_count ?? 0,
+                active_members_count: item.active_members_count ?? 0,
+            }));
+    }
+
+    async createZoomGroup(dto: CreateZoomGroupDto) {
+        await this.ensureZoomGroupsBootstrap();
+        const name = String(dto.name ?? '').trim();
+        if (!name) {
+            throw new BadRequestException('name es requerido.');
+        }
+        const code = this.normalizeZoomGroupCode(dto.code, name);
+        const existing = await this.zoomGroupsRepo.findOne({ where: { code } });
+        if (existing) {
+            throw new BadRequestException(`Ya existe un grupo Zoom con codigo ${code}.`);
+        }
+        const now = new Date();
+        const entity = this.zoomGroupsRepo.create({
+            id: newId(),
+            name,
+            code,
+            is_active: dto.is_active ?? true,
+            created_at: now,
+            updated_at: now,
+        });
+        await this.zoomGroupsRepo.save(entity);
+        return {
+            id: entity.id,
+            name: entity.name,
+            code: entity.code,
+            is_active: entity.is_active,
+            created_at: entity.created_at,
+            updated_at: entity.updated_at,
+        };
+    }
+
+    async updateZoomGroup(id: string, dto: UpdateZoomGroupDto) {
+        await this.ensureZoomGroupsBootstrap();
+        const group = await this.zoomGroupsRepo.findOne({ where: { id: String(id ?? '').trim() } });
+        if (!group) {
+            throw new BadRequestException('No se encontro el grupo Zoom.');
+        }
+        const nextName = dto.name !== undefined ? String(dto.name ?? '').trim() : group.name;
+        if (!nextName) {
+            throw new BadRequestException('name no puede quedar vacio.');
+        }
+        const nextCode =
+            dto.code !== undefined || dto.name !== undefined
+                ? this.normalizeZoomGroupCode(dto.code, nextName)
+                : group.code;
+        const isDefaultGroup =
+            group.code === DEFAULT_ZOOM_GROUP_REGULAR_CODE ||
+            group.code === DEFAULT_ZOOM_GROUP_HIBRIDO_CODE;
+        if (isDefaultGroup && nextCode !== group.code) {
+            throw new BadRequestException('No se puede cambiar el codigo de un grupo Zoom por defecto.');
+        }
+        const duplicated = await this.zoomGroupsRepo.findOne({ where: { code: nextCode } });
+        if (duplicated && duplicated.id !== group.id) {
+            throw new BadRequestException(`Ya existe un grupo Zoom con codigo ${nextCode}.`);
+        }
+
+        group.name = nextName;
+        group.code = nextCode;
+        if (dto.is_active !== undefined) {
+            group.is_active = Boolean(dto.is_active);
+        }
+        group.updated_at = new Date();
+        await this.zoomGroupsRepo.save(group);
+        return {
+            id: group.id,
+            name: group.name,
+            code: group.code,
+            is_active: group.is_active,
+            created_at: group.created_at,
+            updated_at: group.updated_at,
+        };
+    }
+
+    async deleteZoomGroup(id: string) {
+        await this.ensureZoomGroupsBootstrap();
+        const group = await this.zoomGroupsRepo.findOne({ where: { id: String(id ?? '').trim() } });
+        if (!group) {
+            throw new BadRequestException('No se encontro el grupo Zoom.');
+        }
+        if (
+            group.code === DEFAULT_ZOOM_GROUP_REGULAR_CODE ||
+            group.code === DEFAULT_ZOOM_GROUP_HIBRIDO_CODE
+        ) {
+            throw new BadRequestException('No se puede eliminar un grupo Zoom por defecto.');
+        }
+        await this.zoomGroupUsersRepo.delete({ group_id: group.id });
+        await this.zoomGroupsRepo.delete({ id: group.id });
+        return { success: true, id: group.id };
+    }
+
+    async getZoomGroupPool(groupId: string) {
+        await this.ensureZoomGroupsBootstrap();
+        const group = await this.getZoomGroupOrFail(groupId);
+        const poolRows = await this.zoomGroupUsersRepo
+            .createQueryBuilder('group_user')
+            .leftJoin(ZoomUserEntity, 'zoom_user', 'zoom_user.id = group_user.zoom_user_id')
+            .select('group_user.id', 'pool_id')
+            .addSelect('group_user.zoom_user_id', 'zoom_user_id')
+            .addSelect('group_user.sort_order', 'sort_order')
+            .addSelect('group_user.is_active', 'is_active')
             .addSelect('zoom_user.name', 'name')
             .addSelect('zoom_user.email', 'email')
-            .orderBy('pool.sort_order', 'ASC')
+            .where('group_user.group_id = :groupId', { groupId: group.id })
+            .orderBy('group_user.sort_order', 'ASC')
             .addOrderBy('zoom_user.name', 'ASC')
             .getRawMany<Record<string, unknown>>();
 
@@ -1972,6 +2152,12 @@ export class VideoconferenceService {
         const selectedIds = new Set(poolRows.map((row) => readString(row.zoom_user_id)));
 
         return {
+            group: {
+                id: group.id,
+                name: group.name,
+                code: group.code,
+                is_active: group.is_active,
+            },
             items: poolRows.map((row) => ({
                 id: readString(row.pool_id),
                 zoom_user_id: readString(row.zoom_user_id),
@@ -1993,7 +2179,9 @@ export class VideoconferenceService {
         };
     }
 
-    async replaceZoomPool(dto: UpdateZoomPoolDto) {
+    async replaceZoomGroupPool(groupId: string, dto: UpdateZoomPoolDto) {
+        await this.ensureZoomGroupsBootstrap();
+        const group = await this.getZoomGroupOrFail(groupId);
         const normalizedItems = dto.items.map((item) => ({
             zoom_user_id: item.zoom_user_id.trim(),
             sort_order: item.sort_order,
@@ -2025,13 +2213,14 @@ export class VideoconferenceService {
             }
         }
 
-        await this.zoomPoolRepo.clear();
+        await this.zoomGroupUsersRepo.delete({ group_id: group.id });
         if (normalizedItems.length) {
             const now = new Date();
-            await this.zoomPoolRepo.save(
+            await this.zoomGroupUsersRepo.save(
                 normalizedItems.map((item) =>
-                    this.zoomPoolRepo.create({
+                    this.zoomGroupUsersRepo.create({
                         id: newId(),
+                        group_id: group.id,
                         zoom_user_id: item.zoom_user_id,
                         sort_order: item.sort_order,
                         is_active: item.is_active,
@@ -2042,7 +2231,132 @@ export class VideoconferenceService {
             );
         }
 
-        return this.getZoomPool();
+        return this.getZoomGroupPool(group.id);
+    }
+
+    async getZoomPool() {
+        await this.ensureZoomGroupsBootstrap();
+        const defaultGroup = await this.getDefaultRegularZoomGroup();
+        const response = await this.getZoomGroupPool(defaultGroup.id);
+        return {
+            items: response.items,
+            users: response.users,
+            license_sync_ok: response.license_sync_ok,
+            license_sync_error: response.license_sync_error,
+        };
+    }
+
+    async replaceZoomPool(dto: UpdateZoomPoolDto) {
+        await this.ensureZoomGroupsBootstrap();
+        const defaultGroup = await this.getDefaultRegularZoomGroup();
+        const response = await this.replaceZoomGroupPool(defaultGroup.id, dto);
+        return {
+            items: response.items,
+            users: response.users,
+            license_sync_ok: response.license_sync_ok,
+            license_sync_error: response.license_sync_error,
+        };
+    }
+
+    private async ensureZoomGroupsBootstrap() {
+        if (!this.zoomGroupBootstrapPromise) {
+            this.zoomGroupBootstrapPromise = this.runZoomGroupsBootstrap();
+        }
+        await this.zoomGroupBootstrapPromise;
+    }
+
+    private async runZoomGroupsBootstrap() {
+        const now = new Date();
+        const existing = await this.zoomGroupsRepo.find();
+        const byCode = new Map(existing.map((item) => [item.code, item] as const));
+
+        const ensureGroup = async (code: string, name: string) => {
+            const found = byCode.get(code);
+            if (found) {
+                return found;
+            }
+            const created = this.zoomGroupsRepo.create({
+                id: newId(),
+                name,
+                code,
+                is_active: true,
+                created_at: now,
+                updated_at: now,
+            });
+            await this.zoomGroupsRepo.save(created);
+            byCode.set(code, created);
+            return created;
+        };
+
+        const regularGroup = await ensureGroup(DEFAULT_ZOOM_GROUP_REGULAR_CODE, 'Grupo Regular');
+        await ensureGroup(DEFAULT_ZOOM_GROUP_HIBRIDO_CODE, 'Grupo Hibrido');
+
+        const regularMembersCount = await this.zoomGroupUsersRepo.count({
+            where: { group_id: regularGroup.id },
+        });
+        if (regularMembersCount > 0) {
+            return;
+        }
+
+        const legacyPoolRows = await this.zoomPoolRepo.find({
+            order: { sort_order: 'ASC', updated_at: 'DESC', created_at: 'DESC' },
+        });
+        if (!legacyPoolRows.length) {
+            return;
+        }
+        await this.zoomGroupUsersRepo.save(
+            legacyPoolRows.map((row, index) =>
+                this.zoomGroupUsersRepo.create({
+                    id: newId(),
+                    group_id: regularGroup.id,
+                    zoom_user_id: row.zoom_user_id,
+                    sort_order: Number(row.sort_order ?? index + 1) || index + 1,
+                    is_active: Boolean(row.is_active),
+                    created_at: now,
+                    updated_at: now,
+                }),
+            ),
+        );
+    }
+
+    private normalizeZoomGroupCode(inputCode: string | null | undefined, fallbackName?: string | null) {
+        const raw = `${inputCode ?? ''}`.trim() || `${fallbackName ?? ''}`.trim();
+        if (!raw) {
+            throw new BadRequestException('code es requerido para el grupo Zoom.');
+        }
+        const normalized = raw
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toUpperCase()
+            .replace(/[^A-Z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 40);
+        if (!normalized) {
+            throw new BadRequestException('code de grupo Zoom invalido.');
+        }
+        return normalized;
+    }
+
+    private async getZoomGroupOrFail(id: string) {
+        const normalizedId = String(id ?? '').trim();
+        if (!normalizedId) {
+            throw new BadRequestException('zoomGroupId es requerido.');
+        }
+        const group = await this.zoomGroupsRepo.findOne({ where: { id: normalizedId } });
+        if (!group) {
+            throw new BadRequestException('No se encontro el grupo Zoom seleccionado.');
+        }
+        return group;
+    }
+
+    private async getDefaultRegularZoomGroup() {
+        const group = await this.zoomGroupsRepo.findOne({
+            where: { code: DEFAULT_ZOOM_GROUP_REGULAR_CODE },
+        });
+        if (!group) {
+            throw new BadRequestException('No existe el grupo Zoom REGULAR.');
+        }
+        return group;
     }
 
     async upsertOverride(dto: UpsertVideoconferenceOverrideDto) {
@@ -2147,6 +2461,10 @@ export class VideoconferenceService {
     }
 
     async generate(payload: GenerateVideoconferenceDto) {
+        const zoomGroupId = String(payload.zoomGroupId ?? '').trim();
+        if (!zoomGroupId) {
+            throw new BadRequestException('zoomGroupId es requerido.');
+        }
         const scheduleIds = normalizeIdArray(payload.scheduleIds);
         const occurrenceKeys = normalizeIdArray(payload.occurrenceKeys);
         if (!scheduleIds.length && !occurrenceKeys.length) {
@@ -2174,11 +2492,14 @@ export class VideoconferenceService {
 
         const aulaVirtualContext = await this.getAulaVirtualRequestContext();
         const zoomConfig = await this.zoomAccountService.requireConfiguredConfig();
-        const poolValidation = await this.getActiveZoomPoolUsers(Boolean(payload.allowPoolWarnings));
+        const poolValidation = await this.getActiveZoomPoolUsers(
+            zoomGroupId,
+            Boolean(payload.allowPoolWarnings),
+        );
         const zoomUsers = poolValidation.users;
         if (!zoomUsers.length) {
             throw new BadRequestException(
-                'No hay usuarios Zoom activos en el pool de videoconferencias.',
+                `No hay usuarios Zoom activos en el grupo ${poolValidation.group.name}.`,
             );
         }
 
@@ -2262,6 +2583,7 @@ export class VideoconferenceService {
                 zoomUsers,
                 remoteMeetingsCache,
                 this.findPreferredZoomUserId(ownerOccurrence, preferredHosts),
+                poolValidation.group.name,
             );
             results.push(ownerResult);
 
@@ -2400,6 +2722,7 @@ export class VideoconferenceService {
         zoomUsers: ZoomPoolUser[],
         remoteMeetingsCache: Map<string, ZoomMeetingSummary[] | null>,
         preferredZoomUserId: string | null,
+        zoomGroupName: string,
     ): Promise<GenerateResultItem> {
         const validationError = this.validateScheduleForGeneration(occurrence.row);
         if (validationError) {
@@ -2451,7 +2774,7 @@ export class VideoconferenceService {
                     occurrence_key: occurrence.occurrence_key,
                     conference_date: occurrence.effective_conference_date,
                     status: 'ERROR',
-                    message: `El host sugerido (${preferredZoomUserId}) ya no esta activo en el pool Zoom.`,
+                    message: `El host sugerido (${preferredZoomUserId}) no pertenece al grupo Zoom "${zoomGroupName}" o esta inactivo.`,
                     record_id: null,
                     zoom_user_id: null,
                     zoom_user_email: null,
@@ -3388,18 +3711,27 @@ export class VideoconferenceService {
         };
     }
 
-    private async getActiveZoomPoolUsers(allowWarnings: boolean) {
-        const rawRows = await this.zoomPoolRepo
-            .createQueryBuilder('pool')
-            .innerJoin(ZoomUserEntity, 'zoom_user', 'zoom_user.id = pool.zoom_user_id')
-            .select('pool.id', 'pool_id')
-            .addSelect('pool.zoom_user_id', 'zoom_user_id')
-            .addSelect('pool.sort_order', 'sort_order')
-            .addSelect('pool.is_active', 'is_active')
+    private async getActiveZoomPoolUsers(zoomGroupId: string, allowWarnings: boolean) {
+        await this.ensureZoomGroupsBootstrap();
+        const group = await this.getZoomGroupOrFail(zoomGroupId);
+        if (!group.is_active) {
+            throw new BadRequestException(
+                `El grupo Zoom ${group.name} (${group.code}) esta inactivo.`,
+            );
+        }
+
+        const rawRows = await this.zoomGroupUsersRepo
+            .createQueryBuilder('group_user')
+            .innerJoin(ZoomUserEntity, 'zoom_user', 'zoom_user.id = group_user.zoom_user_id')
+            .select('group_user.id', 'pool_id')
+            .addSelect('group_user.zoom_user_id', 'zoom_user_id')
+            .addSelect('group_user.sort_order', 'sort_order')
+            .addSelect('group_user.is_active', 'is_active')
             .addSelect('zoom_user.name', 'name')
             .addSelect('zoom_user.email', 'email')
-            .where('pool.is_active = :isActive', { isActive: true })
-            .orderBy('pool.sort_order', 'ASC')
+            .where('group_user.group_id = :groupId', { groupId: group.id })
+            .andWhere('group_user.is_active = :isActive', { isActive: true })
+            .orderBy('group_user.sort_order', 'ASC')
             .addOrderBy('zoom_user.name', 'ASC')
             .getRawMany<Record<string, unknown>>();
 
@@ -3427,6 +3759,7 @@ export class VideoconferenceService {
                 users: rows,
                 warnings,
                 warning_count: warnings.length,
+                group,
             };
         }
 
@@ -3455,6 +3788,7 @@ export class VideoconferenceService {
             users: rows,
             warnings,
             warning_count: warnings.length,
+            group,
         };
     }
 

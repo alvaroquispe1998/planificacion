@@ -1,7 +1,12 @@
-import { Body, Controller, Get, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import { ACTION_PERMISSIONS, WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { RequirePermissions } from '../auth/permissions.decorator';
-import { UpdateZoomConfigDto, UpdateZoomPoolDto } from './videoconference.dto';
+import {
+    CreateZoomGroupDto,
+    UpdateZoomConfigDto,
+    UpdateZoomGroupDto,
+    UpdateZoomPoolDto,
+} from './videoconference.dto';
 import { VideoconferenceService } from './videoconference.service';
 import { ZoomAccountService } from './zoom-account.service';
 
@@ -36,5 +41,35 @@ export class ZoomSettingsController {
     @Put('pool')
     async updatePool(@Body() dto: UpdateZoomPoolDto) {
         return this.videoconferenceService.replaceZoomPool(dto);
+    }
+
+    @Get('groups')
+    async listGroups() {
+        return this.videoconferenceService.listZoomGroups();
+    }
+
+    @Post('groups')
+    async createGroup(@Body() dto: CreateZoomGroupDto) {
+        return this.videoconferenceService.createZoomGroup(dto);
+    }
+
+    @Patch('groups/:id')
+    async updateGroup(@Param('id') id: string, @Body() dto: UpdateZoomGroupDto) {
+        return this.videoconferenceService.updateZoomGroup(id, dto);
+    }
+
+    @Delete('groups/:id')
+    async deleteGroup(@Param('id') id: string) {
+        return this.videoconferenceService.deleteZoomGroup(id);
+    }
+
+    @Get('groups/:id/pool')
+    async getGroupPool(@Param('id') id: string) {
+        return this.videoconferenceService.getZoomGroupPool(id);
+    }
+
+    @Put('groups/:id/pool')
+    async updateGroupPool(@Param('id') id: string, @Body() dto: UpdateZoomPoolDto) {
+        return this.videoconferenceService.replaceZoomGroupPool(id, dto);
     }
 }

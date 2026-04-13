@@ -5,6 +5,7 @@ import {
     IsBoolean,
     IsDateString,
     IsInt,
+    IsNotEmpty,
     IsOptional,
     IsString,
     Min,
@@ -62,6 +63,10 @@ export class PreviewVideoconferenceDto extends FilterOptionsDto {
 }
 
 export class AssignmentPreviewVideoconferenceDto extends FilterOptionsDto {
+    @IsString()
+    @IsNotEmpty()
+    zoomGroupId!: string;
+
     @IsOptional()
     @Type(() => Boolean)
     @IsBoolean()
@@ -89,6 +94,10 @@ export class AssignmentPreviewVideoconferenceDto extends FilterOptionsDto {
 }
 
 export class GenerateVideoconferenceDto {
+    @IsString()
+    @IsNotEmpty()
+    zoomGroupId!: string;
+
     @IsOptional()
     @IsArray()
     @ArrayUnique()
@@ -233,6 +242,38 @@ export class UpdateZoomPoolDto {
     @ValidateNested({ each: true })
     @Type(() => UpdateZoomPoolItemDto)
     items!: UpdateZoomPoolItemDto[];
+}
+
+export class CreateZoomGroupDto {
+    @IsString()
+    @IsNotEmpty()
+    name!: string;
+
+    @IsOptional()
+    @IsString()
+    code?: string;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    is_active?: boolean;
+}
+
+export class UpdateZoomGroupDto {
+    @IsOptional()
+    @IsString()
+    @IsNotEmpty()
+    name?: string;
+
+    @IsOptional()
+    @IsString()
+    @IsNotEmpty()
+    code?: string;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    is_active?: boolean;
 }
 
 export class VideoconferenceInheritanceCatalogDto {

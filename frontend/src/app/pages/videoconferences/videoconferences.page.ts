@@ -16,6 +16,7 @@ import {
   VideoconferenceOverridePayload,
   VideoconferencePreviewDto,
   VideoconferencePreviewItem,
+  ZoomGroupItem,
 } from '../../services/videoconference-api.service';
 
 type PreviewSelectionItem = VideoconferencePreviewItem & {
@@ -67,6 +68,8 @@ export class VideoconferencesPageComponent implements OnInit {
   selectedPeriod = '';
   selectedModalities: string[] = [];
   selectedDays: string[] = [];
+  selectedZoomGroupId = '';
+  zoomGroups: ZoomGroupItem[] = [];
 
   periodOptions: MultiSelectOption[] = [];
   campusOptions: MultiSelectOption[] = [];
@@ -127,6 +130,7 @@ export class VideoconferencesPageComponent implements OnInit {
   ) {}
 
   ngOnInit() {
+    this.loadZoomGroups();
     this.refreshFilterOptions();
   }
 
@@ -172,6 +176,15 @@ export class VideoconferencesPageComponent implements OnInit {
 
   get hasOperationalRange() {
     return Boolean(this.startDate && this.endDate);
+  }
+
+  get selectedZoomGroup() {
+    return this.zoomGroups.find((item) => item.id === this.selectedZoomGroupId) ?? null;
+  }
+
+  get selectedZoomGroupLabel() {
+    const group = this.selectedZoomGroup;
+    return group ? `${group.name} (${group.code})` : 'Sin grupo Zoom';
   }
 
   get usesOccurrenceRows() {
@@ -255,6 +268,11 @@ export class VideoconferencesPageComponent implements OnInit {
   onDaysChange(selectedIds: string[]) {
     this.selectedDays = selectedIds;
     this.handleFilterChange();
+  }
+
+  onZoomGroupChange(value: string) {
+    this.selectedZoomGroupId = value;
+    this.assignmentPreview = null;
   }
 
   clearFilters() {
@@ -716,6 +734,13 @@ export class VideoconferencesPageComponent implements OnInit {
       });
       return;
     }
+    if (!this.selectedZoomGroupId) {
+      await this.dialog.alert({
+        title: 'Grupo Zoom requerido',
+        message: 'Selecciona un grupo Zoom antes de generar videoconferencias.',
+      });
+      return;
+    }
 
     if (!this.startDate || !this.endDate) {
       await this.dialog.alert({
@@ -748,12 +773,14 @@ export class VideoconferencesPageComponent implements OnInit {
     const preferredHosts = this.buildPreferredHostsForGeneration(selected);
     const payload = this.usesOccurrenceRows
       ? {
+          zoomGroupId: this.selectedZoomGroupId,
           occurrenceKeys: selected.map((item) => item.occurrence_key),
           startDate: this.startDate,
           endDate: this.endDate,
           preferredHosts,
         }
       : {
+          zoomGroupId: this.selectedZoomGroupId,
           scheduleIds: Array.from(
             new Set(
               selected.flatMap((item) =>
@@ -792,26 +819,37 @@ export class VideoconferencesPageComponent implements OnInit {
       });
       return;
     }
+    if (!this.selectedZoomGroupId) {
+      await this.dialog.alert({
+        title: 'Grupo Zoom requerido',
+        message: 'Selecciona un grupo Zoom antes de previsualizar la asignacion.',
+      });
+      return;
+    }
 
     const payload = this.usesOccurrenceRows
       ? selected.length === this.selectableRows.length
         ? {
+            zoomGroupId: this.selectedZoomGroupId,
             selectAllVisible: true,
             ...this.buildCatalogFilters(),
             startDate: this.startDate,
             endDate: this.endDate,
           }
         : {
+            zoomGroupId: this.selectedZoomGroupId,
             occurrenceKeys: selected.map((item) => item.occurrence_key),
             startDate: this.startDate,
             endDate: this.endDate,
           }
       : selected.length === this.selectableRows.length
         ? {
+            zoomGroupId: this.selectedZoomGroupId,
             selectAllVisible: true,
             ...this.buildCatalogFilters(),
           }
         : {
+            zoomGroupId: this.selectedZoomGroupId,
             scheduleIds: selected.map((item) => item.schedule_id),
           };
 
@@ -854,7 +892,7 @@ export class VideoconferencesPageComponent implements OnInit {
       case 'VALIDATION_ERROR':
         return 'Validacion pendiente';
       case 'NO_AVAILABLE_ZOOM_USER':
-        return 'Sin host';
+        return 'Sin host disponible en grupo';
       default:
         return 'Sin preview';
     }
@@ -1030,6 +1068,31 @@ export class VideoconferencesPageComponent implements OnInit {
       this.buildSelectionLabel('Modalidades', snapshot.selectedModalities, this.modalityOptions),
       this.buildSelectionLabel('Dias', snapshot.selectedDays, this.dayOptions),
     ].filter((label): label is string => Boolean(label));
+  }
+
+  private loadZoomGroups() {
+    this.api.listZoomGroups().subscribe({
+      next: (groups) => {
+        this.zoomGroups = (Array.isArray(groups) ? groups : [])
+          .filter((item) => item?.is_active !== false)
+          .sort((left, right) => `${left.name}`.localeCompare(`${right.name}`));
+
+        if (!this.selectedZoomGroupId || !this.zoomGroups.some((item) => item.id === this.selectedZoomGroupId)) {
+          this.selectedZoomGroupId = this.zoomGroups[0]?.id || '';
+        }
+        this.cdr.detectChanges();
+      },
+      error: async () => {
+        this.zoomGroups = [];
+        this.selectedZoomGroupId = '';
+        this.cdr.detectChanges();
+        await this.dialog.alert({
+          title: 'No se pudieron cargar los grupos Zoom',
+          message: 'Configura los grupos de usuarios Zoom antes de generar videoconferencias.',
+          tone: 'danger',
+        });
+      },
+    });
   }
 
   private refreshFilterOptions() {
@@ -1310,6 +1373,13 @@ export class VideoconferencesPageComponent implements OnInit {
   async retryFailed() {
     const failed = this.retryableFailedRows;
     if (!failed.length) return;
+    if (!this.selectedZoomGroupId) {
+      await this.dialog.alert({
+        title: 'Grupo Zoom requerido',
+        message: 'Selecciona un grupo Zoom antes de reintentar.',
+      });
+      return;
+    }
 
     const confirmed = await this.dialog.confirm({
       title: 'Reintentar fallidos',
@@ -1328,6 +1398,7 @@ export class VideoconferencesPageComponent implements OnInit {
     );
 
     this.executeGeneration({
+      zoomGroupId: this.selectedZoomGroupId,
       occurrenceKeys,
       startDate: this.startDate,
       endDate: this.endDate,
@@ -1467,6 +1538,7 @@ export class VideoconferencesPageComponent implements OnInit {
 
   private executeGeneration(
     payload: {
+      zoomGroupId: string;
       scheduleIds?: string[];
       occurrenceKeys?: string[];
       startDate: string;
@@ -1647,6 +1719,8 @@ export class VideoconferencesPageComponent implements OnInit {
         scheduleId: item.schedule_id,
         occurrenceKey: item.occurrence_key,
         inherited: item.inheritance?.is_inherited ?? false,
+        zoomGroupId: this.selectedZoomGroupId || null,
+        zoomGroupLabel: this.selectedZoomGroupLabel,
         hostPreview: assignment?.zoom_user_email || assignment?.zoom_user_name || assignment?.zoom_user_id || null,
         hostFixedFromPreview: Boolean(assignment?.zoom_user_id),
       },

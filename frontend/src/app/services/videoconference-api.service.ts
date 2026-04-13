@@ -242,6 +242,16 @@ export interface ZoomPoolResponse {
     license_sync_error: string | null;
 }
 
+export interface ZoomGroupItem {
+    id: string;
+    name: string;
+    code: string;
+    is_active: boolean;
+    is_default?: boolean;
+    members_count?: number;
+    active_members_count?: number;
+}
+
 export interface VideoconferenceInheritanceCatalogSchedule {
     schedule_id: string;
     campus_id: string | null;
@@ -444,6 +454,7 @@ export class VideoconferenceApiService {
     }
 
     assignmentPreview(payload: {
+        zoomGroupId: string;
         selectAllVisible?: boolean;
         semesterId?: string;
         campusIds?: string[];
@@ -462,6 +473,7 @@ export class VideoconferenceApiService {
     }
 
     generate(payload: {
+        zoomGroupId: string;
         scheduleIds?: string[];
         occurrenceKeys?: string[];
         startDate: string;
@@ -497,6 +509,10 @@ export class VideoconferenceApiService {
 
     getZoomPool() {
         return this.http.get<ZoomPoolResponse>(`${API_BASE_URL}/settings/zoom/pool`);
+    }
+
+    listZoomGroups() {
+        return this.http.get<ZoomGroupItem[]>(`${this.baseUrl}/zoom-groups`);
     }
 
     reconcile(id: string) {
