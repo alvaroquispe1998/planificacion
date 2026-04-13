@@ -40,6 +40,16 @@ type AssignmentUserUsageSummary = {
   session_lines: string[];
 };
 
+type AppliedFilterSnapshot = {
+  selectedPeriod: string;
+  selectedCampuses: string[];
+  selectedFaculties: string[];
+  selectedPrograms: string[];
+  selectedCourses: string[];
+  selectedModalities: string[];
+  selectedDays: string[];
+};
+
 @Component({
   selector: 'app-videoconferences-page',
   standalone: true,
@@ -78,6 +88,7 @@ export class VideoconferencesPageComponent implements OnInit {
   expandedAssignmentHostKey = '';
   hasSearched = false;
   retryingRecordId = '';
+  appliedFilterSnapshot: AppliedFilterSnapshot | null = null;
 
   overrideEditorOpen = false;
   overrideTarget: PreviewSelectionItem | null = null;
@@ -135,15 +146,7 @@ export class VideoconferencesPageComponent implements OnInit {
   }
 
   get activeFilterLabels() {
-    return [
-      this.buildSingleSelectionLabel('Periodo', this.selectedPeriod, this.periodOptions),
-      this.buildSelectionLabel('Sedes', this.selectedCampuses, this.campusOptions),
-      this.buildSelectionLabel('Facultades', this.selectedFaculties, this.facultyOptions),
-      this.buildSelectionLabel('Programas', this.selectedPrograms, this.programOptions),
-      this.buildSelectionLabel('Cursos', this.selectedCourses, this.courseOptions),
-      this.buildSelectionLabel('Modalidades', this.selectedModalities, this.modalityOptions),
-      this.buildSelectionLabel('Dias', this.selectedDays, this.dayOptions),
-    ].filter((label): label is string => Boolean(label));
+    return this.buildFilterLabels(this.appliedFilterSnapshot ?? this.captureFilterSnapshot());
   }
 
   get hasActiveFilters() {
@@ -383,13 +386,13 @@ export class VideoconferencesPageComponent implements OnInit {
   }
 
   getContextPrimary(item: VideoconferencePreviewItem) {
-    return item.campus_name || 'Sin sede';
+    return item.faculty_name || 'Sin facultad';
   }
 
   getContextSecondary(item: VideoconferencePreviewItem) {
     return [
-      item.faculty_name || 'Sin facultad',
       item.program_name || 'Sin programa',
+      item.campus_name || 'Sin sede',
       item.cycle ? `Ciclo ${item.cycle}` : '',
     ]
       .filter(Boolean)
@@ -407,6 +410,15 @@ export class VideoconferencesPageComponent implements OnInit {
     ]
       .filter(Boolean)
       .join(' | ');
+  }
+
+  hasDifferentAvContext(item: VideoconferencePreviewItem) {
+    const planningFaculty = (item.faculty_name || '').trim().toUpperCase();
+    const planningProgram = (item.program_name || '').trim().toUpperCase();
+    const avFaculty = (item.vc_faculty_name || '').trim().toUpperCase();
+    const avProgram = (item.vc_academic_program_name || '').trim().toUpperCase();
+
+    return Boolean(avFaculty || avProgram) && (planningFaculty !== avFaculty || planningProgram !== avProgram);
   }
 
   getVcContext(item: VideoconferencePreviewItem) {
@@ -871,6 +883,30 @@ export class VideoconferencesPageComponent implements OnInit {
     this.refreshFilterOptions();
   }
 
+  private captureFilterSnapshot(): AppliedFilterSnapshot {
+    return {
+      selectedPeriod: this.selectedPeriod,
+      selectedCampuses: [...this.selectedCampuses],
+      selectedFaculties: [...this.selectedFaculties],
+      selectedPrograms: [...this.selectedPrograms],
+      selectedCourses: [...this.selectedCourses],
+      selectedModalities: [...this.selectedModalities],
+      selectedDays: [...this.selectedDays],
+    };
+  }
+
+  private buildFilterLabels(snapshot: AppliedFilterSnapshot) {
+    return [
+      this.buildSingleSelectionLabel('Periodo', snapshot.selectedPeriod, this.periodOptions),
+      this.buildSelectionLabel('Sedes', snapshot.selectedCampuses, this.campusOptions),
+      this.buildSelectionLabel('Facultades', snapshot.selectedFaculties, this.facultyOptions),
+      this.buildSelectionLabel('Programas', snapshot.selectedPrograms, this.programOptions),
+      this.buildSelectionLabel('Cursos', snapshot.selectedCourses, this.courseOptions),
+      this.buildSelectionLabel('Modalidades', snapshot.selectedModalities, this.modalityOptions),
+      this.buildSelectionLabel('Dias', snapshot.selectedDays, this.dayOptions),
+    ].filter((label): label is string => Boolean(label));
+  }
+
   private refreshFilterOptions() {
     const requestId = ++this.filterOptionsRequestId;
     this.filterOptionsLoading = true;
@@ -970,6 +1006,7 @@ export class VideoconferencesPageComponent implements OnInit {
     this.generationResult = null;
     this.hasSearched = false;
     this.retryingRecordId = '';
+    this.appliedFilterSnapshot = null;
   }
 
   private buildCatalogFilters(): FilterOptionsDto {
@@ -1006,6 +1043,7 @@ export class VideoconferencesPageComponent implements OnInit {
 
   private loadPreview(selectedKeys = new Set<string>(), includeOperationalRange = true) {
     this.loading = true;
+    const appliedSnapshot = this.captureFilterSnapshot();
     this.cdr.detectChanges();
 
     this.api.preview(this.buildPreviewFilters(includeOperationalRange)).subscribe({
@@ -1015,6 +1053,7 @@ export class VideoconferencesPageComponent implements OnInit {
           selected: item.selectable && (selectedKeys.size ? selectedKeys.has(item.occurrence_key) : false),
         }));
         this.assignmentPreview = null;
+        this.appliedFilterSnapshot = appliedSnapshot;
         this.loading = false;
         this.cdr.detectChanges();
       },
