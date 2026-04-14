@@ -2621,6 +2621,7 @@ export class VideoconferenceService implements OnModuleInit {
             });
         }
 
+        let abortedEarly = false;
         for (const familyKey of familyKeys) {
             const familyItems = familyOccurrences.filter(
                 (item) =>
@@ -2658,6 +2659,14 @@ export class VideoconferenceService implements OnModuleInit {
             );
             results.push(ownerResult);
 
+            // Fail fast: if a real system error occurred (e.g. Aula Virtual down),
+            // stop processing remaining items immediately instead of accumulating
+            // retries that could cause the HTTP request to time out and lose all results.
+            if (ownerResult.status === 'ERROR') {
+                abortedEarly = true;
+                break;
+            }
+
             // Brief pause after each successful creation attempt to respect Aula Virtual
             // and Zoom rate limits during bulk operations. Skipped when blocked/validation.
             if (ownerResult.status === 'MATCHED' || ownerResult.status === 'CREATED_UNMATCHED') {
@@ -2674,6 +2683,21 @@ export class VideoconferenceService implements OnModuleInit {
             }
         }
 
+        const processedFamilyKeys = new Set(
+            results
+                .filter((r) => r.occurrence_key)
+                .map((r) => {
+                    const occ = familyOccurrences.find((o) => o.occurrence_key === r.occurrence_key);
+                    return occ
+                        ? buildOccurrenceKey(occ.inheritance.family_owner_schedule_id, occ.base_conference_date)
+                        : null;
+                })
+                .filter((k): k is string => k !== null),
+        );
+        const pendingCount = abortedEarly
+            ? familyKeys.filter((k) => !processedFamilyKeys.has(k)).length
+            : 0;
+
         const summary = {
             requestedSchedules: requestedScheduleIds.length,
             requestedOccurrences: familyOccurrences.length,
@@ -2683,6 +2707,8 @@ export class VideoconferenceService implements OnModuleInit {
             noAvailableZoomUser: results.filter((item) => item.status === 'NO_AVAILABLE_ZOOM_USER').length,
             validationErrors: results.filter((item) => item.status === 'VALIDATION_ERROR').length,
             errors: results.filter((item) => item.status === 'ERROR').length,
+            abortedEarly,
+            pendingCount,
         };
 
         return {
@@ -4825,6 +4851,8 @@ function buildGenerationMessage(summary: {
     noAvailableZoomUser: number;
     validationErrors: number;
     errors: number;
+    abortedEarly?: boolean;
+    pendingCount?: number;
 }, warningCount = 0) {
     const parts = [
         `${summary.matched} conciliadas`,
@@ -4836,6 +4864,9 @@ function buildGenerationMessage(summary: {
     ];
     if (warningCount > 0) {
         parts.push(`${warningCount} advertencia(s) de licencias`);
+    }
+    if (summary.abortedEarly && (summary.pendingCount ?? 0) > 0) {
+        return `Proceso interrumpido por error (${summary.pendingCount} clases pendientes sin procesar): ${parts.join(', ')}.`;
     }
     return `Proceso completado: ${parts.join(', ')}.`;
 }
