@@ -91,6 +91,7 @@ export class VideoconferencesPageComponent implements OnInit {
   generationProgress = 0;
   /** Total occurrences sent to the backend for the current run, used to show "X / N" in progress bar. */
   generationTotal = 0;
+  private generationStartTime = 0;
   filterOptionsLoading = false;
   overrideSaving = false;
   checkingExisting = false;
@@ -1671,8 +1672,8 @@ export class VideoconferencesPageComponent implements OnInit {
           return;
         }
         await this.dialog.alert({
-          title: partialResults?.length > 0
-            ? 'Proceso interrumpido — revisa los resultados parciales'
+          title: Array.isArray(partialResults) && partialResults.length > 0
+            ? 'Proceso terminado con errores — revisa los resultados'
             : 'No se pudieron generar las videoconferencias',
           message,
           tone: 'danger',
@@ -1684,16 +1685,21 @@ export class VideoconferencesPageComponent implements OnInit {
   private startGenerationProgress(total = 0) {
     this.generationProgress = 0;
     this.generationTotal = total;
+    this.generationStartTime = Date.now();
     this.generating = true;
     this.cdr.detectChanges();
     if (this.generationProgressInterval) {
       clearInterval(this.generationProgressInterval);
     }
+    // Estimate ~5 seconds per item (throttle + API calls + possible retry).
+    // Progress advances linearly based on real elapsed time so the bar moves
+    // at a steady, honest rate instead of rushing to 90% and freezing.
+    const estimatedMs = Math.max(total * 5000, 8000);
     this.generationProgressInterval = setInterval(() => {
-      // Exponential ease toward 90 % — never reaches 100 until the request finishes.
-      this.generationProgress += (90 - this.generationProgress) * 0.06;
+      const elapsed = Date.now() - this.generationStartTime;
+      this.generationProgress = Math.min(92, (elapsed / estimatedMs) * 100);
       this.cdr.detectChanges();
-    }, 300);
+    }, 500);
   }
 
   private finishGenerationProgress() {
