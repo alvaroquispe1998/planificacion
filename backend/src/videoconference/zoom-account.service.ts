@@ -9,6 +9,8 @@ const ZOOM_TOKEN_URL = 'https://zoom.us/oauth/token';
 const ZOOM_API_BASE_URL = 'https://api.zoom.us/v2';
 const TOKEN_EXPIRY_SAFETY_MS = 30_000;
 const ZOOM_REQUEST_TIMEOUT_MS = 15_000;
+const ZOOM_RATE_LIMIT_MAX_RETRIES = 3;
+const ZOOM_RATE_LIMIT_DEFAULT_WAIT_MS = 10_000;
 
 type ZoomTokenResponse = {
     access_token?: string;
@@ -398,7 +400,7 @@ export class ZoomAccountService {
         return parsed.access_token;
     }
 
-    private async fetchZoomJson<T>(path: string, retryOnUnauthorized = true): Promise<T> {
+    private async fetchZoomJson<T>(path: string, retryOnUnauthorized = true, rateLimitAttempt = 0): Promise<T> {
         const token = await this.getAccessToken();
         const response = await this.fetchWithDiagnostics(
             `${ZOOM_API_BASE_URL}${path}`,
@@ -414,7 +416,17 @@ export class ZoomAccountService {
 
         if (response.status === 401 && retryOnUnauthorized) {
             this.cachedAccessToken = null;
-            return this.fetchZoomJson<T>(path, false);
+            return this.fetchZoomJson<T>(path, false, rateLimitAttempt);
+        }
+
+        // Handle Zoom rate limiting (429 Too Many Requests)
+        if (response.status === 429 && rateLimitAttempt < ZOOM_RATE_LIMIT_MAX_RETRIES) {
+            const retryAfterHeader = response.headers.get('Retry-After') ?? response.headers.get('X-RateLimit-Reset');
+            const waitMs = retryAfterHeader
+                ? Math.min(Number(retryAfterHeader) * 1000, 60_000)
+                : ZOOM_RATE_LIMIT_DEFAULT_WAIT_MS * (rateLimitAttempt + 1);
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+            return this.fetchZoomJson<T>(path, retryOnUnauthorized, rateLimitAttempt + 1);
         }
 
         const bodyText = await response.text();
