@@ -51,6 +51,12 @@ import {
 const ACTIVE_CONFERENCE_STATUSES = ['CREATING', 'CREATED_UNMATCHED', 'MATCHED'] as const;
 const ZOOM_MATCH_ATTEMPTS = 5;
 const ZOOM_MATCH_DELAY_MS = 3000;
+// Minimum delay between successive Aula Virtual POST requests during bulk generation.
+// Prevents overwhelming the remote server and avoids session-level throttling.
+const AULA_VIRTUAL_THROTTLE_MS = 500;
+// Max retries for transient Aula Virtual errors (5xx / gateway) during bulk generation.
+const AULA_VIRTUAL_MAX_RETRIES = 3;
+const AULA_VIRTUAL_RETRY_BASE_DELAY_MS = 5_000;
 const MEETING_MARGIN_MINUTES = 10;
 const DEFAULT_REMOTE_MEETING_DURATION_MINUTES = 60;
 // For live Zoom meetings the API returns the *scheduled* duration, which may be
@@ -2652,6 +2658,12 @@ export class VideoconferenceService implements OnModuleInit {
             );
             results.push(ownerResult);
 
+            // Brief pause after each successful creation attempt to respect Aula Virtual
+            // and Zoom rate limits during bulk operations. Skipped when blocked/validation.
+            if (ownerResult.status === 'MATCHED' || ownerResult.status === 'CREATED_UNMATCHED') {
+                await new Promise((resolve) => setTimeout(resolve, AULA_VIRTUAL_THROTTLE_MS));
+            }
+
             const ownerRecord =
                 ownerResult.record_id
                     ? await this.planningVideoconferencesRepo.findOne({ where: { id: ownerResult.record_id } })
@@ -4580,7 +4592,13 @@ export class VideoconferenceService implements OnModuleInit {
     private async postAulaVirtualConference(
         context: AulaVirtualRequestContext,
         payload: AulaVirtualPayload,
-    ) {
+        attempt = 0,
+    ): Promise<{ status: number; final_url: string; content_type: string; body: object }> {
+        // Throttle: small fixed delay before each request to avoid flooding Aula Virtual
+        if (attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, AULA_VIRTUAL_THROTTLE_MS));
+        }
+
         const form = new FormData();
         for (const [key, value] of Object.entries(payload)) {
             form.append(key, value);
@@ -4613,6 +4631,11 @@ export class VideoconferenceService implements OnModuleInit {
             /Cannot GET \/50[0-9]|Bad Gateway|Service Unavailable/i.test(bodyText);
 
         if (redirectedToErrorPage || bodyLooksLikeGatewayError) {
+            if (attempt < AULA_VIRTUAL_MAX_RETRIES) {
+                const waitMs = AULA_VIRTUAL_RETRY_BASE_DELAY_MS * (attempt + 1);
+                await new Promise((resolve) => setTimeout(resolve, waitMs));
+                return this.postAulaVirtualConference(context, payload, attempt + 1);
+            }
             throw new BadRequestException(
                 'Aula Virtual no esta disponible en este momento (error de servidor). Intenta nuevamente en unos minutos.',
             );
@@ -4623,6 +4646,12 @@ export class VideoconferenceService implements OnModuleInit {
             );
         }
         if (!response.ok || htmlLooksLikeLogin) {
+            // Retry on 5xx transient server errors (not 4xx which are logic errors)
+            if (response.status >= 500 && attempt < AULA_VIRTUAL_MAX_RETRIES) {
+                const waitMs = AULA_VIRTUAL_RETRY_BASE_DELAY_MS * (attempt + 1);
+                await new Promise((resolve) => setTimeout(resolve, waitMs));
+                return this.postAulaVirtualConference(context, payload, attempt + 1);
+            }
             throw new BadRequestException(
                 `Aula Virtual rechazo la creacion (${response.status}): ${bodyText.slice(0, 300)}`,
             );

@@ -89,6 +89,8 @@ export class VideoconferencesPageComponent implements OnInit {
   loading = false;
   generating = false;
   generationProgress = 0;
+  /** Total occurrences sent to the backend for the current run, used to show "X / N" in progress bar. */
+  generationTotal = 0;
   filterOptionsLoading = false;
   overrideSaving = false;
   checkingExisting = false;
@@ -216,8 +218,12 @@ export class VideoconferencesPageComponent implements OnInit {
 
   get attentionResultRows() {
     return this.generationRows.filter((item) =>
-      ['ERROR', 'NO_AVAILABLE_ZOOM_USER', 'BLOCKED_EXISTING'].includes(item.status),
+      ['NO_AVAILABLE_ZOOM_USER', 'BLOCKED_EXISTING'].includes(item.status),
     );
+  }
+
+  get errorResultRows() {
+    return this.generationRows.filter((item) => item.status === 'ERROR');
   }
 
   get retryableFailedRows() {
@@ -1059,6 +1065,54 @@ export class VideoconferencesPageComponent implements OnInit {
     });
   }
 
+  async retryAllFailed() {
+    const rows = this.errorResultRows.filter((item) => Boolean(item.occurrence_key));
+    if (!rows.length || this.generating) {
+      return;
+    }
+    const confirmed = await this.dialog.confirm({
+      title: 'Reintentar reuniones con error',
+      message: `Se reintentara la creacion de ${rows.length} reunion(es) que fallaron. Deseas continuar?`,
+      confirmLabel: 'Reintentar',
+      cancelLabel: 'Cancelar',
+    });
+    if (!confirmed) {
+      return;
+    }
+    const occurrenceKeys = rows.map((item) => item.occurrence_key).filter((k): k is string => Boolean(k));
+    const payload = {
+      zoomGroupId: this.selectedZoomGroupId,
+      occurrenceKeys,
+      startDate: this.startDate,
+      endDate: this.endDate,
+    };
+    this.executeGeneration(payload, false);
+  }
+
+  copyFailedList() {
+    const rows = this.errorResultRows;
+    if (!rows.length) {
+      return;
+    }
+    const lines = rows.map((item) => {
+      const label = this.resultCourseLabel(item);
+      const ctx = this.resultContextLabel(item);
+      const msg = item.message || '';
+      return `${label} | ${ctx} | ${msg}`;
+    });
+    const text = `Reuniones con error (${rows.length}):\n\n${lines.join('\n')}`;
+    navigator.clipboard.writeText(text).catch(() => {
+      // fallback: create a temporary textarea
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    });
+    this.dialog.alert({ title: 'Copiado', message: `${rows.length} error(es) copiados al portapapeles.`, tone: 'success' });
+  }
+
   private handleFilterChange() {
     this.closeOverrideEditor();
     this.resetPreviewState();
@@ -1572,7 +1626,11 @@ export class VideoconferencesPageComponent implements OnInit {
     hasConfirmedWarnings: boolean,
   ) {
     this.loading = true;
-    this.startGenerationProgress();
+    const estimatedTotal =
+      (payload.occurrenceKeys?.length ?? 0) ||
+      (payload.scheduleIds?.length ?? 0) ||
+      this.selectedCount;
+    this.startGenerationProgress(estimatedTotal);
     this.api.generate(payload).subscribe({
       next: async (res) => {
         this.finishGenerationProgress();
@@ -1613,8 +1671,9 @@ export class VideoconferencesPageComponent implements OnInit {
     });
   }
 
-  private startGenerationProgress() {
+  private startGenerationProgress(total = 0) {
     this.generationProgress = 0;
+    this.generationTotal = total;
     this.generating = true;
     this.cdr.detectChanges();
     if (this.generationProgressInterval) {
@@ -1637,8 +1696,9 @@ export class VideoconferencesPageComponent implements OnInit {
     setTimeout(() => {
       this.generating = false;
       this.generationProgress = 0;
+      this.generationTotal = 0;
       this.cdr.detectChanges();
-    }, 500);
+    }, 1200);
   }
 
   private blurActiveElement() {

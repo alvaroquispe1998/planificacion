@@ -1364,3 +1364,58 @@ h1 {
   }
 }
 .chip-warning { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+
+/* ── Error column ───────────────────────────────────────── */
+.result-column-error {
+  background: linear-gradient(180deg, #fffafa, #fff5f5);
+}
+
+.result-column-desc {
+  margin: 0.1rem 0 0;
+  color: #8a6666;
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.result-column-actions-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.1rem;
+  margin-bottom: 0.2rem;
+}
+
+.count-badge-danger {
+  background: #fde8e8;
+  border: 1px solid #f4bcbc;
+  color: #a03b3b;
+}
+
+.result-card-error {
+  border-color: #f4c4c4;
+  background: linear-gradient(180deg, #fffefe, #fff4f4);
+  box-shadow: inset 3px 0 0 #e05252;
+}
+
+.result-message-error {
+  color: #b33030;
+}
+
+.result-status-pill-danger {
+  background: #fde3e3;
+  color: #a03b3b;
+}
+
+/* ── Progress bar total count ───────────────────────────── */
+.generation-progress-total {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #e8f2ff;
+  border: 1px solid #c8ddfc;
+  color: #2a5ea0;
+  font-size: 0.76rem;
+  font-weight: 700;
+  margin-left: 0.35rem;
+}

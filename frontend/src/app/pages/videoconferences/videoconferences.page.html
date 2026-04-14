@@ -218,14 +218,17 @@
 
     <div class="generation-progress-bar" *ngIf="generating" role="status" aria-label="Generando videoconferencias">
       <div class="generation-progress-header">
-        <span class="generation-progress-label">Generando videoconferencias en Aula Virtual&hellip;</span>
+        <span class="generation-progress-label">
+          Generando videoconferencias en Aula Virtual&hellip;
+          <span *ngIf="generationTotal > 0" class="generation-progress-total">{{ generationTotal }} clase(s) en proceso</span>
+        </span>
         <span class="generation-progress-pct">{{ generationProgress | number:'1.0-0' }}%</span>
       </div>
       <div class="generation-progress-track">
         <div class="generation-progress-fill" [style.width.%]="generationProgress"></div>
       </div>
       <p class="generation-progress-hint">
-        Cada clase se crea individualmente en Aula Virtual y se concilia con Zoom. Esto puede tardar varios segundos segun la cantidad de ocurrencias.
+        Cada clase se crea individualmente en Aula Virtual y se concilia con Zoom. Tarda ~1&ndash;2 seg por clase &mdash; con {{ generationTotal || '?' }} clase(s) puede demorar hasta {{ ((generationTotal || 0) * 2) | number:'1.0-0' }} seg. No cierres esta ventana.
       </p>
     </div>
 
@@ -473,6 +476,47 @@
             </div>
             <span class="result-context">{{ resultContextLabel(item) }}</span>
             <p class="result-message">{{ item.message }}</p>
+            <div class="result-actions-inline" *ngIf="item.record_id">
+              <button class="btn btn-secondary btn-sm" type="button" (click)="openAuditDetail(item.record_id)">
+                Abrir auditoria
+              </button>
+            </div>
+          </article>
+        </div>
+      </article>
+
+      <article class="result-column result-column-error" *ngIf="errorResultRows.length > 0">
+        <header class="result-column-head">
+          <div>
+            <span class="eyebrow eyebrow-soft">Fallos</span>
+            <h3>Errores reales</h3>
+            <p class="result-column-desc">Estas reuniones NO fueron creadas. Puedes reintentarlas o copiar la lista para revisarlas.</p>
+          </div>
+          <span class="count-badge count-badge-danger">{{ errorResultRows.length }}</span>
+        </header>
+        <div class="result-column-actions-bar">
+          <button
+            class="btn btn-primary btn-sm"
+            type="button"
+            (click)="retryAllFailed()"
+            [disabled]="generating">
+            ↩ Reintentar todas ({{ errorResultRows.length }})
+          </button>
+          <button
+            class="btn btn-secondary btn-sm"
+            type="button"
+            (click)="copyFailedList()">
+            Copiar lista de errores
+          </button>
+        </div>
+        <div class="result-card-list">
+          <article class="result-card result-card-error" *ngFor="let item of errorResultRows">
+            <div class="result-card-head">
+              <strong>{{ resultCourseLabel(item) }}</strong>
+              <span class="result-status-pill result-status-pill-danger">Error</span>
+            </div>
+            <span class="result-context">{{ resultContextLabel(item) }}</span>
+            <p class="result-message result-message-error">{{ item.message }}</p>
             <div class="result-actions-inline" *ngIf="item.record_id">
               <button class="btn btn-secondary btn-sm" type="button" (click)="openAuditDetail(item.record_id)">
                 Abrir auditoria
