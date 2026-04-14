@@ -1645,6 +1645,14 @@ export class VideoconferencesPageComponent implements OnInit {
       error: async (error) => {
         this.finishGenerationProgress();
         this.loading = false;
+
+        // If the error body contains partial results (e.g. timeout after fail-fast),
+        // display them so the user can see what was processed and retry the rest.
+        const partialResults = error?.error?.results;
+        if (Array.isArray(partialResults) && partialResults.length > 0) {
+          this.generationResult = error.error;
+        }
+
         const message = error?.error?.message ?? 'Error generando videoconferencias.';
         const shouldConfirmPoolWarning =
           !hasConfirmedWarnings &&
@@ -1663,7 +1671,9 @@ export class VideoconferencesPageComponent implements OnInit {
           return;
         }
         await this.dialog.alert({
-          title: 'No se pudieron generar las videoconferencias',
+          title: partialResults?.length > 0
+            ? 'Proceso interrumpido — revisa los resultados parciales'
+            : 'No se pudieron generar las videoconferencias',
           message,
           tone: 'danger',
         });
