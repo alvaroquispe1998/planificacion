@@ -34,6 +34,8 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   mappings: VideoconferenceInheritanceItem[] = [];
   schedules: VideoconferenceInheritanceCatalogSchedule[] = [];
   inheritanceCandidates: VideoconferenceInheritanceCandidateItem[] = [];
+  /** Set of candidate IDs where the user has manually swapped parent ↔ first child */
+  invertedCandidateIds = new Set<string>();
 
   filters = {
     semesterId: '',
@@ -572,6 +574,28 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     this.inheritanceCandidates = this.inheritanceCandidates.filter(
       (candidate) => candidate.id !== item.id,
     );
+    this.cdr.detectChanges();
+  }
+
+  /**
+   * Swaps parent ↔ first child for a candidate so the user can choose which
+   * schedule should be the actual parent before applying.
+   */
+  invertCandidate(item: VideoconferenceInheritanceCandidateItem) {
+    const firstChild = item.children[0];
+    if (!firstChild) {
+      return;
+    }
+    const originalParent = item.parent;
+    // Swap in-place
+    (item as any).parent = firstChild;
+    item.children[0] = originalParent as any;
+
+    if (this.invertedCandidateIds.has(item.id)) {
+      this.invertedCandidateIds.delete(item.id);
+    } else {
+      this.invertedCandidateIds.add(item.id);
+    }
     this.cdr.detectChanges();
   }
 
