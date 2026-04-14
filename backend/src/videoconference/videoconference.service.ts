@@ -1526,8 +1526,10 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         // Pre-seed simulatedReservations with already-scheduled DB meetings for all pool users.
-        // Without this, BASE mode has no knowledge of existing conferences and can over-assign a user
-        // who already has maxConcurrent meetings in a given time window.
+        // IMPORTANT: We must convert to reference-week dates (same fictional week used by
+        // buildWeeklyScheduleDateTime) using day_of_week + start_time/end_time, NOT real
+        // scheduled_start/scheduled_end dates, because the weekly simulation compares everything
+        // against reference dates (Jan 2026) and real UTC dates would never overlap.
         const simulatedReservations = new Map<string, SimulatedReservation[]>();
         const poolUserIds = zoomUsers.map((u) => u.zoom_user_id).filter(Boolean);
         if (poolUserIds.length) {
@@ -1536,15 +1538,50 @@ export class VideoconferenceService implements OnModuleInit {
                     zoom_user_id: In(poolUserIds),
                     status: In([...ACTIVE_CONFERENCE_STATUSES]),
                 },
-                select: ['zoom_user_id', 'scheduled_start', 'scheduled_end'],
+                select: ['zoom_user_id', 'day_of_week', 'start_time', 'end_time', 'zoom_meeting_id'],
             });
+            const dbMeetingIds = new Set<string>();
             for (const conf of existingConferences) {
                 if (!conf.zoom_user_id) {
                     continue;
                 }
+                if (conf.zoom_meeting_id) {
+                    dbMeetingIds.add(conf.zoom_meeting_id);
+                }
+                const refStart = buildWeeklyScheduleDateTime(conf.day_of_week, conf.start_time);
+                const refEnd = buildWeeklyScheduleDateTime(conf.day_of_week, conf.end_time);
                 const current = simulatedReservations.get(conf.zoom_user_id) ?? [];
-                current.push({ scheduled_start: conf.scheduled_start, scheduled_end: conf.scheduled_end });
+                current.push({ scheduled_start: refStart, scheduled_end: refEnd });
                 simulatedReservations.set(conf.zoom_user_id, current);
+            }
+
+            // Also pre-seed from live/upcoming Zoom meetings that are NOT already in our DB.
+            // This catches meetings created directly in Zoom outside the system.
+            for (const zoomUser of zoomUsers) {
+                if (!zoomUser.email) {
+                    continue;
+                }
+                try {
+                    const remoteMeetings = await this.zoomAccountService.listUserMeetingsByTypes(
+                        zoomUser.email,
+                        ['live', 'upcoming'],
+                    );
+                    for (const meeting of remoteMeetings) {
+                        if (dbMeetingIds.has(meeting.id)) {
+                            // Already counted via the DB record
+                            continue;
+                        }
+                        const slot = zoomMeetingToReferenceWeekSlot(meeting);
+                        if (!slot) {
+                            continue;
+                        }
+                        const current = simulatedReservations.get(zoomUser.zoom_user_id) ?? [];
+                        current.push({ scheduled_start: slot.start, scheduled_end: slot.end });
+                        simulatedReservations.set(zoomUser.zoom_user_id, current);
+                    }
+                } catch {
+                    // Zoom API unavailable — continue without remote meetings for this user
+                }
             }
         }
 
@@ -5301,6 +5338,53 @@ function parseRemoteMeetingStart(value: string | null) {
     }
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date;
+}
+
+// Lima is UTC-5. This constant is used to convert Zoom UTC timestamps to local day/time.
+const LIMA_UTC_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+const JS_DAY_TO_CODE: Record<number, string> = {
+    0: 'DOMINGO',
+    1: 'LUNES',
+    2: 'MARTES',
+    3: 'MIERCOLES',
+    4: 'JUEVES',
+    5: 'VIERNES',
+    6: 'SABADO',
+};
+
+/**
+ * Converts a ZoomMeetingSummary to a reference-week slot compatible with the base (weekly)
+ * simulation. The base simulation uses fictional reference dates (Jan 2026) where hours/minutes
+ * encode local Lima time directly, so we must project the Zoom meeting from its real UTC timestamp
+ * into the same reference week using day-of-week + local time.
+ */
+function zoomMeetingToReferenceWeekSlot(meeting: ZoomMeetingSummary): { start: Date; end: Date } | null {
+    const remoteStart = parseRemoteMeetingStart(meeting.start_time);
+    if (!remoteStart) {
+        return null;
+    }
+    // Shift UTC → Lima local (subtract 5 hours)
+    const localStart = new Date(remoteStart.getTime() - LIMA_UTC_OFFSET_MS);
+    const dayCode = JS_DAY_TO_CODE[localStart.getUTCDay()];
+    if (!dayCode) {
+        return null;
+    }
+    const hh = String(localStart.getUTCHours()).padStart(2, '0');
+    const mm = String(localStart.getUTCMinutes()).padStart(2, '0');
+    const refStart = buildWeeklyScheduleDateTime(dayCode, `${hh}:${mm}`);
+
+    // For live meetings the scheduled duration may already be over; use a generous ceiling
+    // so that a live meeting active right now blocks the slot.
+    const isLive = meeting.source_type === 'live';
+    const durationMin = meeting.duration_minutes
+        ? (isLive
+            ? Math.max(meeting.duration_minutes, LIVE_MEETING_FALLBACK_DURATION_MINUTES)
+            : meeting.duration_minutes)
+        : (isLive ? LIVE_MEETING_FALLBACK_DURATION_MINUTES : DEFAULT_REMOTE_MEETING_DURATION_MINUTES);
+
+    const refEnd = addMinutes(refStart, durationMin);
+    return { start: refStart, end: refEnd };
 }
 
 function parseMaybeJson(value: string) {
