@@ -658,6 +658,12 @@ h1 {
   grid-template-columns: 44px minmax(250px, 1.2fr) minmax(200px, 0.85fr) minmax(220px, 0.9fr) minmax(240px, 1fr) minmax(230px, 0.9fr) minmax(170px, 0.7fr);
 }
 
+/* When there is no hybrid host column, drop it from the grid */
+.rows-shell-no-host .rows-header-actions,
+.rows-shell-no-host .schedule-line-actions {
+  grid-template-columns: 44px minmax(250px, 1.2fr) minmax(200px, 0.85fr) minmax(220px, 0.9fr) minmax(240px, 1.1fr) minmax(170px, 0.7fr);
+}
+
 .schedule-rows {
   display: flex;
   flex-direction: column;
@@ -724,28 +730,52 @@ h1 {
 }
 
 .vc-action-btn {
-  min-height: 36px;
-  padding: 0 14px;
-  border-radius: 10px;
-  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 11px;
+  border-radius: 7px;
+  font-size: 0.75rem;
   font-weight: 700;
   cursor: pointer;
-  transition: opacity 0.15s;
+  letter-spacing: 0.01em;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
   white-space: nowrap;
+  border: none;
 }
 
 .vc-action-btn:hover:not(:disabled) {
-  opacity: 0.82;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(0,0,0,0.12);
+}
+
+.vc-action-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .vc-action-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.38;
   cursor: not-allowed;
 }
 
 .vc-action-btn-secondary {
-  border: 1px solid #d3e3f2;
-  background: linear-gradient(180deg, #f4f9ff, #edf4fc);
+  background: #e8f0fb;
+  color: #1a4f8a;
+  border: 1px solid #c5d8f5;
+}
+.vc-action-btn-secondary:hover:not(:disabled) {
+  background: #d5e6ff;
+}
+
+.vc-action-btn-ghost {
+  background: transparent;
+  color: #6b8ab0;
+  border: 1px solid #dde8f4;
+}
+.vc-action-btn-ghost:hover:not(:disabled) {
+  background: #f0f5fb;
   color: #2d5277;
 }
 

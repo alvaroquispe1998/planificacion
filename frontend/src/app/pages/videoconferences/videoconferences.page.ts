@@ -1153,7 +1153,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
           .sort((left, right) => `${left.name}`.localeCompare(`${right.name}`));
 
         if (!this.selectedZoomGroupId || !this.zoomGroups.some((item) => item.id === this.selectedZoomGroupId)) {
-          this.selectedZoomGroupId = this.zoomGroups[0]?.id || '';
+          // Prefer the REGULAR group as default; fall back to first active group
+          const regularGroup = this.zoomGroups.find((item) => item.code.toUpperCase().includes('REGULAR'));
+          this.selectedZoomGroupId = (regularGroup ?? this.zoomGroups[0])?.id || '';
         }
         this.cdr.detectChanges();
       },
