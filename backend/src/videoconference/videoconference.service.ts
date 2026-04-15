@@ -466,7 +466,11 @@ export class VideoconferenceService implements OnModuleInit {
     ) { }
 
     async onModuleInit() {
-        await this.ensureZoomGroupsBootstrap();
+        try {
+            await this.ensureZoomGroupsBootstrap();
+        } catch (err) {
+            console.error('[VideoconferenceService] onModuleInit bootstrap failed (non-fatal):', err);
+        }
     }
 
     async getCampuses() {
