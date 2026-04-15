@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, OnInit, QueryList, ViewChildren } from '@angular/core';
+import { ChangeDetectorRef, Component, OnDestroy, OnInit, QueryList, ViewChildren } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { MultiSelectComponent, MultiSelectOption } from '../../components/multi-select/multi-select.component';
@@ -59,7 +59,7 @@ type AppliedFilterSnapshot = {
   templateUrl: './videoconferences.page.html',
   styleUrl: './videoconferences.page.css',
 })
-export class VideoconferencesPageComponent implements OnInit {
+export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   @ViewChildren(MultiSelectComponent) multiSelectComponents!: QueryList<MultiSelectComponent>;
 
   selectedCampuses: string[] = [];
@@ -105,6 +105,7 @@ export class VideoconferencesPageComponent implements OnInit {
   }>();
 
   private generationProgressInterval: ReturnType<typeof setInterval> | null = null;
+  private generationPollInterval: ReturnType<typeof setInterval> | null = null;
   assignmentUsersModalOpen = false;
   expandedAssignmentHostKey = '';
   hasSearched = false;
@@ -1631,7 +1632,8 @@ export class VideoconferencesPageComponent implements OnInit {
       (payload.occurrenceKeys?.length ?? 0) ||
       (payload.scheduleIds?.length ?? 0) ||
       this.selectedCount;
-    this.startGenerationProgress(estimatedTotal);
+    const displayTotal = this.selectedCount || estimatedTotal;
+    this.startGenerationProgress(estimatedTotal, displayTotal);
     this.api.generate(payload).subscribe({
       next: async (res) => {
         this.finishGenerationProgress();
@@ -1644,8 +1646,28 @@ export class VideoconferencesPageComponent implements OnInit {
         });
       },
       error: async (error) => {
-        this.finishGenerationProgress();
         this.loading = false;
+
+        // Gateway / network error (502, 503, 504, or status 0):
+        // The backend may still be processing. Keep the progress bar alive and
+        // poll checkExisting until the count stabilises, then finish normally.
+        const isGatewayError =
+          error.status === 0 ||
+          error.status === 502 ||
+          error.status === 503 ||
+          error.status === 504;
+        if (isGatewayError) {
+          this.startGatewayPolling({
+            scheduleIds: payload.scheduleIds,
+            occurrenceKeys: payload.occurrenceKeys,
+            startDate: payload.startDate,
+            endDate: payload.endDate,
+          });
+          this.cdr.detectChanges();
+          return;
+        }
+
+        this.finishGenerationProgress();
 
         // If the error body contains partial results (e.g. timeout after fail-fast),
         // display them so the user can see what was processed and retry the rest.
@@ -1682,9 +1704,9 @@ export class VideoconferencesPageComponent implements OnInit {
     });
   }
 
-  private startGenerationProgress(total = 0) {
+  private startGenerationProgress(total = 0, displayTotal?: number) {
     this.generationProgress = 0;
-    this.generationTotal = total;
+    this.generationTotal = displayTotal ?? total;
     this.generationStartTime = Date.now();
     this.generating = true;
     this.cdr.detectChanges();
@@ -1702,10 +1724,14 @@ export class VideoconferencesPageComponent implements OnInit {
     }, 500);
   }
 
-  private finishGenerationProgress() {
+  finishGenerationProgress() {
     if (this.generationProgressInterval) {
       clearInterval(this.generationProgressInterval);
       this.generationProgressInterval = null;
+    }
+    if (this.generationPollInterval) {
+      clearInterval(this.generationPollInterval);
+      this.generationPollInterval = null;
     }
     this.generationProgress = 100;
     this.cdr.detectChanges();
@@ -1715,6 +1741,61 @@ export class VideoconferencesPageComponent implements OnInit {
       this.generationTotal = 0;
       this.cdr.detectChanges();
     }, 1200);
+  }
+
+  ngOnDestroy() {
+    if (this.generationProgressInterval) clearInterval(this.generationProgressInterval);
+    if (this.generationPollInterval) clearInterval(this.generationPollInterval);
+  }
+
+  /**
+   * After a gateway error (502/0) the backend may still be creating records.
+   * Poll checkExisting every 8 s; when the count is stable for 2 consecutive
+   * rounds (≥ 3 polls minimum = ~24 s), consider the generation complete,
+   * finish the progress bar and show a result summary.
+   */
+  private startGatewayPolling(payload: {
+    scheduleIds?: string[];
+    occurrenceKeys?: string[];
+    startDate: string;
+    endDate: string;
+  }) {
+    if (this.generationPollInterval) {
+      clearInterval(this.generationPollInterval);
+    }
+    let lastCount = -1;
+    let stableRounds = 0;
+    let pollCount = 0;
+
+    this.generationPollInterval = setInterval(() => {
+      pollCount++;
+      this.api.checkExisting(payload).subscribe({
+        next: async (res) => {
+          const count = res.existing.length;
+          if (count === lastCount && pollCount >= 3) {
+            stableRounds++;
+            if (stableRounds >= 2) {
+              clearInterval(this.generationPollInterval!);
+              this.generationPollInterval = null;
+              this.finishGenerationProgress();
+              await this.dialog.alert({
+                title: 'Proceso finalizado',
+                message: count > 0
+                  ? `Se detectaron ${count} clase(s) creadas en el rango ${payload.startDate} – ${payload.endDate}. Revisa el detalle en Auditoría.`
+                  : 'La generación concluyó pero no se detectaron nuevas clases en el rango. Revisa Auditoría para confirmar.',
+                tone: count > 0 ? 'success' : 'warning',
+              });
+            }
+          } else {
+            lastCount = count;
+            stableRounds = 0;
+          }
+        },
+        error: () => {
+          // Network still unstable — keep polling silently
+        },
+      });
+    }, 8000);
   }
 
   private blurActiveElement() {

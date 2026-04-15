@@ -1177,6 +1177,32 @@ h1 {
   transition: width 0.28s ease-out;
 }
 
+.generation-progress-fill-warn {
+  background: linear-gradient(90deg, #f5a623 0%, #e07b00 100%);
+}
+
+.generation-progress-hint-warn {
+  color: #7a4a00;
+  background: #fff8ec;
+  border: 1px solid #f5c87c;
+  border-radius: 6px;
+  padding: 0.45rem 0.7rem;
+}
+
+.btn-link-dismiss {
+  background: none;
+  border: none;
+  color: #2d72b3;
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 0.6rem;
+  text-decoration: underline;
+}
+.btn-link-dismiss:hover {
+  color: #1a4f8a;
+}
+
 /* ── Already-created badge ───────────────────────────── */
 .chip-already-created {
   background: #e8f5e9;
