@@ -103,7 +103,7 @@ jobs:
             fi
 
             APP_NAME="api-planificacion-academica"
-            APP_ENTRY="$API_DIR/dist/src/main.js"
+            APP_ENTRY="$API_DIR/dist/main.js"
 
             if pm2 describe $APP_NAME > /dev/null 2>&1; then
               pm2 restart $APP_NAME
