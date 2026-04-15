@@ -39,6 +39,7 @@ export class AuditPageComponent implements OnInit {
   loading = true;
   error = '';
   rows: any[] = [];
+  hideInherited = true;
   totals = {
     total: 0,
     matched: 0,
@@ -122,6 +123,7 @@ export class AuditPageComponent implements OnInit {
       audit_sync_status: '',
       search: '',
     };
+    this.hideInherited = true;
     this.page = 1;
     this.loadRows();
   }
@@ -333,6 +335,7 @@ export class AuditPageComponent implements OnInit {
   private apiFilters() {
     return {
       ...this.filters,
+      hide_inherited: this.hideInherited ? 'true' : 'false',
       page: this.page,
       page_size: this.pageSize,
     };

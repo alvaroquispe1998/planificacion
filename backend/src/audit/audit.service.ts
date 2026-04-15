@@ -126,6 +126,7 @@ type PlanningAuditFilters = {
   status?: string;
   audit_sync_status?: string;
   search?: string;
+  hide_inherited?: boolean;
 };
 
 @Injectable()
@@ -797,6 +798,9 @@ export class AuditService {
         pendingAudit: 'PENDING',
         auditStatus: filters.audit_sync_status,
       });
+    }
+    if (filters.hide_inherited) {
+      query.andWhere("vc.link_mode != 'INHERITED'");
     }
     const search = `${filters.search ?? ''}`.trim();
     if (search) {
