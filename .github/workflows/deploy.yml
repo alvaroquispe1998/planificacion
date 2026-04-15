@@ -105,13 +105,11 @@ jobs:
             APP_NAME="api-planificacion-academica"
             APP_ENTRY="$API_DIR/dist/main.js"
 
-            if pm2 describe $APP_NAME > /dev/null 2>&1; then
-              pm2 restart $APP_NAME
-            else
-              pm2 start $APP_ENTRY \
-                --name $APP_NAME \
-                --cwd $API_DIR
-            fi
+            # Siempre eliminar y re-registrar para que pm2 use el entry point actualizado
+            pm2 delete $APP_NAME 2>/dev/null || true
+            pm2 start $APP_ENTRY \
+              --name $APP_NAME \
+              --cwd $API_DIR
 
             pm2 save
             echo "✅ Deploy completado como autonomadeica"
