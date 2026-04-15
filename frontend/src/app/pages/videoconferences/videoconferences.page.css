@@ -723,6 +723,45 @@ h1 {
   align-items: flex-start;
 }
 
+.vc-action-btn {
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+
+.vc-action-btn:hover:not(:disabled) {
+  opacity: 0.82;
+}
+
+.vc-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vc-action-btn-secondary {
+  border: 1px solid #d3e3f2;
+  background: linear-gradient(180deg, #f4f9ff, #edf4fc);
+  color: #2d5277;
+}
+
+.vc-vacancies-chip {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 1px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #eef4ff;
+  border: 1px solid #c8ddf8;
+  color: #1e55a0;
+  font-size: 0.73rem;
+  font-weight: 700;
+}
+
 .course-cell strong,
 .teacher-cell strong,
 .context-cell strong,

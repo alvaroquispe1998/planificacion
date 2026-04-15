@@ -619,6 +619,9 @@
             <strong>{{ getContextPrimary(item) }}</strong>
             <span class="meta-inline">{{ getContextSecondary(item) }}</span>
             <span class="meta-inline">{{ getVcContext(item) }}</span>
+            <span *ngIf="item.section_projected_vacancies != null" class="vc-vacancies-chip">
+              Vacantes: {{ item.section_projected_vacancies }}
+            </span>
             <span *ngIf="hasDifferentAvContext(item)" class="meta-inline">
               AV: {{ getAvContextPrimary(item) }} | {{ getAvContextSecondary(item) }}
             </span>
@@ -660,13 +663,13 @@
 
           <div class="actions-cell">
             <button
-              class="btn btn-secondary btn-sm"
+              class="vc-action-btn vc-action-btn-secondary"
               type="button"
               (click)="$event.stopPropagation(); openPayloadPreview(item)">
               Ver payload
             </button>
             <button
-              class="btn btn-secondary btn-sm"
+              class="vc-action-btn vc-action-btn-secondary"
               type="button"
               (click)="$event.stopPropagation(); openOverrideEditor(item)"
               [disabled]="loading || !canManageOccurrence(item)">

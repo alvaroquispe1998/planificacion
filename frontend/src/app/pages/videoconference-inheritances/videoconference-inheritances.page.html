@@ -67,9 +67,14 @@
           class="btn btn-primary candidate-head-btn candidate-head-btn-primary"
           (click)="previewCandidates()"
           [disabled]="candidateLoading || !canLoadCatalog">
-          {{ candidateLoading ? 'Buscando...' : 'Buscar posibles herencias' }}
+          <span *ngIf="candidateLoading" class="btn-spinner"></span>
+          <span>{{ candidateLoading ? 'Buscando...' : 'Buscar posibles herencias' }}</span>
         </button>
       </div>
+    </div>
+
+    <div *ngIf="candidateLoading" class="search-progress-bar">
+      <div class="search-progress-fill"></div>
     </div>
 
     <div class="candidate-list" *ngIf="inheritanceCandidates.length; else emptyCandidateState">
@@ -311,6 +316,9 @@
             <strong>{{ item.parent?.course_label || item.parent_schedule_id }}</strong>
             <span>{{ item.parent?.section_label || '--' }} | {{ item.parent?.subsection_label || '--' }}</span>
             <span>{{ item.parent?.schedule_label || '--' }}</span>
+            <span *ngIf="item.parent?.section_projected_vacancies != null" class="vacancies-chip">
+              Vacantes: {{ item.parent?.section_projected_vacancies }}
+            </span>
           </div>
 
           <div>
@@ -318,6 +326,9 @@
             <strong>{{ item.child?.course_label || item.child_schedule_id }}</strong>
             <span>{{ item.child?.section_label || '--' }} | {{ item.child?.subsection_label || '--' }}</span>
             <span>{{ item.child?.schedule_label || '--' }}</span>
+            <span *ngIf="item.child?.section_projected_vacancies != null" class="vacancies-chip">
+              Vacantes: {{ item.child?.section_projected_vacancies }}
+            </span>
           </div>
         </div>
 
@@ -327,11 +338,11 @@
         </div>
 
         <div class="mapping-actions">
-          <button type="button" class="btn btn-secondary btn-sm" (click)="edit(item)">Editar</button>
-          <button type="button" class="btn btn-secondary btn-sm" (click)="toggleActive(item)">
+          <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="edit(item)">Editar</button>
+          <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="toggleActive(item)">
             {{ item.is_active ? 'Desactivar' : 'Activar' }}
           </button>
-          <button type="button" class="btn btn-danger btn-sm" (click)="remove(item)">Eliminar</button>
+          <button type="button" class="mapping-action-btn mapping-action-btn-danger" (click)="remove(item)">Eliminar</button>
         </div>
       </article>
     </div>

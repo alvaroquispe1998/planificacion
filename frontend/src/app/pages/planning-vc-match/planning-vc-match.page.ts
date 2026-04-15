@@ -24,6 +24,7 @@ type PlanningVcMatchFilters = {
 export class PlanningVcMatchPageComponent implements OnInit {
   loading = true;
   saving = false;
+  recalculating = false;
   error = '';
   message = '';
 
@@ -139,12 +140,13 @@ export class PlanningVcMatchPageComponent implements OnInit {
 
   recalculateVisible() {
     this.saving = true;
+    this.recalculating = true;
     this.api
       .recalculatePlanningVcMatches({
         ...this.filters,
         cycle: this.filters.cycle ? Number(this.filters.cycle) : undefined,
       })
-      .pipe(finalize(() => (this.saving = false)))
+      .pipe(finalize(() => { this.saving = false; this.recalculating = false; }))
       .subscribe({
         next: (response) => {
           this.message = `Recalculo ejecutado. ${response?.updated_subsection_count ?? 0} subsecciones actualizadas.`;

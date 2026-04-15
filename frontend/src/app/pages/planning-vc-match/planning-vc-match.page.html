@@ -7,9 +7,13 @@
     </div>
     <div class="hero-actions">
       <button class="btn btn-secondary btn-sm" (click)="loadRows()" [disabled]="saving || loading">Actualizar</button>
-      <button class="btn btn-primary btn-sm" (click)="recalculateVisible()" [disabled]="saving || loading">
-        Recalcular visibles
+      <button class="btn btn-primary btn-sm recalc-btn" (click)="recalculateVisible()" [disabled]="saving || loading">
+        <span *ngIf="recalculating" class="btn-spinner"></span>
+        <span>{{ recalculating ? 'Recalculando...' : 'Recalcular visibles' }}</span>
       </button>
+    </div>
+    <div *ngIf="recalculating" class="recalc-progress-bar">
+      <div class="recalc-progress-fill"></div>
     </div>
   </header>
 
