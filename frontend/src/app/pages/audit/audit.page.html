@@ -103,6 +103,10 @@
       </label>
 
       <div class="filter-actions">
+        <label class="toggle-label">
+          <input type="checkbox" [(ngModel)]="hideInherited" (ngModelChange)="applyFilters()" />
+          <span>Ocultar heredadas</span>
+        </label>
         <button type="button" class="btn btn-primary" (click)="applyFilters()" [disabled]="loading">
           Buscar
         </button>
@@ -116,6 +120,9 @@
         <p class="eyebrow">Reuniones registradas</p>
         <h2>Reuniones creadas</h2>
         <p class="section-copy">Este listado sale de la generacion de videoconferencias y su seguimiento de auditoria.</p>
+        <p class="section-copy" *ngIf="hideInherited" style="color: #8a7040; margin-top: 0.2rem; font-size: 0.8rem;">
+          Solo se muestran registros Owner. Desactiva "Ocultar heredadas" para ver tambien los secundarios.
+        </p>
       </div>
       <span class="count">{{ resultBadgeLabel }}</span>
     </div>

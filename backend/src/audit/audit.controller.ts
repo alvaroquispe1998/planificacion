@@ -133,6 +133,7 @@ export class AuditController {
     @Query('status') status?: string,
     @Query('audit_sync_status') auditSyncStatus?: string,
     @Query('search') search?: string,
+    @Query('hide_inherited') hideInherited?: string,
   ) {
     return this.auditService.listPlanningVideoconferenceAudits({
       page: page ? Number(page) : undefined,
@@ -144,6 +145,7 @@ export class AuditController {
       status,
       audit_sync_status: auditSyncStatus,
       search,
+      hide_inherited: hideInherited !== 'false',
     });
   }
 
