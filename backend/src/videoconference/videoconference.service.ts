@@ -3718,6 +3718,7 @@ export class VideoconferenceService implements OnModuleInit {
                 parent_label: inheritance.parent_label,
                 family_owner_schedule_id: inheritance.family_owner_schedule_id,
             },
+            section_projected_vacancies: row.section_projected_vacancies,
         };
     }
 
@@ -3785,6 +3786,7 @@ export class VideoconferenceService implements OnModuleInit {
             override_notes: occurrence.override_notes,
             selectable: occurrence.occurrence_type !== 'SKIPPED',
             inheritance: occurrence.inheritance,
+            section_projected_vacancies: row.section_projected_vacancies,
         };
     }
 

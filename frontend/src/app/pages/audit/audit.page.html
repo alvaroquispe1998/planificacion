@@ -110,6 +110,10 @@
         <button type="button" class="btn btn-primary" (click)="applyFilters()" [disabled]="loading">
           Buscar
         </button>
+        <label class="toggle-label">
+          <input type="checkbox" [(ngModel)]="hideInherited" (ngModelChange)="applyFilters()" />
+          <span class="toggle-text">Ocultar heredadas</span>
+        </label>
       </div>
     </div>
   </section>

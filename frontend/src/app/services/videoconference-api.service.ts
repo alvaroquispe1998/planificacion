@@ -93,6 +93,7 @@ export interface VideoconferencePreviewItem {
         parent_label: string | null;
         family_owner_schedule_id: string;
     };
+    section_projected_vacancies: number | null;
     selected?: boolean;
 }
 
@@ -292,6 +293,7 @@ export interface VideoconferenceInheritanceItem {
         section_label: string;
         subsection_label: string;
         schedule_label: string;
+        section_projected_vacancies: number | null;
     } | null;
     child: {
         schedule_id: string;
@@ -299,6 +301,7 @@ export interface VideoconferenceInheritanceItem {
         section_label: string;
         subsection_label: string;
         schedule_label: string;
+        section_projected_vacancies: number | null;
     } | null;
 }
 

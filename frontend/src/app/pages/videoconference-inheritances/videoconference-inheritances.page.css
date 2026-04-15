@@ -37,6 +37,9 @@
 }
 
 .candidate-head-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   min-height: 46px;
   padding: 0 18px;
   border-radius: 14px;
@@ -55,6 +58,43 @@
   border: 1px solid rgba(124, 160, 213, 0.24);
   background: linear-gradient(180deg, rgba(248, 251, 255, 0.98), rgba(238, 244, 252, 0.98));
   color: #21406b;
+}
+
+/* Search loading */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes search-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(500%); }
+}
+
+.search-progress-bar {
+  height: 3px;
+  background: rgba(21, 83, 172, 0.1);
+  border-radius: 0 0 24px 24px;
+  overflow: hidden;
+  margin: -24px -28px 20px;
+}
+
+.search-progress-fill {
+  width: 20%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #1d6fd0, #1553ac, transparent);
+  border-radius: 2px;
+  animation: search-sweep 1.4s ease-in-out infinite;
 }
 
 .filters-grid,
@@ -360,12 +400,55 @@
   color: #16345e;
 }
 
-.mapping-meta,
 .mapping-actions {
   display: flex;
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.mapping-action-btn {
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 12px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mapping-action-btn:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.mapping-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mapping-action-btn-secondary {
+  border: 1px solid rgba(124, 160, 213, 0.3);
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.98), rgba(238, 244, 252, 0.98));
+  color: #21406b;
+}
+
+.mapping-action-btn-danger {
+  border: 1px solid rgba(200, 80, 80, 0.2);
+  background: linear-gradient(135deg, #f87272, #d94040);
+  color: #fff;
+}
+
+.vacancies-chip {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 2px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #eef4ff;
+  border: 1px solid #c8ddf8;
+  color: #1e55a0;
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .pill {
