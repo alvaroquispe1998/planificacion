@@ -44,8 +44,7 @@ jobs:
 
       - name: Add .htaccess to built frontend
         run: |
-          mkdir -p frontend/browser
-          cp frontend/deploy/.htaccess frontend/browser/.htaccess || true
+          cp frontend/deploy/.htaccess frontend/dist/frontend/browser/.htaccess
 
       - name: Preparar clave SSH
         run: |
