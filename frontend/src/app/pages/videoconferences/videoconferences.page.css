@@ -1459,6 +1459,8 @@ h1 {
   }
 }
 .chip-warning { background: #fee2e2; color: #b91c1c; border-color: #fca5a5; }
+.chip-host-rule { background: #eff6ff; color: #1d4ed8; border-color: #93c5fd; }
+.chip-host-locked { background: #fafafa; color: #374151; border-color: #6b7280; font-weight: 600; }
 
 /* ── Error column ───────────────────────────────────────── */
 .result-column-error {
@@ -1513,4 +1515,210 @@ h1 {
   font-size: 0.76rem;
   font-weight: 700;
   margin-left: 0.35rem;
+}
+
+/* --- Cursos Especiales / Split Panel ----------------------------------- */
+.split-panel-wrapper {
+  margin-top: 1.25rem;
+  border: 1px solid #d0dff0;
+  border-radius: 14px;
+  background: #f7fbff;
+  overflow: hidden;
+}
+
+.split-panel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 1.1rem;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #20344d;
+  background: #eef5fd;
+  border-bottom: 1px solid #d0dff0;
+  user-select: none;
+}
+
+.split-panel-toggle:hover {
+  background: #e4eefa;
+}
+
+.split-panel-toggle-icon {
+  font-size: 0.7rem;
+  color: #6a8fbc;
+}
+
+.split-panel-body {
+  padding: 1.1rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.split-rules-section,
+.split-preview-section,
+.split-generate-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.split-generate-section {
+  background: #f0f7fe;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  border: 1px solid #c8ddf8;
+}
+
+.generate-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.split-result-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.5rem;
+  font-size: 0.87rem;
+  color: #274f6e;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.data-table th {
+  text-align: left;
+  padding: 0.38rem 0.6rem;
+  background: #e8f0fb;
+  color: #304b6b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  border-bottom: 1px solid #c8d9ef;
+}
+
+.data-table td {
+  padding: 0.42rem 0.6rem;
+  border-bottom: 1px solid #e8eef8;
+  color: #203044;
+  vertical-align: middle;
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tr.row-selected td {
+  background: #f0f9ff;
+}
+
+.data-table td.mono {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.78rem;
+  color: #456;
+}
+
+.data-table td.action-cell {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.host-rule-chip {
+  display: inline-block;
+  padding: 0.18rem 0.52rem;
+  border-radius: 999px;
+  background: #dff0e8;
+  border: 1px solid #a8d8bf;
+  color: #1a6038;
+  font-size: 0.77rem;
+  font-weight: 600;
+}
+
+.status-chip {
+  display: inline-block;
+  padding: 0.15rem 0.48rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.chip-ok {
+  background: #d8f5e3;
+  border-color: #90d6ae;
+  color: #1a6038;
+}
+
+.chip-off {
+  background: #f0f0f0;
+  border-color: #c8c8c8;
+  color: #666;
+}
+
+.chip-accent {
+  background: #e0ecff;
+  border-color: #92b8f4;
+  color: #234a9a;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-width: 1px;
+  border-style: solid;
+}
+
+.btn-danger {
+  background: #ffe0e0;
+  border: 1px solid #f4a0a0;
+  color: #a03030;
+  border-radius: 8px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-danger:hover {
+  background: #ffc8c8;
+}
+
+.btn-xs {
+  font-size: 0.77rem;
+  padding: 0.22rem 0.55rem;
+  border-radius: 7px;
+}
+
+.modal-help {
+  margin: -0.3rem 0 0.8rem;
+  font-size: 0.85rem;
+  color: #4a6a8a;
+}
+
+.modal-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem 1.1rem;
+}
+
+.empty-state {
+  color: #6a8aaa;
+  font-size: 0.87rem;
+  font-style: italic;
+  padding: 0.3rem 0;
+}
+
+.loading-label {
+  color: #4a7ab0;
+  font-size: 0.87rem;
+  font-style: italic;
 }

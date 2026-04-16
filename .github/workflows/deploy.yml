@@ -54,13 +54,9 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p ${{ secrets.DEPLOY_PORT }} -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Limpiar frontend completo
-        run: |
-          ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'rm -rf /home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/*'
-           
       - name: Sync frontend to server (rsync)
         run: |
-          rsync -avz frontend/dist/*/browser/. ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no"                                     
+          rsync -avz --delete frontend/dist/*/browser/. ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/home/autonomadeica/public_html/software-uai/planificacion-academica/frontend/ -e "ssh -i ~/.ssh/deploy_key -p ${{ secrets.DEPLOY_PORT }} -o StrictHostKeyChecking=no"                                     
         
       - name: Copy backend package files
         run: |
@@ -109,7 +105,10 @@ jobs:
             pm2 delete $APP_NAME 2>/dev/null || true
             pm2 start $APP_ENTRY \
               --name $APP_NAME \
-              --cwd $API_DIR
+              --cwd $API_DIR \
+              --env production
 
             pm2 save
             echo "✅ Deploy completado como autonomadeica"
+            echo "ℹ️  Si DB_SYNCHRONIZE=true en el .env del servidor, TypeORM correrá ALTER TABLEs al arrancar."
+            echo "ℹ️  Verifica que DB_SYNCHRONIZE=false en producción para evitar bloqueos de DB al reiniciar."

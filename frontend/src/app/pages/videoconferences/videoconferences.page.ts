@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, OnInit, QueryList, ViewChildren } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { MultiSelectComponent, MultiSelectOption } from '../../components/multi-select/multi-select.component';
 import { DialogService } from '../../core/dialog.service';
 import {
@@ -55,7 +55,7 @@ type AppliedFilterSnapshot = {
 @Component({
   selector: 'app-videoconferences-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, MultiSelectComponent],
+  imports: [CommonModule, FormsModule, MultiSelectComponent, RouterLink],
   templateUrl: './videoconferences.page.html',
   styleUrl: './videoconferences.page.css',
 })
@@ -126,6 +126,10 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   payloadPreviewTitle = '';
   payloadPreviewJson = '';
 
+  // ─── Split / Cursos Especiales ──────────────────────────────────────────────
+  /** Count of active host rules — displayed as compact badge on the VC page */
+  splitRulesCount = 0;
+
   private filterOptionsRequestId = 0;
 
   constructor(
@@ -137,6 +141,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.loadZoomGroups();
+    this.loadSplitRulesCount();
     this.refreshFilterOptions();
   }
 
@@ -589,6 +594,15 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     return item.inheritance?.is_inherited
       ? `Hereda de: ${item.inheritance.parent_label || item.inheritance.parent_schedule_id || 'Horario padre'}`
       : 'Owner Zoom';
+  }
+
+  getHostRuleChipLabel(item: VideoconferencePreviewItem): string {
+    const rule = item.host_rule;
+    if (!rule) return '';
+    if (rule.zoom_user_name) return rule.lock_host ? `🔒 ${rule.zoom_user_name}` : rule.zoom_user_name;
+    if (rule.zoom_user_email) return rule.lock_host ? `🔒 ${rule.zoom_user_email}` : rule.zoom_user_email;
+    if (rule.zoom_group_name) return `Grupo: ${rule.zoom_group_name}`;
+    return 'Auto-asignar';
   }
 
   getOccurrenceBadgeLabel(item: VideoconferencePreviewItem) {
@@ -1322,6 +1336,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         this.previewData = this.sortPreviewData(data).map((item) => ({
           ...item,
           selected: item.selectable && (selectedKeys.size ? selectedKeys.has(item.occurrence_key) : false),
+          // Pre-fill from host_rule config (Cursos Especiales): lock_host uses fixed user,
+          // flexible rules let the user override from the pool.
+          manualZoomUserId: item.host_rule?.zoom_user_id ?? undefined,
         }));
         this.assignmentPreview = null;
         this.appliedFilterSnapshot = appliedSnapshot;
@@ -1785,7 +1802,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
                 message: count > 0
                   ? `Se detectaron ${count} clase(s) creadas en el rango ${payload.startDate} – ${payload.endDate}. Revisa el detalle en Auditoría.`
                   : 'La generación concluyó pero no se detectaron nuevas clases en el rango. Revisa Auditoría para confirmar.',
-                tone: count > 0 ? 'success' : 'warning',
+                tone: count > 0 ? 'success' : 'default',
               });
             }
           } else {
@@ -1981,5 +1998,17 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     const [startHour, startMinute] = (startTime || '00:00').split(':').map((part) => Number(part));
     const [endHour, endMinute] = (endTime || '00:00').split(':').map((part) => Number(part));
     return endHour * 60 + endMinute - (startHour * 60 + startMinute);
+  }
+
+  // ─── Split / Cursos Especiales ──────────────────────────────────────────────
+
+  loadSplitRulesCount() {
+    this.api.listHostRules().subscribe({
+      next: (rules) => {
+        this.splitRulesCount = rules.filter((r) => r.is_active).length;
+        this.cdr.detectChanges();
+      },
+      error: (err) => console.error('[Split] loadSplitRulesCount error', err),
+    });
   }
 }

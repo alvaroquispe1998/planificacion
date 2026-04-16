@@ -19,6 +19,7 @@ import { firstAllowedPath } from './navigation';
 
 const ACCESS_TOKEN_KEY = 'uai.auth.access_token';
 const REFRESH_TOKEN_KEY = 'uai.auth.refresh_token';
+const SESSION_CACHE_KEY = 'uai.auth.session_cache';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -51,11 +52,31 @@ export class AuthService {
 
     try {
       await firstValueFrom(this.fetchMe(accessToken, refreshToken));
-    } catch {
-      try {
-        await firstValueFrom(this.refreshAccessToken());
-      } catch {
-        this.clearSession();
+    } catch (fetchError: unknown) {
+      // Distinguish between auth errors (401/403 → invalid token) and
+      // network/server errors (0/5xx → backend temporarily unavailable).
+      // On network errors we preserve the stored tokens and restore the
+      // cached profile so the user is not logged out due to infra issues.
+      const status = (fetchError as { status?: number })?.status ?? 0;
+      const isNetworkOrServerError = status === 0 || status >= 500;
+
+      if (isNetworkOrServerError) {
+        const cached = this.restoreSessionCache(accessToken, refreshToken);
+        if (!cached) {
+          // No cache and server unreachable — keep tokens but mark as ready;
+          // the interceptor will refresh the token on the next API call.
+          this.clearSession(); // removes from memory only if already empty
+        }
+        // Even if we couldn't restore full profile, don't wipe tokens.
+        localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+        localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+      } else {
+        // 401/403 or unexpected auth error — try a token refresh.
+        try {
+          await firstValueFrom(this.refreshAccessToken());
+        } catch {
+          this.clearSession();
+        }
       }
     }
 
@@ -208,12 +229,31 @@ export class AuthService {
   private setSession(session: SessionState) {
     localStorage.setItem(ACCESS_TOKEN_KEY, session.accessToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, session.refreshToken);
+    // Save a profile cache so init() can restore it on network errors
+    try {
+      const cache = { user: session.user, roles: session.roles, scopes: session.scopes, permissions: session.permissions, windows: session.windows };
+      localStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(cache));
+    } catch { /* storage quota — ignore */ }
     this.sessionSubject.next(session);
   }
 
   private clearSession() {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem(SESSION_CACHE_KEY);
     this.sessionSubject.next(null);
+  }
+
+  private restoreSessionCache(accessToken: string, refreshToken: string): boolean {
+    try {
+      const raw = localStorage.getItem(SESSION_CACHE_KEY);
+      if (!raw) return false;
+      const cache = JSON.parse(raw) as Pick<SessionState, 'user' | 'roles' | 'scopes' | 'permissions' | 'windows'>;
+      if (!cache?.user) return false;
+      this.sessionSubject.next({ accessToken, refreshToken, ...cache });
+      return true;
+    } catch {
+      return false;
+    }
   }
 }

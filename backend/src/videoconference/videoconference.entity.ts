@@ -576,3 +576,39 @@ export class VideoconferenceGenerationBatchResultEntity {
     @Column({ type: 'datetime' })
     created_at!: Date;
 }
+
+@Entity({ name: 'vc_schedule_host_rules' })
+@Index(['schedule_id'], { unique: true })
+@Index(['zoom_group_id'])
+export class VcScheduleHostRuleEntity {
+    @PrimaryColumn({ type: 'varchar', length: 36 })
+    id!: string;
+
+    @Column({ type: 'varchar', length: 36 })
+    schedule_id!: string;
+
+    @Column({ type: 'varchar', length: 36, nullable: true })
+    zoom_group_id!: string | null;
+
+    @Column({ type: 'varchar', length: 36, nullable: true })
+    zoom_user_id!: string | null;
+
+    @Column({ type: 'varchar', length: 500, nullable: true })
+    notes!: string | null;
+
+    @Column({ type: 'boolean', default: true })
+    is_active!: boolean;
+
+    @Column({ type: 'boolean', default: false })
+    lock_host!: boolean;
+
+    @Column({ type: 'boolean', default: false })
+    skip_zoom!: boolean;
+
+    @Column({ type: 'datetime' })
+    created_at!: Date;
+
+    @Column({ type: 'datetime' })
+    updated_at!: Date;
+}
+

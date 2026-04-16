@@ -32,6 +32,7 @@ import {
     VideoconferenceGenerationBatchEntity,
     VideoconferenceGenerationBatchResultEntity,
     ZoomConfigEntity,
+    VcScheduleHostRuleEntity,
 } from './videoconference.entity';
 import { ZoomSettingsController } from './zoom-settings.controller';
 import { ZoomAccountService } from './zoom-account.service';
@@ -64,6 +65,7 @@ import { ZoomAccountService } from './zoom-account.service';
             PlanningSectionEntity,
             PlanningSubsectionEntity,
             PlanningSubsectionScheduleEntity,
+            VcScheduleHostRuleEntity,
         ]),
     ],
     controllers: [VideoconferenceController, ZoomSettingsController],

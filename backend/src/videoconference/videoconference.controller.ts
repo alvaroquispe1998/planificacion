@@ -5,11 +5,13 @@ import { VideoconferenceService } from './videoconference.service';
 import {
     AssignmentPreviewVideoconferenceDto,
     CheckExistingVideoconferencesDto,
+    CreateHostRuleDto,
     CreateVideoconferenceInheritanceDto,
     FilterOptionsDto,
     GenerateVideoconferenceDto,
     PreviewVideoconferenceInheritanceCandidatesDto,
     PreviewVideoconferenceDto,
+    UpdateHostRuleDto,
     UpdateVideoconferenceInheritanceDto,
     UpsertVideoconferenceOverrideDto,
     VideoconferenceInheritanceCatalogDto,
@@ -133,5 +135,25 @@ export class VideoconferenceController {
         @Query('conferenceDate') conferenceDate: string,
     ) {
         return this.service.deleteOverride(scheduleId, conferenceDate);
+    }
+
+    @Get('host-rules')
+    async listHostRules() {
+        return this.service.listHostRules();
+    }
+
+    @Post('host-rules')
+    async createHostRule(@Body() payload: CreateHostRuleDto) {
+        return this.service.createHostRule(payload);
+    }
+
+    @Patch('host-rules/:id')
+    async updateHostRule(@Param('id') id: string, @Body() payload: UpdateHostRuleDto) {
+        return this.service.updateHostRule(id, payload);
+    }
+
+    @Delete('host-rules/:id')
+    async deleteHostRule(@Param('id') id: string) {
+        return this.service.deleteHostRule(id);
     }
 }

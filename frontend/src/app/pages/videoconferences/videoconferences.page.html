@@ -578,6 +578,15 @@
               <span class="course-meta-chip">{{ getSectionDisplay(item) }}</span>
               <span class="course-meta-chip">{{ getSubsectionDisplay(item) }}</span>
               <span *ngIf="!item.vc_section_id" class="course-meta-chip chip-warning">Match pendiente</span>
+              <!-- Host rule configured via Cursos Especiales -->
+              <span
+                *ngIf="item.host_rule"
+                class="course-meta-chip"
+                [class.chip-host-locked]="item.host_rule.lock_host"
+                [class.chip-host-rule]="!item.host_rule.lock_host"
+                [title]="'Host configurado: ' + getHostRuleChipLabel(item)">
+                {{ getHostRuleChipLabel(item) }}
+              </span>
               <!-- Occurrence mode: exact match badge -->
               <span
                 *ngIf="usesOccurrenceRows && isAlreadyCreated(item)"
@@ -751,6 +760,13 @@
         </button>
       </div>
     </article>
+  </section>
+
+  <!-- ─── Cursos Especiales ─────────────────────────────────────────────────── -->
+  <section class="specials-banner" *ngIf="splitRulesCount > 0">
+    <span class="chip chip-accent">{{ splitRulesCount }} reglas de host fijo</span>
+    <span class="subtle">Hay horarios excluidos del flujo normal con host asignado.</span>
+    <a class="btn btn-secondary btn-sm" routerLink="/videoconferences/especiales">Gestionar Cursos Especiales</a>
   </section>
 
   <section class="modal-backdrop" *ngIf="payloadPreviewOpen" (click)="closePayloadPreview()">

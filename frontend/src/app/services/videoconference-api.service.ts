@@ -16,6 +16,10 @@ export interface FilterOptionsDto {
 export interface VideoconferencePreviewDto extends FilterOptionsDto {
     startDate?: string;
     endDate?: string;
+    includeSplit?: boolean;
+    includeAll?: boolean;
+    /** Return each schedule as its own independent row (no continuous-block grouping) */
+    expandGroups?: boolean;
 }
 
 export interface FilterCatalogOption {
@@ -94,6 +98,16 @@ export interface VideoconferencePreviewItem {
         family_owner_schedule_id: string;
     };
     section_projected_vacancies: number | null;
+    host_rule?: {
+        rule_id: string;
+        zoom_user_id: string | null;
+        zoom_user_email: string | null;
+        zoom_user_name: string | null;
+        zoom_group_id: string | null;
+        zoom_group_name: string | null;
+        lock_host: boolean;
+        skip_zoom: boolean;
+    } | null;
     selected?: boolean;
 }
 
@@ -303,6 +317,26 @@ export interface VideoconferenceInheritanceItem {
         schedule_label: string;
         section_projected_vacancies: number | null;
     } | null;
+}
+
+export interface VcScheduleHostRule {
+    id: string;
+    schedule_id: string;
+    zoom_group_id: string | null;
+    zoom_group_name: string | null;
+    zoom_user_id: string | null;
+    zoom_user_email: string | null;
+    zoom_user_name: string | null;
+    notes: string | null;
+    is_active: boolean;
+    lock_host: boolean;
+    skip_zoom: boolean;
+    created_at: string;
+    updated_at: string;
+    section_id: string;
+    section_code: string;
+    course_id: string | null;
+    course_label: string | null;
 }
 
 export interface VideoconferenceInheritanceCandidateItem {
@@ -535,5 +569,21 @@ export class VideoconferenceApiService {
             .set('scheduleId', scheduleId)
             .set('conferenceDate', conferenceDate);
         return this.http.delete<any>(`${this.baseUrl}/overrides`, { params });
+    }
+
+    listHostRules() {
+        return this.http.get<VcScheduleHostRule[]>(`${this.baseUrl}/host-rules`);
+    }
+
+    createHostRule(payload: { scheduleId: string; zoomGroupId?: string; zoomUserId?: string; notes?: string; lockHost?: boolean; skipZoom?: boolean }) {
+        return this.http.post<{ id: string; schedule_id: string }>(`${this.baseUrl}/host-rules`, payload);
+    }
+
+    updateHostRule(id: string, payload: { zoomGroupId?: string; zoomUserId?: string; notes?: string; isActive?: boolean; lockHost?: boolean; skipZoom?: boolean }) {
+        return this.http.patch<{ id: string; schedule_id: string }>(`${this.baseUrl}/host-rules/${encodeURIComponent(id)}`, payload);
+    }
+
+    deleteHostRule(id: string) {
+        return this.http.delete<{ success: boolean; id: string }>(`${this.baseUrl}/host-rules/${encodeURIComponent(id)}`);
     }
 }

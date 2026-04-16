@@ -21,6 +21,7 @@ import { VideoconferenceInheritancesPageComponent } from './pages/videoconferenc
 import { VideoconferenceZoomUsersPageComponent } from './pages/videoconference-zoom-users/videoconference-zoom-users.page';
 
 import { VideoconferencesPageComponent } from './pages/videoconferences/videoconferences.page';
+import { VideoconferenceEspecialesPageComponent } from './pages/videoconference-especiales/videoconference-especiales.page';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'planning' },
@@ -121,6 +122,15 @@ export const routes: Routes = [
   {
     path: 'videoconferences/zoom-users',
     component: VideoconferenceZoomUsersPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.settings',
+      requiredPermission: 'action.settings.manage',
+    },
+  },
+  {
+    path: 'videoconferences/especiales',
+    component: VideoconferenceEspecialesPageComponent,
     canActivate: [windowGuard, permissionGuard],
     data: {
       requiredWindow: 'window.settings',
