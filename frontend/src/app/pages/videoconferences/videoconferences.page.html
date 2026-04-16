@@ -547,14 +547,14 @@
       </article>
     </section>
 
-    <div class="rows-shell" [class.rows-shell-no-host]="!isHybridGroup">
+    <div class="rows-shell">
       <div class="rows-header rows-header-actions">
         <span></span>
         <span>Curso / Grupo</span>
         <span>Fecha / Horario</span>
         <span>Docente</span>
         <span>Contexto</span>
-        <span *ngIf="isHybridGroup">Host Zoom</span>
+        <span>Host Zoom</span>
         <span>Acciones</span>
       </div>
 
@@ -643,8 +643,8 @@
             </span>
           </div>
 
-          <div class="zoom-host-cell" *ngIf="isHybridGroup">
-            <ng-container *ngIf="hybridZoomUsers.length; else defaultHostCell">
+          <div class="zoom-host-cell">
+            <ng-container *ngIf="isHybridGroup && hybridZoomUsers.length; else defaultHostCell">
               <select
                 class="form-control form-control-compact hybrid-host-select"
                 [(ngModel)]="item.manualZoomUserId"

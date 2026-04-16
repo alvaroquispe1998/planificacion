@@ -111,3 +111,4 @@ jobs:
             echo "✅ Deploy completado como autonomadeica"
             echo "ℹ️  Si DB_SYNCHRONIZE=true en el .env del servidor, TypeORM correrá ALTER TABLEs al arrancar."
             echo "ℹ️  Verifica que DB_SYNCHRONIZE=false en producción para evitar bloqueos de DB al reiniciar."
+            
