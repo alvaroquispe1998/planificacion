@@ -144,6 +144,16 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             },
           },
           {
+            label: 'Cursos Especiales',
+            path: '/videoconferences/especiales',
+            icon: 'zap',
+            window: 'window.settings',
+            permission: 'action.settings.manage',
+            match: {
+              exact: ['/videoconferences/especiales'],
+            },
+          },
+          {
             label: 'Auditoria Zoom',
             path: '/videoconferences/audit',
             icon: 'search',

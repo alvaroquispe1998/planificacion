@@ -60,6 +60,26 @@ export class PreviewVideoconferenceDto extends FilterOptionsDto {
     @IsOptional()
     @IsDateString()
     endDate?: string;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    includeSplit?: boolean;
+
+    /** Returns all schedules regardless of split rules; each row includes host_rule if one exists */
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    includeAll?: boolean;
+
+    /**
+     * Disables the automatic continuous-block grouping so that each schedule_id
+     * is returned as its own row (used by the Cursos Especiales "Por horario" config).
+     */
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    expandGroups?: boolean;
 }
 
 export class AssignmentPreviewVideoconferenceDto extends FilterOptionsDto {
@@ -334,4 +354,61 @@ export class UpdateVideoconferenceInheritanceDto {
     @Type(() => Boolean)
     @IsBoolean()
     isActive?: boolean;
+}
+
+export class CreateHostRuleDto {
+    @IsString()
+    @IsNotEmpty()
+    scheduleId!: string;
+
+    @IsOptional()
+    @IsString()
+    zoomGroupId?: string;
+
+    @IsOptional()
+    @IsString()
+    zoomUserId?: string;
+
+    @IsOptional()
+    @IsString()
+    notes?: string;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    lockHost?: boolean;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    skipZoom?: boolean;
+}
+
+export class UpdateHostRuleDto {
+    @IsOptional()
+    @IsString()
+    zoomGroupId?: string;
+
+    @IsOptional()
+    @IsString()
+    zoomUserId?: string;
+
+    @IsOptional()
+    @IsString()
+    notes?: string;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    isActive?: boolean;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    lockHost?: boolean;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    skipZoom?: boolean;
 }

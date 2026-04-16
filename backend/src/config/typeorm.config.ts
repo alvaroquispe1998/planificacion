@@ -90,6 +90,7 @@ import {
   ZoomGroupEntity,
   ZoomGroupUserEntity,
   ZoomConfigEntity,
+  VcScheduleHostRuleEntity,
 } from '../videoconference/videoconference.entity';
 
 export const appEntities = [
@@ -102,6 +103,7 @@ export const appEntities = [
   VideoconferenceEntity,
   VideoconferenceGenerationBatchEntity,
   VideoconferenceGenerationBatchResultEntity,
+  VcScheduleHostRuleEntity,
   ZoomConfigEntity,
   VideoconferenceZoomPoolUserEntity,
   ZoomGroupEntity,
@@ -290,5 +292,16 @@ export async function buildTypeOrmConfig(configService: ConfigService): Promise<
     entities: appEntities,
     synchronize: readConfig(configService, 'DB_SYNCHRONIZE', 'true') === 'true',
     timezone: 'Z',
+    // Connection pool — prevents pool exhaustion from long-running generation jobs
+    extra: {
+      connectionLimit: 20,
+      waitForConnections: true,
+      // How long (ms) to wait for a free connection from the pool before throwing
+      queueLimit: 0,
+      connectTimeout: 10000,
+      // Keep connections alive to avoid stale socket errors after idle periods
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 30000,
+    },
   };
 }

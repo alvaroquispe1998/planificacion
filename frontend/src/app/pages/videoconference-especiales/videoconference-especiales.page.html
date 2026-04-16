@@ -1,0 +1,424 @@
+﻿<div class="especiales-shell">
+
+  <!-- ─── Hero ─────────────────────────────────────────────────────────────── -->
+  <header class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Videoconferencias</p>
+      <h1>Cursos Especiales</h1>
+      <p class="subtle">
+        Asigna hosts Zoom fijos o flexibles a cada seccion. Elige entre un host unificado para todos los horarios, o configura cada horario de forma independiente.
+      </p>
+    </div>
+  </header>
+
+  <!-- ─── Workspace layout ─────────────────────────────────────────────────── -->
+  <div class="workspace" [class.workspace-active]="!!selectedSection">
+
+    <!-- LEFT: Busqueda + secciones ───────────────────────────────────────── -->
+    <div class="workspace-nav">
+
+      <div class="nav-search">
+        <p class="nav-label">Buscar curso</p>
+        <div class="search-input-group">
+          <input
+            type="text"
+            class="form-control course-search-input"
+            [class.has-selection]="selectedCourse !== null"
+            placeholder="Codigo o nombre del curso..."
+            [(ngModel)]="courseSearch"
+            (focus)="openDropdown()"
+            (blur)="closeDropdown()"
+          />
+          <button *ngIf="selectedCourse" type="button" class="btn-clear" (click)="clearCourse()">×</button>
+        </div>
+        <ul class="course-dropdown" *ngIf="courseDropdownOpen && filteredCourses.length">
+          <li
+            *ngFor="let c of filteredCourses"
+            class="course-dropdown-item"
+            [class.is-selected]="selectedCourse?.id === c.id"
+            (mousedown)="selectCourse(c)"
+          >{{ c.label }}</li>
+        </ul>
+        <p *ngIf="courseDropdownOpen && !filteredCourses.length && courseSearch" class="dropdown-empty">
+          Sin resultados para "{{ courseSearch }}"
+        </p>
+        <p *ngIf="catalogLoading" class="nav-hint">Cargando catalogo de cursos...</p>
+      </div>
+
+      <div class="nav-sections" *ngIf="selectedCourse">
+        <p class="nav-label">
+          Secciones
+          <span class="nav-label-course">{{ selectedCourse.label }}</span>
+        </p>
+        <p *ngIf="sectionsLoading" class="nav-hint">Cargando secciones...</p>
+        <p *ngIf="!sectionsLoading && !sections.length" class="nav-hint">Sin secciones activas en este semestre.</p>
+        <div class="section-list" *ngIf="sections.length">
+          <button
+            type="button"
+            class="section-item"
+            *ngFor="let sec of sections"
+            [class.is-active]="selectedSection?.section_id === sec.section_id"
+            (click)="selectSection(sec)"
+          >
+            <div class="sec-row-top">
+              <span class="sec-code">{{ sec.section_code }}</span>
+              <span class="chip chip-sm" [class.chip-ok]="rulesCount(sec) > 0" [class.chip-neutral]="rulesCount(sec) === 0">
+                {{ rulesCount(sec) }} regla{{ rulesCount(sec) !== 1 ? 's' : '' }}
+              </span>
+            </div>
+            <span class="sec-teacher">{{ sec.teacher_name ?? '—' }}</span>
+            <span class="sec-schedules">{{ sec.schedules.length }} horario{{ sec.schedules.length !== 1 ? 's' : '' }}</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="nav-empty" *ngIf="!selectedCourse">
+        <p>Busca un curso para ver sus secciones.</p>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: Configuracion ────────────────────────────────────────────── -->
+    <div class="workspace-config">
+
+      <!-- Placeholder -->
+      <div class="config-placeholder" *ngIf="!selectedSection">
+        <div class="placeholder-icon">⚙</div>
+        <p *ngIf="!selectedCourse">Busca un curso en el panel izquierdo.</p>
+        <p *ngIf="selectedCourse && !sectionsLoading && !sections.length">Sin secciones activas para este curso.</p>
+        <p *ngIf="selectedCourse && sections.length && !selectedSection">Selecciona una seccion para configurar reglas de host.</p>
+        <p *ngIf="selectedCourse && sectionsLoading">Cargando secciones...</p>
+      </div>
+
+      <!-- Config form -->
+      <div class="config-panel" *ngIf="selectedSection">
+
+        <div class="config-head">
+          <div class="config-head-copy">
+            <h2>{{ selectedSection.section_code }}</h2>
+            <p class="subtle">{{ selectedSection.section_label }}</p>
+          </div>
+          <div class="teacher-badge" *ngIf="selectedSection.teacher_name">
+            {{ selectedSection.teacher_name }}
+          </div>
+        </div>
+
+        <!-- Mode toggle + descripcion -->
+        <div class="mode-block">
+          <div class="mode-toggle">
+            <button
+              type="button"
+              class="mode-btn"
+              [class.active]="assignMode === 'unified'"
+              (click)="assignMode = 'unified'"
+            >Asignacion unificada</button>
+            <button
+              type="button"
+              class="mode-btn"
+              [class.active]="assignMode === 'individual'"
+              (click)="assignMode = 'individual'"
+            >Por horario</button>
+          </div>
+          <p class="mode-desc" *ngIf="assignMode === 'unified'">
+            Un unico host Zoom para todos los horarios de la seccion.
+          </p>
+          <p class="mode-desc" *ngIf="assignMode === 'individual'">
+            Cada horario puede tener un host diferente. Los grupos del mismo horario comparten la misma sesion Zoom.
+          </p>
+        </div>
+
+        <!-- Modo unificado -->
+        <div *ngIf="assignMode === 'unified'" class="unified-form">
+
+          <!-- Merged schedule summary -->
+          <div class="unified-schedules">
+            <p class="unified-schedules-label">Alcance de la configuracion</p>
+            <div class="unified-blocks">
+              <div class="unified-block" *ngFor="let s of unifiedScheduleSummary" [class.is-merged]="s.merged">
+                <div class="ub-groups">
+                  <span class="ub-group" *ngFor="let g of s.groups; let last = last">
+                    {{ g }}<span class="ub-connector" *ngIf="!last">→</span>
+                  </span>
+                </div>
+                <div class="ub-meta">
+                  <span class="ub-day">{{ s.day_label }}</span>
+                  <span class="ub-time">{{ s.start_time }}–{{ s.end_time }}</span>
+                  <span class="ub-merged-badge" *ngIf="s.merged">Bloque continuo</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div class="unified-controls">
+            <div class="uc-field">
+              <label class="field-label">Grupo Zoom</label>
+              <select class="form-control" [(ngModel)]="unifiedDraft.zoomGroupId" (change)="onUnifiedGroupChange()">
+                <option value="">— Seleccionar grupo —</option>
+                <option *ngFor="let g of zoomGroups" [value]="g.id">{{ g.name }}</option>
+              </select>
+            </div>
+
+            <div class="uc-field uc-field-user">
+              <label class="field-label">Usuario host <span class="optional-hint">(opcional)</span></label>
+              <select class="form-control" [(ngModel)]="unifiedDraft.zoomUserId" [disabled]="!unifiedDraft.zoomGroupId || unifiedDraft.poolLoading">
+                <option value="">{{ unifiedDraft.poolLoading ? 'Cargando...' : '— Auto-asignar —' }}</option>
+                <option *ngFor="let u of unifiedDraft.poolUsers" [value]="u.zoom_user_id ?? u.id">
+                  {{ getPoolLabel(u) }}
+                </option>
+              </select>
+              <span class="field-hint" *ngIf="unifiedDraft.zoomGroupId && !unifiedDraft.poolLoading && unifiedDraft.poolUsers.length > 0">
+                {{ unifiedDraft.poolUsers.length }} usuario(s) en este grupo
+              </span>
+              <span class="field-hint field-warn" *ngIf="unifiedDraft.zoomGroupId && !unifiedDraft.poolLoading && unifiedDraft.poolUsers.length === 0">
+                Sin usuarios en el pool de este grupo
+              </span>
+            </div>
+
+            <div class="uc-field uc-field-type">
+              <label class="field-label">Tipo</label>
+              <label class="lock-label">
+                <input type="checkbox" class="lock-checkbox" id="unifiedLock" [(ngModel)]="unifiedDraft.lockHost" />
+                <span class="lock-track" [class.is-obligatorio]="unifiedDraft.lockHost">
+                  <span class="lock-track-text">{{ unifiedDraft.lockHost ? 'Obligatorio' : 'Preferido' }}</span>
+                </span>
+              </label>
+              <span class="field-hint">{{ unifiedDraft.lockHost ? 'Host fijo, no cambia al generar' : 'Flexible, se puede ajustar al generar' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modo individual -->
+        <div *ngIf="assignMode === 'individual'" class="individual-form">
+          <div class="schedule-cards">
+            <div class="schedule-card" *ngFor="let row of selectedSection.schedules"
+              [class.has-rule]="row.host_rule"
+              [class.is-skip]="row.draft.zoomMode === 'skip'"
+              [class.is-zoom]="row.draft.zoomMode === 'zoom'"
+            >
+              <div class="sc-identity">
+                <span class="sc-group">{{ row.subsection_label }}</span>
+                <span class="sc-slot">{{ row.day_label }} {{ row.start_time }}–{{ row.end_time }}</span>
+              </div>
+
+              <!-- 3-state mode pills -->
+              <div class="mode-pills">
+                <button type="button" class="mode-pill"
+                  [class.active]="row.draft.zoomMode === 'default'"
+                  (click)="onZoomModeChange(row, 'default')">Auto</button>
+                <button type="button" class="mode-pill mode-pill--zoom"
+                  [class.active]="row.draft.zoomMode === 'zoom'"
+                  (click)="onZoomModeChange(row, 'zoom')">Zoom</button>
+                <button type="button" class="mode-pill mode-pill--skip"
+                  [class.active]="row.draft.zoomMode === 'skip'"
+                  (click)="onZoomModeChange(row, 'skip')">Sin Zoom</button>
+              </div>
+
+              <!-- Zoom config (only in zoom mode) -->
+              <div class="sc-controls" *ngIf="row.draft.zoomMode === 'zoom'">
+                <label class="sc-field">
+                  <span class="sc-field-label">Grupo Zoom</span>
+                  <select
+                    class="form-control form-control-compact"
+                    [(ngModel)]="row.draft.zoomGroupId"
+                    (change)="onIndividualGroupChange(row.draft)"
+                  >
+                    <option value="">— Seleccionar —</option>
+                    <option *ngFor="let g of zoomGroups" [value]="g.id">{{ g.name }}</option>
+                  </select>
+                </label>
+                <label class="sc-field sc-field-user" *ngIf="row.draft.zoomGroupId">
+                  <span class="sc-field-label">Usuario host <span class="optional-hint">(opcional)</span></span>
+                  <select
+                    class="form-control form-control-compact"
+                    [(ngModel)]="row.draft.zoomUserId"
+                    [disabled]="row.draft.poolLoading"
+                  >
+                    <option value="">{{ row.draft.poolLoading ? 'Cargando...' : '— Auto-asignar —' }}</option>
+                    <option *ngFor="let u of row.draft.poolUsers" [value]="u.zoom_user_id ?? u.id">
+                      {{ getPoolLabel(u) }}
+                    </option>
+                  </select>
+                </label>
+                <div class="sc-type" *ngIf="row.draft.zoomUserId">
+                  <span class="sc-field-label">Tipo</span>
+                  <label class="lock-label">
+                    <input
+                      type="checkbox"
+                      class="lock-checkbox"
+                      [id]="'lock-' + row.schedule_id"
+                      [(ngModel)]="row.draft.lockHost"
+                    />
+                    <span class="lock-track" [class.is-obligatorio]="row.draft.lockHost">
+                      <span class="lock-track-text">{{ row.draft.lockHost ? 'Oblig.' : 'Pref.' }}</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Sin Zoom hint -->
+              <p class="sc-skip-hint" *ngIf="row.draft.zoomMode === 'skip'">
+                Este horario no generará videoconferencia.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div *ngIf="configMessage" class="flash success">{{ configMessage }}</div>
+        <div *ngIf="configError" class="flash error">{{ configError }}</div>
+
+        <div class="form-actions">
+          <button
+            type="button"
+            class="btn btn-primary"
+            [disabled]="!canSave || configSaving"
+            (click)="saveConfig()"
+          >{{ configSaving ? 'Guardando...' : 'Guardar configuracion' }}</button>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ─── Generacion ───────────────────────────────────────────────────────── -->
+  <section class="panel gen-panel" *ngIf="selectedSection && rowsWithRule.length > 0">
+    <div class="panel-head">
+      <div>
+        <h2>Generar videoconferencias</h2>
+        <p class="subtle">
+          {{ rowsWithRule.length }} horario(s) con host asignado.
+          Los <strong>obligatorios</strong> son fijos; los <strong>preferidos</strong> se pueden ajustar antes de generar.
+        </p>
+      </div>
+    </div>
+
+    <div class="gen-controls">
+      <label class="field">
+        <span>Fecha inicio</span>
+        <input type="date" class="form-control form-control-compact" [(ngModel)]="genStartDate" />
+      </label>
+      <label class="field">
+        <span>Fecha fin</span>
+        <input type="date" class="form-control form-control-compact" [(ngModel)]="genEndDate" />
+      </label>
+      <button
+        type="button"
+        class="btn btn-secondary"
+        (click)="prepareGenRows()"
+        [disabled]="!genStartDate || !genEndDate"
+      >Preparar</button>
+    </div>
+
+    <table *ngIf="genRows.length" class="data-table">
+      <thead>
+        <tr>
+          <th>Grupo / Horario</th>
+          <th>Host</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let gr of genRows" [class.gen-row-locked]="gr.row.host_rule?.lock_host">
+          <td>
+            <span class="row-group">{{ gr.row.subsection_label }}</span>
+            <span class="row-slot">{{ gr.row.day_label }} {{ gr.row.start_time }}–{{ gr.row.end_time }}</span>
+          </td>
+          <td>
+            <ng-container *ngIf="gr.row.host_rule?.lock_host; else flexibleHost">
+              <span class="host-chip lock-obligatorio">
+                <span class="host-name">{{ gr.row.host_rule!.zoom_user_name ?? gr.row.host_rule!.zoom_user_email ?? gr.row.host_rule!.zoom_user_id ?? '—' }}</span>
+                <span class="lock-badge">Fijo</span>
+              </span>
+            </ng-container>
+            <ng-template #flexibleHost>
+              <select
+                class="form-control form-control-compact"
+                [(ngModel)]="gr.overrideZoomUserId"
+                [disabled]="gr.poolLoading"
+              >
+                <option *ngIf="gr.poolLoading" disabled>Cargando...</option>
+                <option *ngFor="let u of gr.poolUsers" [value]="u.zoom_user_id ?? u.id">
+                  {{ getPoolLabel(u) }}
+                </option>
+              </select>
+            </ng-template>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="form-actions" *ngIf="genRows.length">
+      <button
+        type="button"
+        class="btn btn-primary"
+        [disabled]="genLoading"
+        (click)="generate()"
+      >{{ genLoading ? 'Generando...' : 'Generar (' + genRows.length + ' horarios)' }}</button>
+    </div>
+
+    <div *ngIf="generationResult" class="gen-result">
+      <div class="gen-result-summary">
+        <span class="chip" [class.chip-ok]="generationResult.success" [class.chip-warn]="!generationResult.success">
+          {{ generationResult.success ? 'Completado' : 'Con errores' }}
+        </span>
+        <span>{{ (generationResult.summary.matched ?? 0) + (generationResult.summary.createdUnmatched ?? 0) }} creadas</span>
+        <span *ngIf="generationResult.summary.errors"> / {{ generationResult.summary.errors }} errores</span>
+        <span *ngIf="generationResult.summary.blockedExisting"> / {{ generationResult.summary.blockedExisting }} ya existian</span>
+      </div>
+
+      <table *ngIf="generationResult.results.length" class="data-table gen-result-table">
+        <thead>
+          <tr>
+            <th>Schedule</th>
+            <th>Fecha</th>
+            <th>Estado</th>
+            <th>Host</th>
+            <th>Meeting ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let r of generationResult.results" [class]="'row-status-' + r.status.toLowerCase()">
+            <td class="mono">{{ r.schedule_id | slice:0:8 }}...</td>
+            <td>{{ r.conference_date ?? '-' }}</td>
+            <td><span class="status-chip status-{{ r.status | lowercase }}">{{ r.status }}</span></td>
+            <td>{{ r.zoom_user_email ?? r.zoom_user_id ?? '-' }}</td>
+            <td>{{ r.zoom_meeting_id ?? '-' }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─── Global saved rules (always visible) ─────────────────────────────── -->
+  <section class="summary-panel">
+    <h3 class="summary-title">
+      Reglas guardadas
+      <span class="summary-count" *ngIf="allSavedRules.length > 0">{{ groupedSavedRules.length }}</span>
+    </h3>
+    <p class="summary-empty" *ngIf="!allSavedRulesLoading && allSavedRules.length === 0">
+      No hay reglas configuradas aún.
+    </p>
+    <p class="summary-empty" *ngIf="allSavedRulesLoading">Cargando...</p>
+    <div class="summary-list" *ngIf="groupedSavedRules.length > 0">
+      <div class="summary-item" *ngFor="let group of groupedSavedRules">
+        <span class="summary-item-sec">{{ group.section_code }}</span>
+        <span class="summary-item-course">{{ group.course_label }}</span>
+        <!-- Badge: summarise the rules in this section -->
+        <div class="summary-item-badges">
+          <ng-container *ngFor="let r of group.rules">
+            <span class="rule-badge rule-badge--skip" *ngIf="r.skip_zoom">Sin Zoom</span>
+            <span class="rule-badge rule-badge--zoom" *ngIf="!r.skip_zoom && r.zoom_group_id">
+              {{ r.zoom_group_name ?? r.zoom_group_id }}
+            </span>
+            <span class="rule-badge rule-badge--auto" *ngIf="!r.skip_zoom && !r.zoom_group_id">Auto</span>
+          </ng-container>
+        </div>
+        <div class="summary-item-actions">
+          <button type="button" class="btn btn-xs btn-secondary" (click)="editFromGlobalSummary(group)">Editar</button>
+          <button type="button" class="btn btn-xs btn-danger" (click)="deleteAllForSection(group)" title="Eliminar todas las reglas de esta sección">✕</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>

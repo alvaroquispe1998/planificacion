@@ -21,10 +21,12 @@ import {
 import { SettingsSyncService } from '../settings/settings-sync.service';
 import {
     AssignmentPreviewVideoconferenceDto,
+    CreateHostRuleDto,
     CreateZoomGroupDto,
     FilterOptionsDto,
     GenerateVideoconferenceDto,
     PreviewVideoconferenceDto,
+    UpdateHostRuleDto,
     UpdateZoomGroupDto,
     UpsertVideoconferenceOverrideDto,
     UpdateZoomPoolDto,
@@ -38,6 +40,7 @@ import {
     VcCourseEntity,
     VcFacultyEntity,
     VcSectionEntity,
+    VcScheduleHostRuleEntity,
     VideoconferenceZoomPoolUserEntity,
     ZoomGroupEntity,
     ZoomGroupUserEntity,
@@ -451,6 +454,8 @@ export class VideoconferenceService implements OnModuleInit {
         private readonly zoomGroupsRepo: Repository<ZoomGroupEntity>,
         @InjectRepository(ZoomGroupUserEntity)
         private readonly zoomGroupUsersRepo: Repository<ZoomGroupUserEntity>,
+        @InjectRepository(VcScheduleHostRuleEntity)
+        private readonly hostRulesRepo: Repository<VcScheduleHostRuleEntity>,
         @InjectRepository(PlanningSubsectionScheduleVcInheritanceEntity)
         private readonly inheritanceRepo: Repository<PlanningSubsectionScheduleVcInheritanceEntity>,
         @InjectRepository(PlanningSubsectionVideoconferenceEntity)
@@ -1047,7 +1052,48 @@ export class VideoconferenceService implements OnModuleInit {
     }
 
     async preview(filters: PreviewVideoconferenceDto) {
-        const requestedRows = await this.getScheduleRows(filters);
+        const hostRuleMap = await this.getActiveHostRuleMap();
+        const includeAll = filters.includeAll === true;
+        const includeSplit = filters.includeSplit === true;
+        const expandGroups = filters.expandGroups === true;
+
+        let requestedRows = await this.getScheduleRows(filters);
+        // includeAll bypasses split filtering (used by the Cursos Especiales admin page)
+        if (!includeAll) {
+            if (includeSplit) {
+                // Cursos Especiales view: show only rows that have a host rule configured
+                requestedRows = requestedRows.filter((row) => hostRuleMap.has(row.schedule_id));
+            } else {
+                // Normal VC view: exclude only rows explicitly marked as skip_zoom
+                // (rows with host_rules are included — their host_rule data is attached to the result)
+                requestedRows = requestedRows.filter((row) => {
+                    const rule = hostRuleMap.get(row.schedule_id);
+                    return !rule?.skip_zoom;
+                });
+            }
+        }
+
+        // expandGroups: return each schedule as its own independent row (no continuous-block grouping).
+        // Used by the Cursos Especiales "Por horario" mode.
+        if (expandGroups) {
+            const noInheritance: ScheduleInheritanceInfo = {
+                mapping: null,
+                parent_schedule_id: null,
+                family_owner_schedule_id: '',
+                is_inherited: false,
+                parent_label: null,
+            };
+            return requestedRows.map((row) => ({
+                ...this.serializeBasePreviewRow(
+                    row,
+                    { ...noInheritance, family_owner_schedule_id: row.schedule_id },
+                    [row.schedule_id],
+                    [buildGroupLabel(row)],
+                ),
+                host_rule: hostRuleMap.get(row.schedule_id) ?? null,
+            }));
+        }
+
         const requestedScheduleIds = requestedRows.map((row) => row.schedule_id);
         const requestedScheduleIdSet = new Set<string>(requestedScheduleIds);
         const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(requestedRows);
@@ -1096,12 +1142,15 @@ export class VideoconferenceService implements OnModuleInit {
                             : row.subsection_code,
                 };
                 mappedBaseRows.push(
-                    this.serializeBasePreviewRow(
-                        clonedRow,
-                        inheritance,
-                        blockInfo?.family_schedule_ids ?? [row.schedule_id],
-                        blockInfo?.grouped_subsection_labels ?? [buildGroupLabel(row)],
-                    ),
+                    {
+                        ...this.serializeBasePreviewRow(
+                            clonedRow,
+                            inheritance,
+                            blockInfo?.family_schedule_ids ?? [row.schedule_id],
+                            blockInfo?.grouped_subsection_labels ?? [buildGroupLabel(row)],
+                        ),
+                        host_rule: hostRuleMap.get(row.schedule_id) ?? null,
+                    },
                 );
             }
             return mappedBaseRows;
@@ -1146,11 +1195,14 @@ export class VideoconferenceService implements OnModuleInit {
                 },
             };
             mappedOccurrences.push(
-                this.serializeOccurrencePreviewRow(
-                    clonedOcc,
-                    blockInfo?.family_schedule_ids ?? [occ.row.schedule_id],
-                    blockInfo?.grouped_subsection_labels ?? [buildGroupLabel(occ.row)],
-                ),
+                {
+                    ...this.serializeOccurrencePreviewRow(
+                        clonedOcc,
+                        blockInfo?.family_schedule_ids ?? [occ.row.schedule_id],
+                        blockInfo?.grouped_subsection_labels ?? [buildGroupLabel(occ.row)],
+                    ),
+                    host_rule: hostRuleMap.get(occ.row.schedule_id) ?? null,
+                },
             );
         }
         return mappedOccurrences;
@@ -2201,6 +2253,163 @@ export class VideoconferenceService implements OnModuleInit {
         await this.zoomGroupUsersRepo.delete({ group_id: group.id });
         await this.zoomGroupsRepo.delete({ id: group.id });
         return { success: true, id: group.id };
+    }
+
+    // ─── Host Rules (Cursos Especiales) ──────────────────────────────────────
+
+    async listHostRules() {
+        const rows = await this.hostRulesRepo
+            .createQueryBuilder('rule')
+            .leftJoin(ZoomUserEntity, 'zoom_user', 'zoom_user.id = rule.zoom_user_id')
+            .leftJoin(ZoomGroupEntity, 'zoom_group', 'zoom_group.id = rule.zoom_group_id')
+            .innerJoin(PlanningSubsectionScheduleEntity, 'sched', 'sched.id = rule.schedule_id')
+            .innerJoin(PlanningSubsectionEntity, 'sub', 'sub.id = sched.planning_subsection_id')
+            .innerJoin(PlanningSectionEntity, 'sec', 'sec.id = sub.planning_section_id')
+            .innerJoin(PlanningOfferEntity, 'offer', 'offer.id = sec.planning_offer_id')
+            .select('rule.id', 'id')
+            .addSelect('rule.schedule_id', 'schedule_id')
+            .addSelect('rule.zoom_group_id', 'zoom_group_id')
+            .addSelect('zoom_group.name', 'zoom_group_name')
+            .addSelect('rule.zoom_user_id', 'zoom_user_id')
+            .addSelect('zoom_user.email', 'zoom_user_email')
+            .addSelect('zoom_user.name', 'zoom_user_name')
+            .addSelect('rule.notes', 'notes')
+            .addSelect('rule.is_active', 'is_active')
+            .addSelect('rule.lock_host', 'lock_host')
+            .addSelect('rule.skip_zoom', 'skip_zoom')
+            .addSelect('rule.created_at', 'created_at')
+            .addSelect('rule.updated_at', 'updated_at')
+            .addSelect('sec.id', 'section_id')
+            .addSelect('sec.code', 'section_code')
+            .addSelect('offer.vc_course_id', 'course_id')
+            .addSelect('offer.course_code', 'course_code')
+            .addSelect('offer.course_name', 'course_name')
+            .orderBy('offer.course_code', 'ASC')
+            .addOrderBy('sec.code', 'ASC')
+            .getRawMany<Record<string, unknown>>();
+        return rows.map((r) => ({
+            id: readString(r.id),
+            schedule_id: readString(r.schedule_id),
+            zoom_group_id: readNullableString(r.zoom_group_id),
+            zoom_group_name: readNullableString(r.zoom_group_name),
+            zoom_user_id: readNullableString(r.zoom_user_id),
+            zoom_user_email: readNullableString(r.zoom_user_email),
+            zoom_user_name: readNullableString(r.zoom_user_name),
+            notes: readNullableString(r.notes),
+            is_active: Boolean(r.is_active),
+            lock_host: r.lock_host === true || r.lock_host === 1,
+            skip_zoom: r.skip_zoom === true || r.skip_zoom === 1,
+            created_at: r.created_at as Date,
+            updated_at: r.updated_at as Date,
+            section_id: readString(r.section_id),
+            section_code: readString(r.section_code),
+            course_id: readNullableString(r.course_id),
+            course_label: [readNullableString(r.course_code), readNullableString(r.course_name)].filter(Boolean).join(' - ') || null,
+        }));
+    }
+
+    async createHostRule(dto: CreateHostRuleDto) {
+        const scheduleId = String(dto.scheduleId ?? '').trim();
+        const skipZoom = dto.skipZoom === true;
+        const zoomGroupId = String(dto.zoomGroupId ?? '').trim() || null;
+        const zoomUserId = String(dto.zoomUserId ?? '').trim() || null;
+        if (!scheduleId) {
+            throw new BadRequestException('scheduleId es requerido.');
+        }
+        const existing = await this.hostRulesRepo.findOne({ where: { schedule_id: scheduleId } });
+        if (existing) {
+            throw new BadRequestException(
+                `Ya existe una regla de host para el schedule ${scheduleId}. Use PATCH para actualizarla.`,
+            );
+        }
+        const now = new Date();
+        const rule = this.hostRulesRepo.create({
+            id: newId(),
+            schedule_id: scheduleId,
+            zoom_group_id: skipZoom ? null : zoomGroupId,
+            zoom_user_id: skipZoom ? null : zoomUserId,
+            notes: dto.notes?.trim() || null,
+            is_active: true,
+            lock_host: dto.lockHost === true,
+            skip_zoom: skipZoom,
+            created_at: now,
+            updated_at: now,
+        });
+        await this.hostRulesRepo.save(rule);
+        return { id: rule.id, schedule_id: rule.schedule_id };
+    }
+
+    async updateHostRule(id: string, dto: UpdateHostRuleDto) {
+        const rule = await this.hostRulesRepo.findOne({ where: { id: String(id ?? '').trim() } });
+        if (!rule) {
+            throw new BadRequestException('No se encontro la regla de host.');
+        }
+        if (dto.zoomGroupId !== undefined) {
+            rule.zoom_group_id = String(dto.zoomGroupId ?? '').trim() || null;
+        }
+        if (dto.zoomUserId !== undefined) {
+            rule.zoom_user_id = String(dto.zoomUserId ?? '').trim() || null;
+        }
+        if (dto.notes !== undefined) {
+            rule.notes = dto.notes?.trim() || null;
+        }
+        if (dto.isActive !== undefined) {
+            rule.is_active = Boolean(dto.isActive);
+        }
+        if (dto.lockHost !== undefined) {
+            rule.lock_host = Boolean(dto.lockHost);
+        }
+        if (dto.skipZoom !== undefined) {
+            rule.skip_zoom = Boolean(dto.skipZoom);
+            if (rule.skip_zoom) {
+                rule.zoom_group_id = null;
+                rule.zoom_user_id = null;
+            }
+        }
+        rule.updated_at = new Date();
+        await this.hostRulesRepo.save(rule);
+        return { id: rule.id, schedule_id: rule.schedule_id };
+    }
+
+    async deleteHostRule(id: string) {
+        const rule = await this.hostRulesRepo.findOne({ where: { id: String(id ?? '').trim() } });
+        if (!rule) {
+            throw new BadRequestException('No se encontro la regla de host.');
+        }
+        await this.hostRulesRepo.delete({ id: rule.id });
+        return { success: true, id: rule.id };
+    }
+
+    async getActiveHostRuleMap(): Promise<Map<string, { rule_id: string; zoom_user_id: string | null; zoom_user_email: string | null; zoom_user_name: string | null; zoom_group_id: string | null; zoom_group_name: string | null; lock_host: boolean; skip_zoom: boolean }>> {
+        const rows = await this.hostRulesRepo
+            .createQueryBuilder('rule')
+            .leftJoin(ZoomUserEntity, 'zoom_user', 'zoom_user.id = rule.zoom_user_id')
+            .leftJoin(ZoomGroupEntity, 'zoom_group', 'zoom_group.id = rule.zoom_group_id')
+            .select('rule.id', 'id')
+            .addSelect('rule.schedule_id', 'schedule_id')
+            .addSelect('rule.zoom_group_id', 'zoom_group_id')
+            .addSelect('zoom_group.name', 'zoom_group_name')
+            .addSelect('rule.zoom_user_id', 'zoom_user_id')
+            .addSelect('zoom_user.email', 'zoom_user_email')
+            .addSelect('zoom_user.name', 'zoom_user_name')
+            .addSelect('rule.lock_host', 'lock_host')
+            .addSelect('rule.skip_zoom', 'skip_zoom')
+            .where('rule.is_active = true')
+            .getRawMany<Record<string, unknown>>();
+        const map = new Map<string, { rule_id: string; zoom_user_id: string | null; zoom_user_email: string | null; zoom_user_name: string | null; zoom_group_id: string | null; zoom_group_name: string | null; lock_host: boolean; skip_zoom: boolean }>();
+        for (const r of rows) {
+            map.set(readString(r.schedule_id), {
+                rule_id: readString(r.id),
+                zoom_user_id: readNullableString(r.zoom_user_id),
+                zoom_user_email: readNullableString(r.zoom_user_email),
+                zoom_user_name: readNullableString(r.zoom_user_name),
+                zoom_group_id: readNullableString(r.zoom_group_id),
+                zoom_group_name: readNullableString(r.zoom_group_name),
+                lock_host: r.lock_host === true || r.lock_host === 1,
+                skip_zoom: r.skip_zoom === true || r.skip_zoom === 1,
+            });
+        }
+        return map;
     }
 
     async getZoomGroupPool(groupId: string) {
