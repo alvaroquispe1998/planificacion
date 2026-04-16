@@ -3164,51 +3164,13 @@ export class VideoconferenceService implements OnModuleInit {
             record.error_message = null;
             record.updated_at = new Date();
             await this.planningVideoconferencesRepo.save(record);
-
-            const matched = await this.matchZoomMeeting(
-                selectedZoomUser.email ?? '',
-                topic,
-                occurrence.scheduled_start,
-                calculateDurationMinutes(
-                    occurrence.effective_start_time,
-                    occurrence.effective_end_time,
-                ),
-            );
-            if (matched) {
-                record.zoom_meeting_id = matched.id;
-                record.join_url = matched.join_url;
-                record.start_url = matched.start_url;
-                record.status = 'MATCHED';
-                record.match_attempts = matched.attempts;
-                record.matched_at = new Date();
-                record.updated_at = new Date();
-                await this.planningVideoconferencesRepo.save(record);
-                return {
-                    schedule_id: occurrence.row.schedule_id,
-                    occurrence_key: occurrence.occurrence_key,
-                    conference_date: occurrence.effective_conference_date,
-                    status: 'MATCHED',
-                    message: 'Videoconferencia creada y conciliada con Zoom.',
-                    record_id: record.id,
-                    zoom_user_id: record.zoom_user_id,
-                    zoom_user_email: record.zoom_user_email,
-                    zoom_meeting_id: record.zoom_meeting_id,
-                    link_mode: 'OWNED',
-                    owner_videoconference_id: null,
-                    inheritance: occurrence.inheritance,
-                };
-            }
-
-            record.match_attempts = ZOOM_MATCH_ATTEMPTS;
-            record.updated_at = new Date();
-            await this.planningVideoconferencesRepo.save(record);
+            // Zoom meeting ID matching is deferred — use "Sincronizar datos Zoom" in Auditoría.
             return {
                 schedule_id: occurrence.row.schedule_id,
                 occurrence_key: occurrence.occurrence_key,
                 conference_date: occurrence.effective_conference_date,
                 status: 'CREATED_UNMATCHED',
-                message:
-                    'La videoconferencia fue creada en Aula Virtual, pero no se pudo conciliar el zoom_meeting_id.',
+                message: 'Videoconferencia creada en Aula Virtual. Sincroniza el ID Zoom desde Auditoría.',
                 record_id: record.id,
                 zoom_user_id: record.zoom_user_id,
                 zoom_user_email: record.zoom_user_email,

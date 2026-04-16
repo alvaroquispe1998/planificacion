@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnDestroy, OnInit, QueryList, ViewChildren } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { MultiSelectComponent, MultiSelectOption } from '../../components/multi-select/multi-select.component';
 import { DialogService } from '../../core/dialog.service';
 import {
@@ -252,7 +253,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   get successfulResultRows() {
-    return this.generationRows.filter((item) => item.status === 'MATCHED');
+    return this.generationRows.filter((item) => item.status === 'MATCHED' || item.status === 'CREATED_UNMATCHED');
   }
 
   onCampusChange(selectedIds: string[]) {
@@ -1630,6 +1631,11 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     };
   }
 
+  // Max schedules/occurrences per single HTTP request to avoid proxy timeouts.
+  // Each item: 500ms throttle + 1-8s Aula Virtual POST = up to ~8.5s worst case.
+  // 6 items × 8.5s = ~51s, safely under a standard 60s Apache proxy timeout.
+  private readonly GENERATION_CHUNK_SIZE = 6;
+
   private executeGeneration(
     payload: {
       zoomGroupId: string;
@@ -1646,6 +1652,12 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     },
     hasConfirmedWarnings: boolean,
   ) {
+    const ids = payload.occurrenceKeys?.length ? payload.occurrenceKeys : (payload.scheduleIds ?? []);
+    if (ids.length > this.GENERATION_CHUNK_SIZE) {
+      this.executeGenerationChunked(payload, hasConfirmedWarnings);
+      return;
+    }
+
     this.loading = true;
     const estimatedTotal =
       (payload.occurrenceKeys?.length ?? 0) ||
@@ -1660,21 +1672,26 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         this.loading = false;
         await this.dialog.alert({
           title: 'Proceso finalizado',
-          message: res.message || 'Las videoconferencias fueron procesadas.',
+          message: (res.message || 'Las videoconferencias fueron procesadas.') + ' Sincroniza el ID Zoom desde Auditoría.',
           tone: 'success',
         });
       },
       error: async (error) => {
         this.loading = false;
 
-        // Gateway / network error (502, 503, 504, or status 0):
+        // Gateway / network error (502, 503, 504, status 0, or the nginx error-page
+        // redirect pattern where NestJS returns 404 { message: "Cannot GET /502.shtml" }):
         // The backend may still be processing. Keep the progress bar alive and
         // poll checkExisting until the count stabilises, then finish normally.
+        const errorBody = error?.error?.message ?? error?.message ?? '';
+        const isGatewayErrorPage =
+          typeof errorBody === 'string' && /Cannot GET \//i.test(errorBody);
         const isGatewayError =
           error.status === 0 ||
           error.status === 502 ||
           error.status === 503 ||
-          error.status === 504;
+          error.status === 504 ||
+          isGatewayErrorPage;
         if (isGatewayError) {
           this.startGatewayPolling({
             scheduleIds: payload.scheduleIds,
@@ -1723,8 +1740,142 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  private startGenerationProgress(total = 0, displayTotal?: number) {
+  /**
+   * Sends large generation batches in chunks of GENERATION_CHUNK_SIZE to avoid
+   * proxy timeouts on the production server. Progress is driven by real chunk
+   * completion (not time estimation). Results from all chunks are merged.
+   */
+  private async executeGenerationChunked(
+    payload: {
+      zoomGroupId: string;
+      scheduleIds?: string[];
+      occurrenceKeys?: string[];
+      startDate: string;
+      endDate: string;
+      allowPoolWarnings?: boolean;
+      preferredHosts?: Array<{ scheduleId: string; conferenceDate?: string; zoomUserId: string }>;
+    },
+    hasConfirmedWarnings: boolean,
+  ) {
+    const useOccurrences = (payload.occurrenceKeys?.length ?? 0) > 0;
+    const ids = useOccurrences ? (payload.occurrenceKeys ?? []) : (payload.scheduleIds ?? []);
+    const chunkSize = this.GENERATION_CHUNK_SIZE;
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += chunkSize) {
+      chunks.push(ids.slice(i, i + chunkSize));
+    }
+
+    this.loading = true;
+    this.generating = true;
     this.generationProgress = 0;
+    this.generationTotal = this.selectedCount || ids.length;
+    this.cdr.detectChanges();
+
+    // Stop the time-based animation — we'll drive progress from real chunk completion.
+    if (this.generationProgressInterval) {
+      clearInterval(this.generationProgressInterval);
+      this.generationProgressInterval = null;
+    }
+
+    const allResults: VideoconferenceGenerationResultItem[] = [];
+    let allowWarnings = hasConfirmedWarnings || Boolean(payload.allowPoolWarnings);
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      const chunkPayload = {
+        ...payload,
+        ...(useOccurrences
+          ? { occurrenceKeys: chunk, scheduleIds: undefined }
+          : { scheduleIds: chunk, occurrenceKeys: undefined }),
+        allowPoolWarnings: allowWarnings || undefined,
+        // Pass all preferredHosts — backend ignores non-matching ones
+        preferredHosts: payload.preferredHosts,
+      };
+
+      try {
+        const res = await firstValueFrom(this.api.generate(chunkPayload));
+        allResults.push(...(res.results ?? []));
+        allowWarnings = true; // pool already validated after first successful chunk
+      } catch (error: any) {
+        const errorBody = error?.error?.message ?? error?.message ?? '';
+        const isGatewayErrorPage = typeof errorBody === 'string' && /Cannot GET \//i.test(errorBody);
+        const isGatewayError =
+          error.status === 0 || error.status === 502 ||
+          error.status === 503 || error.status === 504 || isGatewayErrorPage;
+
+        if (isGatewayError) {
+          // Backend still processing this chunk — show partial results and poll.
+          if (allResults.length) {
+            this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
+          }
+          this.startGatewayPolling({ startDate: payload.startDate, endDate: payload.endDate });
+          this.cdr.detectChanges();
+          return;
+        }
+
+        // Pool warning on first chunk — prompt and retry from beginning
+        const message = error?.error?.message ?? '';
+        if (!allowWarnings && typeof message === 'string' && message.includes('Confirma si deseas continuar')) {
+          const confirmed = await this.dialog.confirm({
+            title: 'Advertencia del pool Zoom',
+            message,
+            confirmLabel: 'Continuar',
+            cancelLabel: 'Cancelar',
+          });
+          if (confirmed) {
+            allowWarnings = true;
+            i--; // retry current chunk
+            continue;
+          }
+          break;
+        }
+
+        // Real error — show partial results if any and stop
+        if (allResults.length) {
+          this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
+        }
+        this.finishGenerationProgress();
+        this.loading = false;
+        await this.dialog.alert({
+          title: allResults.length
+            ? `Error en lote ${i + 1} de ${chunks.length} — revisa los resultados parciales`
+            : 'No se pudieron generar las videoconferencias',
+          message: message || 'Error generando videoconferencias.',
+          tone: 'danger',
+        });
+        return;
+      }
+
+      // Advance progress based on completed items
+      const completedCount = Math.min((i + 1) * chunkSize, ids.length);
+      this.generationProgress = Math.min(92, (completedCount / ids.length) * 100);
+      this.cdr.detectChanges();
+    }
+
+    // All chunks done
+    this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
+    this.finishGenerationProgress();
+    this.loading = false;
+
+    const created = allResults.filter((r) => r.status === 'MATCHED' || r.status === 'CREATED_UNMATCHED').length;
+    const errors = allResults.filter((r) =>
+      ['ERROR', 'NO_AVAILABLE_ZOOM_USER', 'VALIDATION_ERROR'].includes(r.status),
+    ).length;
+    const blocked = allResults.filter((r) => r.status === 'BLOCKED_EXISTING').length;
+
+    const parts: string[] = [];
+    if (created > 0) parts.push(`${created} creadas`);
+    if (blocked > 0) parts.push(`${blocked} ya existían`);
+    if (errors > 0) parts.push(`${errors} con error`);
+
+    await this.dialog.alert({
+      title: 'Proceso finalizado',
+      message: (parts.length ? parts.join(', ') + '. ' : '') + 'Sincroniza el ID Zoom desde Auditoría.',
+      tone: errors > 0 && created === 0 ? 'danger' : 'success',
+    });
+  }
+
+  private startGenerationProgress(total = 0, displayTotal?: number) {
     this.generationTotal = displayTotal ?? total;
     this.generationStartTime = Date.now();
     this.generating = true;
