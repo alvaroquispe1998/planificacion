@@ -133,7 +133,10 @@ export class AuditDetailPageComponent implements OnInit {
 
   get syncButtonLabel() {
     if (this.syncing) {
-      return 'Sincronizando...';
+      return this.record?.needs_reconcile ? 'Buscando en Zoom...' : 'Sincronizando...';
+    }
+    if (this.record?.needs_reconcile) {
+      return 'Reintentar match Zoom';
     }
     if (this.record?.is_sync_owner === false) {
       return 'Sincronizar desde owner';

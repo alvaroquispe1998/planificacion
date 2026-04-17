@@ -1024,17 +1024,23 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     if (!item.preview) {
       return item.conference_date || 'Sin contexto local';
     }
-    const parts = [
-      this.getSectionDisplay(item.preview),
-      this.getSubsectionDisplay(item.preview),
-      item.conference_date || item.preview.effective_conference_date || item.preview.base_conference_date,
+    const preview = item.preview;
+    const date = item.conference_date || preview.effective_conference_date || preview.base_conference_date;
+    const startTime = preview.effective_start_time || preview.start_time;
+    const endTime = preview.effective_end_time || preview.end_time;
+    const timeRange = startTime && endTime ? `${startTime} - ${endTime}` : null;
+    const dayTime = [preview.day_label, timeRange].filter(Boolean).join(' ');
+    const parts: (string | null | undefined)[] = [
+      this.getSectionDisplay(preview),
+      this.getSubsectionDisplay(preview),
+      date || null,
+      dayTime || null,
+      preview.teacher_name || null,
     ];
-    if (item.preview.inheritance?.is_inherited) {
-      parts.push(item.preview.inheritance.parent_label || 'Hereda Zoom');
+    if (preview.inheritance?.is_inherited) {
+      parts.push(preview.inheritance.parent_label || 'Hereda Zoom');
     }
-    return parts
-      .filter(Boolean)
-      .join(' | ');
+    return parts.filter(Boolean).join(' | ');
   }
 
   canRetryReconcile(item: VideoconferenceGenerationResultItem) {
@@ -1531,7 +1537,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       }
     }
 
-    return this.previewData.find((preview) => {
+    const byScheduleAndDate = this.previewData.find((preview) => {
       if (preview.schedule_id !== item.schedule_id) {
         return false;
       }
@@ -1542,7 +1548,22 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         preview.effective_conference_date === item.conference_date
         || preview.base_conference_date === item.conference_date
       );
-    }) ?? null;
+    });
+
+    if (byScheduleAndDate) {
+      return byScheduleAndDate;
+    }
+
+    // Last resort: match by schedule_id (or grouped_schedule_ids) only.
+    // Needed for base schedule mode where previewData occurrence_key is "schedule:UUID"
+    // but generation result occurrence_key is "UUID::date" — both exact lookups above fail.
+    return (
+      this.previewData.find(
+        (preview) =>
+          preview.schedule_id === item.schedule_id ||
+          (preview.grouped_schedule_ids?.includes(item.schedule_id) ?? false),
+      ) ?? null
+    );
   }
 
   private findPreviewItemForAssignment(item: VideoconferenceAssignmentPreviewItem) {
