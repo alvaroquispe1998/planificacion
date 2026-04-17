@@ -38,6 +38,7 @@ import {
   CreateVideoConferenceDto,
   UpdateMeetingInstanceDto,
 } from './dto/audit.dto';
+import { VideoconferenceService } from '../videoconference/videoconference.service';
 import { ZoomAccountService } from '../videoconference/zoom-account.service';
 import {
   PlanningSubsectionVideoconferenceAuditStatusValues,
@@ -171,6 +172,7 @@ export class AuditService {
     @InjectRepository(TeacherEntity)
     private readonly teachersRepo: Repository<TeacherEntity>,
     private readonly zoomAccountService: ZoomAccountService,
+    private readonly videoconferenceService: VideoconferenceService,
   ) {}
 
   listVideoConferences(classOfferingId?: string) {
@@ -450,7 +452,10 @@ export class AuditService {
         instance_count: instanceCountMap.get(ownerIdMap.get(row.id) ?? row.id) ?? 0,
         participant_count: participantCountMap.get(ownerIdMap.get(row.id) ?? row.id) ?? 0,
         recording_count: recordingCountMap.get(ownerIdMap.get(row.id) ?? row.id) ?? 0,
-        can_sync: Boolean((row.sync_owner_zoom_meeting_id ?? row.zoom_meeting_id) && (row.sync_owner_videoconference_id ?? row.id)),
+        can_sync: Boolean(
+          ((row.sync_owner_zoom_meeting_id ?? row.zoom_meeting_id) && (row.sync_owner_videoconference_id ?? row.id))
+          || row.status === 'CREATED_UNMATCHED'
+        ),
         is_sync_owner: row.link_mode !== 'INHERITED',
         sync_owner_videoconference_id: row.sync_owner_videoconference_id,
       };
@@ -555,9 +560,13 @@ export class AuditService {
         teacher_id: teacher?.id ?? row.effective_teacher_id,
         teacher_name: teacher?.full_name ?? teacher?.name ?? null,
         teacher_dni: teacher?.dni ?? null,
-        can_sync: Boolean((row.sync_owner_zoom_meeting_id ?? row.zoom_meeting_id) && syncOwnerId),
+        can_sync: Boolean(
+          ((row.sync_owner_zoom_meeting_id ?? row.zoom_meeting_id) && syncOwnerId)
+          || row.status === 'CREATED_UNMATCHED'
+        ),
         is_sync_owner: row.link_mode !== 'INHERITED',
         sync_owner_videoconference_id: syncOwnerId,
+        needs_reconcile: !row.zoom_meeting_id && row.status === 'CREATED_UNMATCHED',
       },
       selected_instance_id: bundles[0]?.instance.id ?? null,
       instances: bundles.map((bundle) => ({
@@ -587,7 +596,9 @@ export class AuditService {
       throw new NotFoundException(`No existe la videoconferencia owner ${syncOwnerId}.`);
     }
     if (!record.zoom_meeting_id) {
-      throw new BadRequestException('La videoconferencia no tiene zoom_meeting_id conciliado.');
+      // No Zoom meeting ID yet — try to reconcile (match) it like generation does.
+      const reconciled = await this.videoconferenceService.reconcile(record.id);
+      return this.getPlanningVideoconferenceAuditDetail(requestedRecord.id);
     }
 
     if (!record.start_url) {
