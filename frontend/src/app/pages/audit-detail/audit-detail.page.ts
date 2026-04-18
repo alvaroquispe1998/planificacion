@@ -129,6 +129,10 @@ export class AuditDetailPageComponent implements OnInit {
     return Math.max(0, rawCount - this.visibleParticipants.length);
   }
 
+  get visibleRecordings() {
+    return Array.isArray(this.selectedInstance?.recordings) ? this.selectedInstance.recordings : [];
+  }
+
   copyUrl(url: string, key: 'join' | 'start') {
     navigator.clipboard.writeText(url).then(() => {
       this.copiedKey = key;
