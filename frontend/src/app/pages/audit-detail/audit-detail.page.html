@@ -93,13 +93,43 @@
         </div>
         <div>
           <span class="meta-label">Join URL</span>
-          <a *ngIf="record.join_url; else noJoin" [href]="record.join_url" target="_blank" rel="noopener">Abrir</a>
-          <ng-template #noJoin><strong>Sin enlace</strong></ng-template>
+          <div class="url-row" *ngIf="record.join_url; else noJoin">
+            <a class="url-open-btn" [href]="record.join_url" target="_blank" rel="noopener" title="Unirse a la reunion">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4Z" fill="currentColor"/>
+              </svg>
+              Unirse
+            </a>
+            <button class="url-copy-btn" type="button" (click)="copyUrl(record.join_url, 'join')" [class.copied]="copiedKey === 'join'" title="Copiar enlace">
+              <svg *ngIf="copiedKey !== 'join'" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1Zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H8V7h11v14Z" fill="currentColor"/>
+              </svg>
+              <svg *ngIf="copiedKey === 'join'" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17Z" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+          <ng-template #noJoin><strong class="url-empty">Sin enlace</strong></ng-template>
         </div>
         <div>
           <span class="meta-label">Start URL</span>
-          <a *ngIf="record.start_url; else noStart" [href]="record.start_url" target="_blank" rel="noopener">Abrir</a>
-          <ng-template #noStart><strong>Sin enlace</strong></ng-template>
+          <div class="url-row" *ngIf="record.start_url; else noStart">
+            <a class="url-open-btn url-open-btn-start" [href]="record.start_url" target="_blank" rel="noopener" title="Iniciar la reunion como host">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 5v14l11-7L8 5Z" fill="currentColor"/>
+              </svg>
+              Iniciar
+            </a>
+            <button class="url-copy-btn" type="button" (click)="copyUrl(record.start_url, 'start')" [class.copied]="copiedKey === 'start'" title="Copiar enlace">
+              <svg *ngIf="copiedKey !== 'start'" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1Zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2Zm0 16H8V7h11v14Z" fill="currentColor"/>
+              </svg>
+              <svg *ngIf="copiedKey === 'start'" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17Z" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+          <ng-template #noStart><strong class="url-empty">Sin enlace</strong></ng-template>
         </div>
       </div>
     </section>

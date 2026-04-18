@@ -380,6 +380,70 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     this.form.childScheduleId = '';
   }
 
+  exportToExcel() {
+    const header = [
+      'ID',
+      'Estado',
+      'Notas',
+      'Padre - Curso',
+      'Padre - Seccion',
+      'Padre - Grupo',
+      'Padre - Horario',
+      'Padre - Vacantes',
+      'Padre - Schedule ID',
+      'Hijo - Curso',
+      'Hijo - Seccion',
+      'Hijo - Grupo',
+      'Hijo - Horario',
+      'Hijo - Vacantes',
+      'Hijo - Schedule ID',
+      'Creada el',
+      'Actualizada el',
+    ];
+
+    const rows = this.mappings.map((item) => [
+      item.id,
+      item.is_active ? 'Activa' : 'Inactiva',
+      item.notes ?? '',
+      item.parent?.course_label ?? '',
+      item.parent?.section_label ?? '',
+      item.parent?.subsection_label ?? '',
+      item.parent?.schedule_label ?? '',
+      item.parent?.section_projected_vacancies != null ? String(item.parent.section_projected_vacancies) : '',
+      item.parent_schedule_id,
+      item.child?.course_label ?? '',
+      item.child?.section_label ?? '',
+      item.child?.subsection_label ?? '',
+      item.child?.schedule_label ?? '',
+      item.child?.section_projected_vacancies != null ? String(item.child.section_projected_vacancies) : '',
+      item.child_schedule_id,
+      item.created_at ? new Date(item.created_at).toLocaleString('es-PE') : '',
+      item.updated_at ? new Date(item.updated_at).toLocaleString('es-PE') : '',
+    ]);
+
+    const escape = (value: string) => {
+      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+        return '"' + value.replace(/"/g, '""') + '"';
+      }
+      return value;
+    };
+
+    const csv = [header, ...rows]
+      .map((line) => line.map(escape).join(','))
+      .join('\r\n');
+
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const ts = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `herencias-zoom-${ts}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
   edit(item: VideoconferenceInheritanceItem) {
     const parent = this.schedules.find((row) => row.schedule_id === item.parent_schedule_id) ?? null;
     const child = this.schedules.find((row) => row.schedule_id === item.child_schedule_id) ?? null;

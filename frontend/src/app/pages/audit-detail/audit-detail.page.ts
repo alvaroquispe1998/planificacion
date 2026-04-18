@@ -39,6 +39,8 @@ export class AuditDetailPageComponent implements OnInit {
   record: any | null = null;
   instances: any[] = [];
   selectedInstanceId = '';
+  copiedKey: 'join' | 'start' | '' = '';
+  private copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly route: ActivatedRoute,
@@ -127,8 +129,16 @@ export class AuditDetailPageComponent implements OnInit {
     return Math.max(0, rawCount - this.visibleParticipants.length);
   }
 
-  get visibleRecordings() {
-    return Array.isArray(this.selectedInstance?.recordings) ? this.selectedInstance.recordings : [];
+  copyUrl(url: string, key: 'join' | 'start') {
+    navigator.clipboard.writeText(url).then(() => {
+      this.copiedKey = key;
+      this.cdr.markForCheck();
+      if (this.copiedTimer) clearTimeout(this.copiedTimer);
+      this.copiedTimer = setTimeout(() => {
+        this.copiedKey = '';
+        this.cdr.markForCheck();
+      }, 2000);
+    });
   }
 
   get syncButtonLabel() {
