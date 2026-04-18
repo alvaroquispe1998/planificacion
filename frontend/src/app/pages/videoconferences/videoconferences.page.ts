@@ -225,8 +225,10 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   get attentionResultRows() {
-    return this.generationRows.filter((item) =>
-      ['NO_AVAILABLE_ZOOM_USER', 'BLOCKED_EXISTING'].includes(item.status),
+    return this.generationRows.filter(
+      (item) =>
+        item.status === 'NO_AVAILABLE_ZOOM_USER' ||
+        (item.status === 'BLOCKED_EXISTING' && !item.zoom_meeting_id),
     );
   }
 
@@ -253,7 +255,12 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   get successfulResultRows() {
-    return this.generationRows.filter((item) => item.status === 'MATCHED' || item.status === 'CREATED_UNMATCHED');
+    return this.generationRows.filter(
+      (item) =>
+        item.status === 'MATCHED' ||
+        item.status === 'CREATED_UNMATCHED' ||
+        (item.status === 'BLOCKED_EXISTING' && Boolean(item.zoom_meeting_id)),
+    );
   }
 
   onCampusChange(selectedIds: string[]) {
@@ -889,10 +896,14 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
             zoomGroupId: this.selectedZoomGroupId,
             selectAllVisible: true,
             ...this.buildCatalogFilters(),
+            startDate: this.startDate || undefined,
+            endDate: this.endDate || undefined,
           }
         : {
             zoomGroupId: this.selectedZoomGroupId,
             scheduleIds: selected.map((item) => item.schedule_id),
+            startDate: this.startDate || undefined,
+            endDate: this.endDate || undefined,
           };
 
     this.loading = true;
@@ -984,13 +995,14 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     if (item.link_mode === 'INHERITED' && item.status === 'CREATED_UNMATCHED') {
       return 'Heredada pendiente';
     }
+    if (item.status === 'BLOCKED_EXISTING') {
+      return item.zoom_meeting_id ? 'Ya conciliada' : 'Ya creada (sin match)';
+    }
     switch (item.status) {
       case 'MATCHED':
         return 'Conciliada';
       case 'CREATED_UNMATCHED':
         return 'Creada sin match';
-      case 'BLOCKED_EXISTING':
-        return 'Ya existente';
       case 'NO_AVAILABLE_ZOOM_USER':
         return 'Sin host disponible';
       case 'VALIDATION_ERROR':
@@ -1007,7 +1019,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       case 'CREATED_UNMATCHED':
         return 'result-tone-warning';
       case 'BLOCKED_EXISTING':
-        return 'result-tone-neutral';
+        return item.zoom_meeting_id ? 'result-tone-success' : 'result-tone-neutral';
       case 'NO_AVAILABLE_ZOOM_USER':
       case 'VALIDATION_ERROR':
         return 'result-tone-warning';
@@ -1044,7 +1056,11 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   canRetryReconcile(item: VideoconferenceGenerationResultItem) {
-    return item.status === 'CREATED_UNMATCHED' && Boolean(item.record_id);
+    return (
+      (item.status === 'CREATED_UNMATCHED' || item.status === 'BLOCKED_EXISTING') &&
+      Boolean(item.record_id) &&
+      !item.zoom_meeting_id
+    );
   }
 
   isRetrying(item: VideoconferenceGenerationResultItem) {

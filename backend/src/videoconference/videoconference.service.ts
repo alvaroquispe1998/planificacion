@@ -3039,12 +3039,15 @@ export class VideoconferenceService implements OnModuleInit {
             },
         });
         if (existing) {
+            const blockedMessage = existing.zoom_meeting_id
+                ? 'Este horario ya tenia una videoconferencia conciliada con Zoom desde una ejecucion anterior. No se genero un duplicado.'
+                : 'Este horario ya fue procesado en una ejecucion anterior pero aun sin conciliar con Zoom. Usa "Reintentar match" para vincularla.';
             return {
                 schedule_id: occurrence.row.schedule_id,
                 occurrence_key: occurrence.occurrence_key,
                 conference_date: occurrence.effective_conference_date,
                 status: 'BLOCKED_EXISTING',
-                message: 'Ya existe un registro para este horario en la fecha indicada.',
+                message: blockedMessage,
                 record_id: existing.id,
                 zoom_user_id: existing.zoom_user_id,
                 zoom_user_email: existing.zoom_user_email,

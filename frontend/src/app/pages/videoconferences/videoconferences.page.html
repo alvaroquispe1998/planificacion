@@ -477,6 +477,14 @@
             <span class="result-context">{{ resultContextLabel(item) }}</span>
             <p class="result-message">{{ item.message }}</p>
             <div class="result-actions-inline" *ngIf="item.record_id">
+              <button
+                *ngIf="canRetryReconcile(item)"
+                class="btn btn-secondary btn-sm"
+                type="button"
+                (click)="retryReconcile(item)"
+                [disabled]="isRetrying(item)">
+                {{ isRetrying(item) ? 'Reintentando...' : 'Reintentar match' }}
+              </button>
               <button class="btn btn-secondary btn-sm" type="button" (click)="openAuditDetail(item.record_id)">
                 Abrir auditoria
               </button>
