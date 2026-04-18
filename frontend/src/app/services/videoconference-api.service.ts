@@ -301,6 +301,7 @@ export interface VideoconferenceInheritanceItem {
     is_active: boolean;
     created_at: string;
     updated_at: string;
+    validity: 'ok' | 'inactive' | 'schedule_missing' | 'schedule_mismatch' | 'teacher_mismatch';
     parent: {
         schedule_id: string;
         course_label: string;
@@ -308,6 +309,10 @@ export interface VideoconferenceInheritanceItem {
         subsection_label: string;
         schedule_label: string;
         section_projected_vacancies: number | null;
+        teacher_name: string | null;
+        day_of_week: string;
+        start_time: string;
+        end_time: string;
     } | null;
     child: {
         schedule_id: string;
@@ -316,6 +321,10 @@ export interface VideoconferenceInheritanceItem {
         subsection_label: string;
         schedule_label: string;
         section_projected_vacancies: number | null;
+        teacher_name: string | null;
+        day_of_week: string;
+        start_time: string;
+        end_time: string;
     } | null;
 }
 

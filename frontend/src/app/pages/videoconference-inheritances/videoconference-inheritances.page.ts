@@ -208,6 +208,21 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     return this.schedules.length > 0;
   }
 
+  get invalidActiveMappings() {
+    return this.mappings.filter(
+      (m) => m.is_active && m.validity !== 'ok' && m.validity !== 'inactive',
+    );
+  }
+
+  validityLabel(validity: VideoconferenceInheritanceItem['validity']): string {
+    switch (validity) {
+      case 'schedule_missing': return 'Horario eliminado';
+      case 'schedule_mismatch': return 'Horario cambiado';
+      case 'teacher_mismatch': return 'Docente distinto';
+      default: return '';
+    }
+  }
+
   get catalogHint() {
     if (this.catalogLoading) {
       return 'Buscando horarios disponibles para este contexto...';

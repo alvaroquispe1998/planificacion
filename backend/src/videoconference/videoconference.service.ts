@@ -4651,14 +4651,17 @@ export class VideoconferenceService implements OnModuleInit {
         return mappings.map((item) => {
             const parent = rowMap.get(item.parent_schedule_id) ?? null;
             const child = rowMap.get(item.child_schedule_id) ?? null;
+            const isActive = Boolean(item.is_active);
+            const validity = computeInheritanceValidity(isActive, parent, child);
             return {
                 id: item.id,
                 parent_schedule_id: item.parent_schedule_id,
                 child_schedule_id: item.child_schedule_id,
                 notes: item.notes ?? null,
-                is_active: Boolean(item.is_active),
+                is_active: isActive,
                 created_at: item.created_at,
                 updated_at: item.updated_at,
+                validity,
                 parent: parent
                     ? {
                         schedule_id: parent.schedule_id,
@@ -4666,6 +4669,10 @@ export class VideoconferenceService implements OnModuleInit {
                         section_label: buildSectionLabel(parent),
                         subsection_label: buildGroupLabel(parent),
                         schedule_label: buildScheduleLabel(parent),
+                        teacher_name: resolveTeacher(parent).name ?? null,
+                        day_of_week: parent.day_of_week,
+                        start_time: parent.start_time,
+                        end_time: parent.end_time,
                     }
                     : null,
                 child: child
@@ -4675,6 +4682,10 @@ export class VideoconferenceService implements OnModuleInit {
                         section_label: buildSectionLabel(child),
                         subsection_label: buildGroupLabel(child),
                         schedule_label: buildScheduleLabel(child),
+                        teacher_name: resolveTeacher(child).name ?? null,
+                        day_of_week: child.day_of_week,
+                        start_time: child.start_time,
+                        end_time: child.end_time,
                     }
                     : null,
             };
@@ -5119,6 +5130,28 @@ function resolveTeacher(row: ScheduleContextRow): ResolvedTeacher {
             ?? coalesceText(row.section_teacher_full_name, row.section_teacher_name),
         dni: row.responsible_teacher_dni ?? row.section_teacher_dni,
     };
+}
+
+function computeInheritanceValidity(
+    isActive: boolean,
+    parent: ScheduleContextRow | null,
+    child: ScheduleContextRow | null,
+): 'ok' | 'inactive' | 'schedule_missing' | 'schedule_mismatch' | 'teacher_mismatch' {
+    if (!isActive) return 'inactive';
+    if (!parent || !child) return 'schedule_missing';
+    if (
+        parent.day_of_week !== child.day_of_week ||
+        parent.start_time !== child.start_time ||
+        parent.end_time !== child.end_time
+    ) {
+        return 'schedule_mismatch';
+    }
+    const parentTeacher = resolveTeacher(parent);
+    const childTeacher = resolveTeacher(child);
+    if (parentTeacher.id && childTeacher.id && parentTeacher.id !== childTeacher.id) {
+        return 'teacher_mismatch';
+    }
+    return 'ok';
 }
 
 function resolveModality(row: ScheduleContextRow): ResolvedModality {
