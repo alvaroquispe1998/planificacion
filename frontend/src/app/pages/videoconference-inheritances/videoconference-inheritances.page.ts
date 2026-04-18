@@ -382,12 +382,10 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
 
   exportToExcel() {
     const header = [
-      'Padre - Curso',
-      'Padre - Seccion',
+      'Padre',
       'Padre - Grupo',
       'Padre - Horario',
-      'Hijo - Curso',
-      'Hijo - Seccion',
+      'Hijo',
       'Hijo - Grupo',
       'Hijo - Horario',
       'Creada el',
@@ -395,11 +393,9 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     ];
 
     const rows = this.mappings.map((item) => [
-      item.parent?.course_label ?? '',
       item.parent?.section_label ?? '',
       item.parent?.subsection_label ?? '',
       item.parent?.schedule_label ?? '',
-      item.child?.course_label ?? '',
       item.child?.section_label ?? '',
       item.child?.subsection_label ?? '',
       item.child?.schedule_label ?? '',
