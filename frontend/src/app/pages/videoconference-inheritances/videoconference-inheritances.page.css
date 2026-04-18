@@ -60,6 +60,42 @@
   color: #21406b;
 }
 
+.btn-export-excel {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1.5px solid #1a7a3a;
+  background: linear-gradient(135deg, #1e8e45, #166e34);
+  color: #fff;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(22, 110, 52, 0.22);
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+
+.btn-export-excel:hover {
+  background: linear-gradient(135deg, #22a050, #1a8040);
+  box-shadow: 0 6px 18px rgba(22, 110, 52, 0.30);
+  transform: translateY(-1px);
+}
+
+.btn-export-excel:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(22, 110, 52, 0.18);
+}
+
+.btn-export-excel svg {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
 /* Search loading */
 @keyframes spin {
   to { transform: rotate(360deg); }
