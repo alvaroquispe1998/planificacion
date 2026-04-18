@@ -305,7 +305,17 @@
         <span class="eyebrow">Matriz actual</span>
         <h2>Herencias configuradas</h2>
       </div>
-      <span class="pill">{{ mappings.length }} herencias</span>
+      <div class="panel-head-actions">
+        <span class="pill">{{ mappings.length }} herencias</span>
+        <button
+          *ngIf="mappings.length"
+          type="button"
+          class="btn btn-secondary"
+          (click)="exportToExcel()"
+          title="Exportar herencias a Excel">
+          Exportar Excel
+        </button>
+      </div>
     </div>
 
     <div class="mapping-list" *ngIf="mappings.length; else emptyState">
