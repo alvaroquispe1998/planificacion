@@ -305,7 +305,8 @@ export class AuditPageComponent implements OnInit {
   }
 
   dateLabel(row: any) {
-    return this.formatDate(row.conference_date) || this.formatDate(row.scheduled_start);
+    const raw = row.conference_date || row.scheduled_start;
+    return this.formatDateSafe(raw);
   }
 
   timeLabel(row: any) {
@@ -314,6 +315,19 @@ export class AuditPageComponent implements OnInit {
 
   shortTime(value: string | null | undefined) {
     return value ? String(value).slice(0, 5) : '--:--';
+  }
+
+  /** Format a date as d/M/yyyy extracting YYYY-MM-DD directly to avoid timezone shifts. */
+  formatDateSafe(value: string | Date | null | undefined) {
+    if (!value) return '--';
+    const str = typeof value === 'string' ? value : value.toISOString();
+    const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const [, y, m, d] = match;
+      return `${parseInt(d, 10)}/${parseInt(m, 10)}/${y}`;
+    }
+    const date = new Date(str);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString();
   }
 
   formatDate(value: string | Date | null | undefined) {
