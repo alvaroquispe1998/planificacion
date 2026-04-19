@@ -907,6 +907,10 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
           };
 
     this.loading = true;
+    // Ensure existing check runs so rows are deselected before assignment preview
+    if (this.startDate && this.endDate && !this.usesOccurrenceRows) {
+      this.refreshExistingCheck();
+    }
     this.api.assignmentPreview(payload).subscribe({
       next: (response) => {
         this.assignmentPreview = response;
@@ -1456,6 +1460,19 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       // Auto-deselect rows that are already created (occurrence mode)
       this.previewData.forEach((item) => {
         if (map.has(item.occurrence_key)) {
+          item.selected = false;
+        }
+      });
+    } else {
+      // Base mode: deselect rows whose schedule_id has an existing conference in the range
+      const existingScheduleIds = new Set<string>();
+      for (const key of map.keys()) {
+        const sep = key.lastIndexOf('::');
+        if (sep >= 0) existingScheduleIds.add(key.slice(0, sep));
+      }
+      this.previewData.forEach((item) => {
+        const ids = item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id];
+        if (ids.some((id) => existingScheduleIds.has(id))) {
           item.selected = false;
         }
       });

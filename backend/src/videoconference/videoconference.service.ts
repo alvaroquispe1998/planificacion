@@ -1257,7 +1257,7 @@ export class VideoconferenceService implements OnModuleInit {
             const rows = await this.planningVideoconferencesRepo
                 .createQueryBuilder('vc')
                 .where('vc.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds: uniqueScheduleIds })
-                .andWhere('vc.conference_date IN (:...conferenceDates)', { conferenceDates })
+                .andWhere('DATE(vc.conference_date) IN (:...conferenceDates)', { conferenceDates })
                 .andWhere("vc.status != 'ERROR'")
                 .select([
                     'vc.id',
@@ -1304,8 +1304,8 @@ export class VideoconferenceService implements OnModuleInit {
         const rows = await this.planningVideoconferencesRepo
             .createQueryBuilder('vc')
             .where('vc.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds })
-            .andWhere('vc.conference_date >= :startDate', { startDate })
-            .andWhere('vc.conference_date <= :endDate', { endDate })
+            .andWhere('DATE(vc.conference_date) >= DATE(:startDate)', { startDate })
+            .andWhere('DATE(vc.conference_date) <= DATE(:endDate)', { endDate })
             .andWhere("vc.status != 'ERROR'")
             .select([
                 'vc.id',
@@ -1879,7 +1879,7 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         const existing =
-            existingLookup.get(`${occurrence.row.schedule_id}::${occurrence.effective_conference_date}`) ?? null;
+            existingLookup.get(`${occurrence.row.schedule_id}::${toDateOnly(occurrence.effective_conference_date)}`) ?? null;
         if (existing) {
             const existingHost = this.resolvePreviewZoomUser(
                 existing.zoom_user_id,
@@ -2102,7 +2102,7 @@ export class VideoconferenceService implements OnModuleInit {
         const rows = await this.planningVideoconferencesRepo
             .createQueryBuilder('conference')
             .where('conference.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds })
-            .andWhere('conference.conference_date IN (:...conferenceDates)', { conferenceDates })
+            .andWhere('DATE(conference.conference_date) IN (:...conferenceDates)', { conferenceDates })
             .getMany();
 
         return new Map(
@@ -3031,12 +3031,11 @@ export class VideoconferenceService implements OnModuleInit {
             };
         }
 
-        const existing = await this.planningVideoconferencesRepo.findOne({
-            where: {
-                planning_subsection_schedule_id: occurrence.row.schedule_id,
-                conference_date: occurrence.effective_conference_date,
-            },
-        });
+        const existing = await this.planningVideoconferencesRepo
+            .createQueryBuilder('conference')
+            .where('conference.planning_subsection_schedule_id = :scheduleId', { scheduleId: occurrence.row.schedule_id })
+            .andWhere('DATE(conference.conference_date) = DATE(:conferenceDate)', { conferenceDate: occurrence.effective_conference_date })
+            .getOne();
         if (existing) {
             const blockedMessage = existing.zoom_meeting_id
                 ? 'Este horario ya tenia una videoconferencia conciliada con Zoom desde una ejecucion anterior. No se genero un duplicado.'
@@ -3212,12 +3211,11 @@ export class VideoconferenceService implements OnModuleInit {
         ownerResult: GenerateResultItem,
     ): Promise<GenerateResultItem> {
         const now = new Date();
-        const existing = await this.planningVideoconferencesRepo.findOne({
-            where: {
-                planning_subsection_schedule_id: occurrence.row.schedule_id,
-                conference_date: occurrence.effective_conference_date,
-            },
-        });
+        const existing = await this.planningVideoconferencesRepo
+            .createQueryBuilder('conference')
+            .where('conference.planning_subsection_schedule_id = :scheduleId', { scheduleId: occurrence.row.schedule_id })
+            .andWhere('DATE(conference.conference_date) = DATE(:conferenceDate)', { conferenceDate: occurrence.effective_conference_date })
+            .getOne();
 
         const status =
             ownerRecord?.status === 'ERROR'
