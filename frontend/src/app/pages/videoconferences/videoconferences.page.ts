@@ -926,10 +926,15 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   getAssignmentPreview(preview: PreviewSelectionItem) {
-    return (
-      this.assignmentPreview?.items.find((item) => item.id === preview.occurrence_key)
-      ?? null
-    );
+    if (!this.assignmentPreview?.items?.length) return null;
+    // Exact match (both in same mode)
+    const exact = this.assignmentPreview.items.find((item) => item.id === preview.occurrence_key);
+    if (exact) return exact;
+    // Fallback: base preview row ("schedule:UUID") ↔ occurrence assignment item ("UUID::date")
+    return this.assignmentPreview.items.find((item) =>
+      item.schedule_id === preview.schedule_id &&
+      (!preview.effective_conference_date || item.conference_date === preview.effective_conference_date)
+    ) ?? null;
   }
 
   assignmentStatusLabel(item: VideoconferenceAssignmentPreviewItem | null) {

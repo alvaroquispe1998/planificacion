@@ -2014,7 +2014,6 @@ export class VideoconferenceService implements OnModuleInit {
             'ASSIGNED_LICENSED',
             'ASSIGNED_RISK',
             'INHERITED',
-            'BLOCKED_EXISTING',
         ]);
         const usedHosts = new Map<string, AssignmentPreviewItem>();
         const hostsByDay = new Map<string, Map<string, AssignmentPreviewItem>>();
@@ -4904,6 +4903,14 @@ export class VideoconferenceService implements OnModuleInit {
                     .filter((item): item is string => Boolean(item)),
             );
 
+            // Track unmatched local meetings (created but not yet reconciled with Zoom).
+            // These exist in the DB without zoom_meeting_id but their corresponding Zoom
+            // meeting will also appear in the remote list. Without this dedup, the same
+            // meeting is counted twice across chunked generation requests.
+            const unmatchedLocalWindows = localMeetings
+                .filter((item) => !item.zoom_meeting_id)
+                .map((item) => ({ start: item.scheduled_start, end: item.scheduled_end }));
+
             const remoteOverlapCount = remoteMeetings.filter((meeting) => {
                 if (localMeetingIds.has(meeting.id)) {
                     return false;
@@ -4922,7 +4929,16 @@ export class VideoconferenceService implements OnModuleInit {
                         : meeting.duration_minutes)
                     : (isLive ? LIVE_MEETING_FALLBACK_DURATION_MINUTES : DEFAULT_REMOTE_MEETING_DURATION_MINUTES);
                 const remoteEnd = addMinutes(remoteStart, effectiveDuration);
-                return doesOverlap(windowStart, windowEnd, remoteStart, remoteEnd);
+                if (!doesOverlap(windowStart, windowEnd, remoteStart, remoteEnd)) {
+                    return false;
+                }
+                // Skip remote meetings that overlap with an unmatched local record —
+                // they are very likely the same meeting (created in a previous chunk
+                // but not yet reconciled, so zoom_meeting_id is null in the DB).
+                const likelyDuplicate = unmatchedLocalWindows.some((w) =>
+                    doesOverlap(w.start, w.end, remoteStart, remoteEnd),
+                );
+                return !likelyDuplicate;
             }).length;
 
             const simulatedOverlapCount = (simulatedReservations?.get(zoomUser.zoom_user_id) ?? []).filter(
