@@ -387,6 +387,14 @@
         </div>
         <div class="mapping-meta">
           <span class="pill" [class.pill-muted]="!item.is_active">{{ item.is_active ? 'Activa' : 'Inactiva' }}</span>
+          <span
+            *ngIf="item.is_active && item.validity !== 'ok' && item.validity !== 'inactive'"
+            class="validity-badge"
+            [class.validity-badge-missing]="item.validity === 'schedule_missing'"
+            [class.validity-badge-mismatch]="item.validity === 'schedule_mismatch'"
+            [class.validity-badge-teacher]="item.validity === 'teacher_mismatch'">
+            ⚠ {{ validityLabel(item.validity) }}
+          </span>
           <span class="muted" *ngIf="item.notes">{{ item.notes }}</span>
         </div>
         <div class="mapping-actions">
