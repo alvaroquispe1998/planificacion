@@ -1924,7 +1924,7 @@ export class VideoconferenceService implements OnModuleInit {
             });
         }
 
-        const selectedZoomUser = await this.findAvailableZoomUser(
+        const findResult = await this.findAvailableZoomUser(
             occurrence.scheduled_start,
             occurrence.scheduled_end,
             zoomUsers,
@@ -1932,6 +1932,7 @@ export class VideoconferenceService implements OnModuleInit {
             remoteMeetingsCache,
             simulatedReservations,
         );
+        const selectedZoomUser = findResult.user;
         if (!selectedZoomUser) {
             return this.buildAssignmentPreviewItem({
                 id: occurrence.occurrence_key,
@@ -1944,7 +1945,7 @@ export class VideoconferenceService implements OnModuleInit {
                 startTime: occurrence.effective_start_time,
                 endTime: occurrence.effective_end_time,
                 previewStatus: 'NO_AVAILABLE_ZOOM_USER',
-                message: 'No se asigno host Zoom para esta ocurrencia. Aunque haya varios usuarios en el grupo, todos pueden estar ocupados en ese bloque horario o superar la concurrencia maxima.',
+                message: findResult.diagnosis || 'No se asigno host Zoom para esta ocurrencia. Aunque haya varios usuarios en el grupo, todos pueden estar ocupados en ese bloque horario o superar la concurrencia maxima.',
                 host: null,
                 consumesCapacity: false,
                 inheritance: occurrence.inheritance,
@@ -3093,13 +3094,14 @@ export class VideoconferenceService implements OnModuleInit {
                 };
             }
         } else {
-            selectedZoomUser = await this.findAvailableZoomUser(
+            const findResult = await this.findAvailableZoomUser(
                 occurrence.scheduled_start,
                 occurrence.scheduled_end,
                 zoomUsers,
                 maxConcurrent,
                 remoteMeetingsCache,
             );
+            selectedZoomUser = findResult.user;
         }
         if (!selectedZoomUser) {
             return {
@@ -4877,9 +4879,10 @@ export class VideoconferenceService implements OnModuleInit {
         maxConcurrent: number,
         remoteMeetingsCache: Map<string, ZoomMeetingSummary[] | null>,
         simulatedReservations?: Map<string, SimulatedReservation[]>,
-    ): Promise<T | null> {
+    ): Promise<{ user: T; diagnosis: string } | { user: null; diagnosis: string }> {
         const windowStart = addMinutes(scheduledStart, -MEETING_MARGIN_MINUTES);
         const windowEnd = addMinutes(scheduledEnd, MEETING_MARGIN_MINUTES);
+        const diagParts: string[] = [];
 
         for (const zoomUser of zoomUsers) {
             if (!zoomUser.email) {
@@ -4898,9 +4901,8 @@ export class VideoconferenceService implements OnModuleInit {
                 }
                 remoteMeetingsCache.set(zoomUser.zoom_user_id, remoteMeetings);
             }
-            if (!remoteMeetings) {
-                continue;
-            }
+            // If remote meetings are unavailable, proceed with local data only
+            // rather than skipping the user entirely.
 
             const localMeetings = await this.planningVideoconferencesRepo
                 .createQueryBuilder('conference')
@@ -4927,7 +4929,8 @@ export class VideoconferenceService implements OnModuleInit {
                 .filter((item) => !item.zoom_meeting_id)
                 .map((item) => ({ start: item.scheduled_start, end: item.scheduled_end }));
 
-            const remoteOverlapCount = remoteMeetings.filter((meeting) => {
+            const remoteOverlapCount = remoteMeetings
+                ? remoteMeetings.filter((meeting) => {
                 if (localMeetingIds.has(meeting.id)) {
                     return false;
                 }
@@ -4955,18 +4958,24 @@ export class VideoconferenceService implements OnModuleInit {
                     doesOverlap(w.start, w.end, remoteStart, remoteEnd),
                 );
                 return !likelyDuplicate;
-            }).length;
+            }).length
+                : 0;
 
             const simulatedOverlapCount = (simulatedReservations?.get(zoomUser.zoom_user_id) ?? []).filter(
                 (item) => doesOverlap(windowStart, windowEnd, item.scheduled_start, item.scheduled_end),
             ).length;
 
-            if (localMeetings.length + remoteOverlapCount + simulatedOverlapCount < maxConcurrent) {
-                return zoomUser;
+            const totalOverlap = localMeetings.length + remoteOverlapCount + simulatedOverlapCount;
+            if (totalOverlap < maxConcurrent) {
+                return { user: zoomUser, diagnosis: '' };
             }
+            diagParts.push(`${zoomUser.email}: ${totalOverlap} conflictos (${localMeetings.length} BD + ${remoteOverlapCount} Zoom + ${simulatedOverlapCount} sim)`);
         }
 
-        return null;
+        return {
+            user: null,
+            diagnosis: `${zoomUsers.length} usuarios evaluados, max_concurrent=${maxConcurrent}. ` + diagParts.slice(0, 5).join('; ') + (diagParts.length > 5 ? ` … y ${diagParts.length - 5} mas` : ''),
+        };
     }
 
     private findAvailableZoomUserForBaseSlot(
