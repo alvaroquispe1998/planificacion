@@ -15,6 +15,10 @@ export const ACTION_PERMISSIONS = {
   PLANNING_CHANGE_LOG_VIEW: 'action.planning.change_log.view',
   PLANNING_PLAN_SUBMIT_REVIEW: 'action.planning.plan.submit_review',
   PLANNING_PLAN_REVIEW_DECIDE: 'action.planning.plan.review_decide',
+  VIDEOCONFERENCES_GENERATE: 'action.videoconferences.generate',
+  VIDEOCONFERENCES_RETRY: 'action.videoconferences.retry',
+  AUDIT_EXPORT: 'action.audit.export',
+  SYNC_EXECUTE: 'action.settings.sync_execute',
 } as const;
 
 export const ROLE_CODES = {
@@ -149,6 +153,42 @@ export const PERMISSION_SEEDS = [
     group_key: 'planning',
     parent_window_code: WINDOW_PERMISSIONS.PLANNING,
     sort_order: 160,
+  },
+  {
+    code: ACTION_PERMISSIONS.VIDEOCONFERENCES_GENERATE,
+    type: 'ACTION' as const,
+    description: 'Generar y previsualizar videoconferencias Zoom.',
+    display_name: 'Generar videoconferencias',
+    group_key: 'videoconferences',
+    parent_window_code: WINDOW_PERMISSIONS.VIDEOCONFERENCES,
+    sort_order: 170,
+  },
+  {
+    code: ACTION_PERMISSIONS.VIDEOCONFERENCES_RETRY,
+    type: 'ACTION' as const,
+    description: 'Reintentar match y acciones de correccion sobre videoconferencias.',
+    display_name: 'Reintentar y corregir VC',
+    group_key: 'videoconferences',
+    parent_window_code: WINDOW_PERMISSIONS.VIDEOCONFERENCES,
+    sort_order: 180,
+  },
+  {
+    code: ACTION_PERMISSIONS.AUDIT_EXPORT,
+    type: 'ACTION' as const,
+    description: 'Exportar datos y reportes de auditoria Zoom.',
+    display_name: 'Exportar auditoria',
+    group_key: 'audit',
+    parent_window_code: WINDOW_PERMISSIONS.AUDIT,
+    sort_order: 190,
+  },
+  {
+    code: ACTION_PERMISSIONS.SYNC_EXECUTE,
+    type: 'ACTION' as const,
+    description: 'Ejecutar sincronizaciones con Akademic.',
+    display_name: 'Ejecutar sincronizacion',
+    group_key: 'settings',
+    parent_window_code: WINDOW_PERMISSIONS.SETTINGS,
+    sort_order: 200,
   },
 ] as const;
 

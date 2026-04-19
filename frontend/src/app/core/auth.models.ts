@@ -14,7 +14,11 @@ export type PermissionCode =
   | 'action.settings.manage'
   | 'action.planning.change_log.view'
   | 'action.planning.plan.submit_review'
-  | 'action.planning.plan.review_decide';
+  | 'action.planning.plan.review_decide'
+  | 'action.videoconferences.generate'
+  | 'action.videoconferences.retry'
+  | 'action.audit.export'
+  | 'action.settings.sync_execute';
 
 export type AccessScope = {
   assignment_id: string;
