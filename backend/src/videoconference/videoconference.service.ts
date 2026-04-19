@@ -1599,6 +1599,7 @@ export class VideoconferenceService implements OnModuleInit {
                 where: {
                     zoom_user_id: In(poolUserIds),
                     status: In([...ACTIVE_CONFERENCE_STATUSES]),
+                    link_mode: 'OWNED',
                 },
                 select: ['zoom_user_id', 'day_of_week', 'start_time', 'end_time', 'zoom_meeting_id'],
             });
@@ -4891,6 +4892,7 @@ export class VideoconferenceService implements OnModuleInit {
                 .andWhere('conference.status IN (:...statuses)', {
                     statuses: [...ACTIVE_CONFERENCE_STATUSES],
                 })
+                .andWhere("conference.link_mode = 'OWNED'")
                 .andWhere('conference.scheduled_start < :windowEnd', { windowEnd })
                 .andWhere('conference.scheduled_end > :windowStart', { windowStart })
                 .getMany();
