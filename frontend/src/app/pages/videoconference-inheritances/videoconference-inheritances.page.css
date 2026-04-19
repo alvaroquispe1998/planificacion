@@ -534,30 +534,47 @@
   color: #23406d;
 }
 
-/* Validity warning banner */
-.validity-warning-banner {
+/* Conflict section — shown above normal mappings */
+.conflict-section {
+  border: 1.5px solid rgba(200, 112, 0, 0.4);
+  border-radius: 18px;
+  background: rgba(255, 245, 220, 0.7);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.conflict-section-head {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 14px 18px;
-  margin-bottom: 16px;
-  border-radius: 14px;
-  border: 1.5px solid rgba(200, 112, 0, 0.35);
-  background: rgba(255, 245, 225, 0.96);
+  padding: 14px 18px 12px;
+  background: rgba(215, 120, 0, 0.1);
+  border-bottom: 1px solid rgba(200, 112, 0, 0.22);
   color: #7a4200;
   font-size: 0.9rem;
   line-height: 1.5;
 }
 
-.validity-warning-banner svg {
-  width: 20px;
-  height: 20px;
+.conflict-section-head svg {
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
-  margin-top: 1px;
+  margin-top: 2px;
   color: #c47200;
 }
 
-/* Invalid mapping card highlight */
+.conflict-section .mapping-item {
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid rgba(200, 112, 0, 0.14);
+  background: transparent;
+}
+
+.conflict-section .mapping-item:last-child {
+  border-bottom: none;
+}
+
+/* Invalid mapping card highlight (used outside conflict section if needed) */
 .mapping-item-invalid {
   border-left: 3px solid #d97c00;
 }

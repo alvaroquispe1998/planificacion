@@ -214,6 +214,12 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     );
   }
 
+  get normalMappings() {
+    return this.mappings.filter(
+      (m) => !m.is_active || m.validity === 'ok' || m.validity === 'inactive',
+    );
+  }
+
   validityLabel(validity: VideoconferenceInheritanceItem['validity']): string {
     switch (validity) {
       case 'schedule_missing': return 'Horario eliminado';
