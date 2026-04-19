@@ -1604,6 +1604,9 @@ export class VideoconferenceService implements OnModuleInit {
                 select: ['zoom_user_id', 'day_of_week', 'start_time', 'end_time', 'zoom_meeting_id'],
             });
             const dbMeetingIds = new Set<string>();
+            // Deduplicate: same user + day + time slot = one weekly commitment,
+            // regardless of how many dates have been generated for that slot.
+            const seenDbSlots = new Set<string>();
             for (const conf of existingConferences) {
                 if (!conf.zoom_user_id) {
                     continue;
@@ -1611,6 +1614,11 @@ export class VideoconferenceService implements OnModuleInit {
                 if (conf.zoom_meeting_id) {
                     dbMeetingIds.add(conf.zoom_meeting_id);
                 }
+                const slotKey = `${conf.zoom_user_id}::${conf.day_of_week}::${conf.start_time}::${conf.end_time}`;
+                if (seenDbSlots.has(slotKey)) {
+                    continue;
+                }
+                seenDbSlots.add(slotKey);
                 const refStart = buildWeeklyScheduleDateTime(conf.day_of_week, conf.start_time);
                 const refEnd = buildWeeklyScheduleDateTime(conf.day_of_week, conf.end_time);
                 const current = simulatedReservations.get(conf.zoom_user_id) ?? [];
@@ -1620,10 +1628,13 @@ export class VideoconferenceService implements OnModuleInit {
 
             // Also pre-seed from live/upcoming Zoom meetings that are NOT already in our DB.
             // This catches meetings created directly in Zoom outside the system.
+            // Deduplicate by reference-week slot to avoid counting the same weekly
+            // slot once per generated date.
             for (const zoomUser of zoomUsers) {
                 if (!zoomUser.email) {
                     continue;
                 }
+                const seenRemoteSlots = new Set<string>();
                 try {
                     const remoteMeetings = await this.zoomAccountService.listUserMeetingsByTypes(
                         zoomUser.email,
@@ -1638,6 +1649,11 @@ export class VideoconferenceService implements OnModuleInit {
                         if (!slot) {
                             continue;
                         }
+                        const remoteSlotKey = `${slot.start.getTime()}::${slot.end.getTime()}`;
+                        if (seenRemoteSlots.has(remoteSlotKey)) {
+                            continue;
+                        }
+                        seenRemoteSlots.add(remoteSlotKey);
                         const current = simulatedReservations.get(zoomUser.zoom_user_id) ?? [];
                         current.push({ scheduled_start: slot.start, scheduled_end: slot.end });
                         simulatedReservations.set(zoomUser.zoom_user_id, current);
