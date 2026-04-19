@@ -45,6 +45,12 @@ import {
   PlanningSubsectionVideoconferenceEntity,
 } from '../videoconference/videoconference.entity';
 
+function toDateOnly(value: string | Date | null | undefined): string {
+  if (!value) return '';
+  const str = typeof value === 'string' ? value : value.toISOString();
+  return str.slice(0, 10);
+}
+
 type PlanningAuditListRow = {
   id: string;
   planning_offer_id: string;
@@ -393,7 +399,7 @@ export class AuditService {
         planning_section_id: row.planning_section_id,
         planning_subsection_id: row.planning_subsection_id,
         planning_subsection_schedule_id: row.planning_subsection_schedule_id,
-        conference_date: row.conference_date,
+        conference_date: toDateOnly(row.conference_date),
         day_of_week: row.day_of_week,
         start_time: row.start_time,
         end_time: row.end_time,
@@ -504,7 +510,7 @@ export class AuditService {
         planning_section_id: row.planning_section_id,
         planning_subsection_id: row.planning_subsection_id,
         planning_subsection_schedule_id: row.planning_subsection_schedule_id,
-        conference_date: row.conference_date,
+        conference_date: toDateOnly(row.conference_date),
         day_of_week: row.day_of_week,
         start_time: row.start_time,
         end_time: row.end_time,

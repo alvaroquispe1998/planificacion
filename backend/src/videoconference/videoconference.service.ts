@@ -1269,7 +1269,7 @@ export class VideoconferenceService implements OnModuleInit {
                 ])
                 .getMany();
 
-            const rowMap = new Map(rows.map((r) => [`${r.planning_subsection_schedule_id}::${r.conference_date}`, r]));
+            const rowMap = new Map(rows.map((r) => [`${r.planning_subsection_schedule_id}::${toDateOnly(r.conference_date)}`, r]));
 
             const existing = pairs
                 .map((p) => {
@@ -1319,9 +1319,9 @@ export class VideoconferenceService implements OnModuleInit {
             .getMany();
 
         const existing = rows.map((r) => ({
-            occurrence_key: `${r.planning_subsection_schedule_id}::${r.conference_date}`,
+            occurrence_key: `${r.planning_subsection_schedule_id}::${toDateOnly(r.conference_date)}`,
             schedule_id: r.planning_subsection_schedule_id,
-            conference_date: r.conference_date,
+            conference_date: toDateOnly(r.conference_date),
             status: r.status,
             zoom_meeting_id: r.zoom_meeting_id,
             zoom_user_email: r.zoom_user_email,
@@ -2106,7 +2106,7 @@ export class VideoconferenceService implements OnModuleInit {
             .getMany();
 
         return new Map(
-            rows.map((item) => [`${item.planning_subsection_schedule_id}::${item.conference_date}`, item] as const),
+            rows.map((item) => [`${item.planning_subsection_schedule_id}::${toDateOnly(item.conference_date)}`, item] as const),
         );
     }
 
@@ -5495,6 +5495,14 @@ function sortCatalogOptions(options: Map<string, string>): FilterCatalogOption[]
     return [...options.entries()]
         .map(([id, label]) => ({ id, label }))
         .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+/** Normalize a date value (string, Date, or ISO timestamp) to YYYY-MM-DD.
+ *  MySQL DATE columns may arrive as "2026-04-20T00:00:00.000Z" via mysql2/TypeORM. */
+function toDateOnly(value: string | Date | null | undefined): string {
+    if (!value) return '';
+    const str = typeof value === 'string' ? value : value.toISOString();
+    return str.slice(0, 10);
 }
 
 function normalizeIsoDate(value: string) {
