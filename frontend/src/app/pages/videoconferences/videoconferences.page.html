@@ -322,6 +322,10 @@
           <strong>{{ summary.no_available_zoom_user }}</strong>
           <span>Sin host</span>
         </div>
+        <div class="summary-metric" *ngIf="summary.blocked_existing > 0">
+          <strong>{{ summary.blocked_existing }}</strong>
+          <span>Ya creadas</span>
+        </div>
         <div class="summary-metric">
           <strong>{{ summary.validation_errors }}</strong>
           <span>Validacion pendiente</span>
