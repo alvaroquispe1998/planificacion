@@ -305,7 +305,7 @@ export class AuditPageComponent implements OnInit {
   }
 
   dateLabel(row: any) {
-    return row.conference_date || this.formatDate(row.scheduled_start);
+    return this.formatDate(row.conference_date) || this.formatDate(row.scheduled_start);
   }
 
   timeLabel(row: any) {
