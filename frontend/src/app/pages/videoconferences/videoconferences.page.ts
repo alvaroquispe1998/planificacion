@@ -860,8 +860,8 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   async previewAssignments() {
-    const selected = this.previewData.filter((item) => item.selectable && item.selected);
-    if (!selected.length) {
+    const initialSelected = this.previewData.filter((item) => item.selectable && item.selected);
+    if (!initialSelected.length) {
       await this.dialog.alert({
         title: 'Seleccion requerida',
         message: 'Selecciona al menos un horario u ocurrencia para previsualizar la asignacion.',
@@ -876,41 +876,40 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       return;
     }
 
+    this.loading = true;
+    this.cdr.detectChanges();
+
+    // Wait for existing check so already-created rows get deselected BEFORE building payload
+    if (this.startDate && this.endDate) {
+      await this.refreshExistingCheckAsync();
+    }
+
+    // Re-read selected items AFTER deselection of already-created rows
+    const selected = this.previewData.filter((item) => item.selectable && item.selected);
+    if (!selected.length) {
+      this.loading = false;
+      this.cdr.detectChanges();
+      await this.dialog.alert({
+        title: 'Todo ya creado',
+        message: 'Todas las filas seleccionadas ya tienen videoconferencias creadas. No hay nada nuevo que previsualizar.',
+      });
+      return;
+    }
+
     const payload = this.usesOccurrenceRows
-      ? selected.length === this.selectableRows.length
-        ? {
-            zoomGroupId: this.selectedZoomGroupId,
-            selectAllVisible: true,
-            ...this.buildCatalogFilters(),
-            startDate: this.startDate,
-            endDate: this.endDate,
-          }
-        : {
+      ? {
             zoomGroupId: this.selectedZoomGroupId,
             occurrenceKeys: selected.map((item) => item.occurrence_key),
             startDate: this.startDate,
             endDate: this.endDate,
           }
-      : selected.length === this.selectableRows.length
-        ? {
-            zoomGroupId: this.selectedZoomGroupId,
-            selectAllVisible: true,
-            ...this.buildCatalogFilters(),
-            startDate: this.startDate || undefined,
-            endDate: this.endDate || undefined,
-          }
-        : {
+      : {
             zoomGroupId: this.selectedZoomGroupId,
             scheduleIds: selected.map((item) => item.schedule_id),
             startDate: this.startDate || undefined,
             endDate: this.endDate || undefined,
           };
 
-    this.loading = true;
-    // Ensure existing check runs so rows are deselected before assignment preview
-    if (this.startDate && this.endDate && !this.usesOccurrenceRows) {
-      this.refreshExistingCheck();
-    }
     this.api.assignmentPreview(payload).subscribe({
       next: (response) => {
         this.assignmentPreview = response;
@@ -931,14 +930,34 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
 
   getAssignmentPreview(preview: PreviewSelectionItem) {
     if (!this.assignmentPreview?.items?.length) return null;
-    // Exact match (both in same mode)
-    const exact = this.assignmentPreview.items.find((item) => item.id === preview.occurrence_key);
+    // Exact match when the visible row is already an occurrence row.
+    const exact = this.assignmentPreview.items.find(
+      (item) => item.id === preview.occurrence_key || item.occurrence_key === preview.occurrence_key,
+    );
     if (exact) return exact;
-    // Fallback: base preview row ("schedule:UUID") ↔ occurrence assignment item ("UUID::date")
-    return this.assignmentPreview.items.find((item) =>
-      item.schedule_id === preview.schedule_id &&
-      (!preview.effective_conference_date || item.conference_date === preview.effective_conference_date)
-    ) ?? null;
+
+    const scheduleIds = new Set(
+      preview.grouped_schedule_ids?.length ? preview.grouped_schedule_ids : [preview.schedule_id],
+    );
+
+    // Base row -> occurrence preview item for the same schedule/date.
+    const byScheduleAndDate = this.assignmentPreview.items.find((item) => {
+      if (!scheduleIds.has(item.schedule_id)) {
+        return false;
+      }
+      if (!preview.effective_conference_date) {
+        return true;
+      }
+      return (
+        item.conference_date === preview.effective_conference_date ||
+        item.conference_date === preview.base_conference_date
+      );
+    });
+    if (byScheduleAndDate) return byScheduleAndDate;
+
+    // Last resort: match only by schedule family so the row still shows the host
+    // selected in the summary/modal even when the visible row is a grouped base row.
+    return this.assignmentPreview.items.find((item) => scheduleIds.has(item.schedule_id)) ?? null;
   }
 
   assignmentStatusLabel(item: VideoconferenceAssignmentPreviewItem | null) {
@@ -1387,6 +1406,53 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
           tone: 'danger',
         });
       },
+    });
+  }
+
+  /** Promise-based wrapper around refreshExistingCheck for use with await */
+  private refreshExistingCheckAsync(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      // ── Occurrence mode ──
+      if (this.usesOccurrenceRows) {
+        const occurrenceKeys = this.previewData
+          .filter((item) => item.selectable && item.occurrence_key && item.effective_conference_date)
+          .map((item) => item.occurrence_key);
+        if (!occurrenceKeys.length) {
+          this.existingByOccurrenceKey = new Map();
+          resolve();
+          return;
+        }
+        this.checkingExisting = true;
+        this.cdr.detectChanges();
+        this.api.checkExisting({ occurrenceKeys }).subscribe({
+          next: (res) => { this.applyExistingCheckResult(res.existing); resolve(); },
+          error: () => { this.checkingExisting = false; this.cdr.detectChanges(); resolve(); },
+        });
+        return;
+      }
+
+      // ── Base schedule mode ──
+      if (!this.startDate || !this.endDate) {
+        this.existingByOccurrenceKey = new Map();
+        resolve();
+        return;
+      }
+      const scheduleIds = [...new Set(
+        this.previewData
+          .filter((item) => item.selectable)
+          .flatMap((item) => item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id]),
+      )];
+      if (!scheduleIds.length) {
+        this.existingByOccurrenceKey = new Map();
+        resolve();
+        return;
+      }
+      this.checkingExisting = true;
+      this.cdr.detectChanges();
+      this.api.checkExisting({ scheduleIds, startDate: this.startDate, endDate: this.endDate }).subscribe({
+        next: (res) => { this.applyExistingCheckResult(res.existing); resolve(); },
+        error: () => { this.checkingExisting = false; this.cdr.detectChanges(); resolve(); },
+      });
     });
   }
 
