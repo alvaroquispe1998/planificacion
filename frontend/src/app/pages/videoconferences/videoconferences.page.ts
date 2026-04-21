@@ -17,6 +17,7 @@ import {
   VideoconferenceOverridePayload,
   VideoconferencePreviewDto,
   VideoconferencePreviewItem,
+  VideoconferenceTemporaryOverridePayload,
   ZoomGroupItem,
 } from '../../services/videoconference-api.service';
 
@@ -95,6 +96,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   private generationStartTime = 0;
   filterOptionsLoading = false;
   overrideSaving = false;
+  overrideHostPreviewing = false;
   checkingExisting = false;
 
   /** occurrence_key -> existing record summary for already-created conferences */
@@ -119,9 +121,13 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     conferenceDate: '',
     overrideDate: '',
     overrideStartTime: '',
+    topic: '',
     reasonCode: 'OTHER' as 'HOLIDAY' | 'WEATHER' | 'OTHER',
     notes: '',
   };
+  overrideHostPreview: VideoconferenceAssignmentPreviewItem | null = null;
+  overrideTopicTouched = false;
+  overrideLastSuggestedTopic = '';
 
   payloadPreviewOpen = false;
   payloadPreviewTitle = '';
@@ -667,103 +673,208 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     ) ?? '';
   }
 
-  get overridePreviewSourceDate() {
-    return (this.overrideForm.conferenceDate || this.overrideTarget?.base_conference_date || '').trim();
-  }
-
   get overrideBaseTimeRange() {
     const startTime = this.overrideTarget?.base_start_time || this.overrideTarget?.start_time || '--:--';
     const endTime = this.overrideTarget?.base_end_time || this.overrideTarget?.end_time || '--:--';
     return `${startTime} - ${endTime}`;
   }
 
+  get overridePreviewDayCode() {
+    return this.dayCodeForDate(this.overrideForm.overrideDate || this.overrideTarget?.effective_conference_date || '');
+  }
+
+  get overrideSuggestedTopic() {
+    if (!this.overrideTarget) {
+      return '';
+    }
+    const endTime = this.overrideComputedEndTime;
+    if (!this.overrideForm.overrideStartTime || !endTime || !this.overridePreviewDayCode) {
+      return '';
+    }
+    return this.buildTopicPreview(
+      this.overrideTarget,
+      this.overridePreviewDayCode,
+      this.overrideForm.overrideStartTime,
+      endTime,
+      true,
+    );
+  }
+
+  get overrideFinalTopic() {
+    return this.overrideForm.topic.trim() || this.overrideSuggestedTopic;
+  }
+
+  get overridePreviewDateTimeLabel() {
+    if (!this.overrideForm.overrideDate || !this.overrideForm.overrideStartTime || !this.overrideComputedEndTime) {
+      return '--';
+    }
+    return `${this.overrideForm.overrideDate} | ${this.overrideForm.overrideStartTime} - ${this.overrideComputedEndTime}`;
+  }
+
+  get overrideHostPreviewLabel() {
+    return this.overrideHostPreview?.zoom_user_email
+      || this.overrideHostPreview?.zoom_user_name
+      || this.overrideHostPreview?.zoom_user_id
+      || 'Sin preview';
+  }
+
+  onOverrideScheduleInputChange() {
+    this.syncOverrideSuggestedTopic();
+    this.overrideHostPreview = null;
+  }
+
+  onOverrideTopicChange() {
+    this.overrideTopicTouched = this.overrideForm.topic.trim() !== this.overrideLastSuggestedTopic.trim();
+  }
+
   openOverrideEditor(item: PreviewSelectionItem) {
     this.overrideTarget = item;
     this.overrideEditorOpen = true;
+    const conferenceDate = item.base_conference_date || '';
+    const overrideDate = item.effective_conference_date || item.base_conference_date || '';
+    const overrideStartTime = item.effective_start_time || item.start_time;
+    const overrideEndTime = this.computeEndTimeWithDuration(
+      overrideStartTime,
+      this.getOverrideDurationMinutes(item),
+    ) || item.effective_end_time || item.end_time;
     this.overrideForm = {
-      conferenceDate: item.base_conference_date || '',
-      overrideDate: item.effective_conference_date || item.base_conference_date || '',
-      overrideStartTime: item.effective_start_time || item.start_time,
+      conferenceDate,
+      overrideDate,
+      overrideStartTime,
+      topic: this.buildTopicPreview(
+        item,
+        this.dayCodeForDate(overrideDate),
+        overrideStartTime,
+        overrideEndTime,
+        true,
+      ),
       reasonCode: (item.override_reason_code as 'HOLIDAY' | 'WEATHER' | 'OTHER') || 'OTHER',
       notes: item.override_notes || '',
     };
+    this.overrideLastSuggestedTopic = this.overrideForm.topic;
+    this.overrideTopicTouched = false;
+    this.overrideHostPreview = null;
   }
 
   closeOverrideEditor() {
     this.overrideEditorOpen = false;
     this.overrideTarget = null;
     this.overrideSaving = false;
+    this.overrideHostPreviewing = false;
+    this.overrideHostPreview = null;
+    this.overrideTopicTouched = false;
+    this.overrideLastSuggestedTopic = '';
     this.overrideForm = {
       conferenceDate: '',
       overrideDate: '',
       overrideStartTime: '',
+      topic: '',
       reasonCode: 'OTHER',
       notes: '',
     };
   }
 
-  async saveOverride() {
-    if (!this.overrideTarget) {
+  async previewOverrideHost() {
+    if (!this.selectedZoomGroupId) {
+      await this.dialog.alert({
+        title: 'Grupo Zoom requerido',
+        message: 'Selecciona un grupo Zoom antes de previsualizar el host.',
+      });
+      return;
+    }
+    const draft = await this.resolveOverrideDraft();
+    if (!draft) {
       return;
     }
 
-    const conferenceDate = (this.overrideForm.conferenceDate || this.overrideTarget.base_conference_date || '').trim();
-    if (!conferenceDate || !this.overrideForm.overrideDate || !this.overrideForm.overrideStartTime) {
-      await this.dialog.alert({
-        title: 'Datos incompletos',
-        message: 'La reprogramacion requiere dia a reprogramar, nueva fecha y hora inicio.',
-      });
-      return;
-    }
+    this.overrideHostPreviewing = true;
+    this.api.assignmentPreview({
+      zoomGroupId: this.selectedZoomGroupId,
+      occurrenceKeys: [draft.occurrenceKey],
+      startDate: draft.startDate,
+      endDate: draft.endDate,
+      temporaryOverrides: [draft.override],
+    }).subscribe({
+      next: (response) => {
+        this.overrideHostPreview = response.items[0] ?? null;
+        this.overrideHostPreviewing = false;
+      },
+      error: async (error) => {
+        this.overrideHostPreviewing = false;
+        await this.dialog.alert({
+          title: 'No se pudo previsualizar el host',
+          message: error?.error?.message ?? 'Intenta nuevamente en unos segundos.',
+          tone: 'danger',
+        });
+      },
+    });
+  }
 
-    const durationMinutes = this.getOverrideDurationMinutes(this.overrideTarget);
-    if (durationMinutes <= 0) {
+  async createOverrideVideoconference(allowPoolWarnings = false) {
+    if (!this.selectedZoomGroupId) {
       await this.dialog.alert({
-        title: 'Horario invalido',
-        message: 'No se pudo determinar la duracion base del horario.',
+        title: 'Grupo Zoom requerido',
+        message: 'Selecciona un grupo Zoom antes de crear la videoconferencia.',
       });
       return;
     }
-
-    const overrideEndTime = this.computeEndTimeWithDuration(this.overrideForm.overrideStartTime, durationMinutes);
-    if (!overrideEndTime) {
-      await this.dialog.alert({
-        title: 'Horario invalido',
-        message: 'La nueva hora inicio no puede generar una hora fin que cruce medianoche.',
-      });
-      return;
-    }
-    if (this.overrideForm.overrideStartTime >= overrideEndTime) {
-      await this.dialog.alert({
-        title: 'Horario invalido',
-        message: 'La hora inicio debe ser menor que la hora fin calculada.',
-      });
+    const draft = await this.resolveOverrideDraft();
+    if (!draft) {
       return;
     }
 
     this.overrideSaving = true;
-    const payload: VideoconferenceOverridePayload = {
-      scheduleId: this.overrideTarget.schedule_id,
-      conferenceDate,
-      action: 'RESCHEDULE',
-      overrideDate: this.overrideForm.overrideDate,
-      overrideStartTime: this.overrideForm.overrideStartTime,
-      overrideEndTime,
-      reasonCode: this.overrideForm.reasonCode,
-      notes: this.overrideForm.notes,
-    };
-
-    this.api.upsertOverride(payload).subscribe({
-      next: async () => {
+    this.startGenerationProgress(1, 1);
+    this.api.generate({
+      zoomGroupId: this.selectedZoomGroupId,
+      occurrenceKeys: [draft.occurrenceKey],
+      startDate: draft.startDate,
+      endDate: draft.endDate,
+      allowPoolWarnings: allowPoolWarnings || undefined,
+      preferredHosts: this.overrideHostPreview?.zoom_user_id
+        ? [{
+            scheduleId: draft.override.scheduleId,
+            conferenceDate: draft.override.overrideDate,
+            zoomUserId: this.overrideHostPreview.zoom_user_id,
+          }]
+        : undefined,
+      temporaryOverrides: [draft.override],
+    }).subscribe({
+      next: async (res) => {
+        this.finishGenerationProgress();
         this.overrideSaving = false;
+        this.generationResult = res;
         this.closeOverrideEditor();
         await this.reloadPreviewPreservingSelection();
-      },
-      error: async () => {
-        this.overrideSaving = false;
         await this.dialog.alert({
-          title: 'No se pudo reprogramar',
-          message: 'Intenta nuevamente en unos segundos.',
+          title: 'Videoconferencia creada',
+          message: res.message || 'La videoconferencia reprogramada fue procesada correctamente.',
+          tone: 'success',
+        });
+      },
+      error: async (error) => {
+        this.finishGenerationProgress();
+        this.overrideSaving = false;
+        const message = error?.error?.message ?? 'No se pudo crear la videoconferencia reprogramada.';
+        const shouldConfirmPoolWarning =
+          !allowPoolWarnings &&
+          typeof message === 'string' &&
+          message.includes('Confirma si deseas continuar');
+        if (shouldConfirmPoolWarning) {
+          const confirmed = await this.dialog.confirm({
+            title: 'Advertencia del pool Zoom',
+            message,
+            confirmLabel: 'Continuar',
+            cancelLabel: 'Cancelar',
+          });
+          if (confirmed) {
+            this.createOverrideVideoconference(true);
+          }
+          return;
+        }
+        await this.dialog.alert({
+          title: 'No se pudo crear la videoconferencia',
+          message,
           tone: 'danger',
         });
       },
@@ -2266,6 +2377,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     dayCode: string,
     startTime: string,
     endTime: string,
+    forceRep = false,
   ) {
     const parts = [
       item.course_name?.trim() || '',
@@ -2278,7 +2390,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     if (courseCode) {
       parts.unshift(courseCode);
     }
-    if (item.occurrence_type === 'RESCHEDULED') {
+    if (forceRep || item.occurrence_type === 'RESCHEDULED') {
       parts.unshift('REP');
     }
     return parts.join('|');
@@ -2287,6 +2399,33 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   private resolveDayCode(item: PreviewSelectionItem) {
     const day = (item.day_of_week || '').trim().toUpperCase();
     return day || 'LUNES';
+  }
+
+  private dayCodeForDate(value: string) {
+    const normalized = (value || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      return '';
+    }
+    const [year, month, day] = normalized.split('-').map((part) => Number(part));
+    const date = new Date(Date.UTC(year, month - 1, day));
+    switch (date.getUTCDay()) {
+      case 0:
+        return 'DOMINGO';
+      case 1:
+        return 'LUNES';
+      case 2:
+        return 'MARTES';
+      case 3:
+        return 'MIERCOLES';
+      case 4:
+        return 'JUEVES';
+      case 5:
+        return 'VIERNES';
+      case 6:
+        return 'SABADO';
+      default:
+        return '';
+    }
   }
 
   private dayToAulaVirtual(dayCode: string) {
@@ -2322,6 +2461,75 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     const [startHour, startMinute] = (startTime || '00:00').split(':').map((part) => Number(part));
     const [endHour, endMinute] = (endTime || '00:00').split(':').map((part) => Number(part));
     return endHour * 60 + endMinute - (startHour * 60 + startMinute);
+  }
+
+  private syncOverrideSuggestedTopic() {
+    const nextSuggested = this.overrideSuggestedTopic;
+    const currentTopic = this.overrideForm.topic.trim();
+    const previousSuggested = this.overrideLastSuggestedTopic.trim();
+    if (!this.overrideTopicTouched || !currentTopic || currentTopic === previousSuggested) {
+      this.overrideForm.topic = nextSuggested;
+      this.overrideTopicTouched = false;
+    }
+    this.overrideLastSuggestedTopic = nextSuggested;
+  }
+
+  private async resolveOverrideDraft() {
+    if (!this.overrideTarget) {
+      return null;
+    }
+
+    const conferenceDate = (this.overrideForm.conferenceDate || this.overrideTarget.base_conference_date || '').trim();
+    if (!conferenceDate || !this.overrideForm.overrideDate || !this.overrideForm.overrideStartTime) {
+      await this.dialog.alert({
+        title: 'Datos incompletos',
+        message: 'La reprogramacion requiere dia a reprogramar, nueva fecha y hora inicio.',
+      });
+      return null;
+    }
+
+    const durationMinutes = this.getOverrideDurationMinutes(this.overrideTarget);
+    if (durationMinutes <= 0) {
+      await this.dialog.alert({
+        title: 'Horario invalido',
+        message: 'No se pudo determinar la duracion base del horario.',
+      });
+      return null;
+    }
+
+    const overrideEndTime = this.computeEndTimeWithDuration(this.overrideForm.overrideStartTime, durationMinutes);
+    if (!overrideEndTime || this.overrideForm.overrideStartTime >= overrideEndTime) {
+      await this.dialog.alert({
+        title: 'Horario invalido',
+        message: 'La nueva hora inicio no puede generar una hora fin valida con la duracion base.',
+      });
+      return null;
+    }
+
+    const topic = this.overrideFinalTopic.trim();
+    if (!topic) {
+      await this.dialog.alert({
+        title: 'Tema requerido',
+        message: 'Completa el tema final antes de continuar.',
+      });
+      return null;
+    }
+
+    return {
+      occurrenceKey: `${this.overrideTarget.schedule_id}::${conferenceDate}`,
+      startDate: conferenceDate,
+      endDate: conferenceDate,
+      override: {
+        scheduleId: this.overrideTarget.schedule_id,
+        conferenceDate,
+        overrideDate: this.overrideForm.overrideDate,
+        overrideStartTime: this.overrideForm.overrideStartTime,
+        overrideEndTime,
+        reasonCode: this.overrideForm.reasonCode,
+        notes: this.overrideForm.notes,
+        topicOverride: topic,
+      } satisfies VideoconferenceTemporaryOverridePayload,
+    };
   }
 
   private getOverrideDurationMinutes(item: VideoconferencePreviewItem | null) {

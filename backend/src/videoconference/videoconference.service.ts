@@ -103,6 +103,7 @@ type ScheduleContextRow = {
     subsection_projected_vacancies: number | null;
     schedule_id: string;
     semester_id: string | null;
+    semester_name: string | null;
     campus_id: string | null;
     campus_name: string | null;
     faculty_id: string | null;
@@ -222,6 +223,8 @@ type ExpandedOccurrence = {
     override_id: string | null;
     override_reason_code: string | null;
     override_notes: string | null;
+    override_topic: string | null;
+    override_is_temporary: boolean;
     inheritance: {
         is_inherited: boolean;
         mapping_id: string | null;
@@ -301,6 +304,8 @@ type StoredOccurrenceOverride = {
     override_end_time: string | null;
     reason_code: string | null;
     notes: string | null;
+    topic_override?: string | null;
+    is_temporary?: boolean;
 };
 
 type ScheduleInheritanceMapping = {
@@ -1400,6 +1405,9 @@ export class VideoconferenceService implements OnModuleInit {
         if (startDate > endDate) {
             throw new BadRequestException('startDate no puede ser mayor que endDate.');
         }
+        const temporaryOverrides = this.normalizeTemporaryOverrides(payload.temporaryOverrides, new Map(
+            expanded.rows.map((row) => [row.schedule_id, row] as const),
+        ));
 
         const occurrences = await this.resolveOccurrences(
             expanded.rows,
@@ -1407,6 +1415,7 @@ export class VideoconferenceService implements OnModuleInit {
             endDate,
             zoomConfig.timezone,
             expanded.inheritanceIndex,
+            temporaryOverrides,
         );
         const result = await this.simulateOccurrenceAssignmentPreview({
             selectedOccurrenceKeys: useCurrentFilters ? new Set<string>() : new Set(occurrenceKeys),
@@ -1534,6 +1543,47 @@ export class VideoconferenceService implements OnModuleInit {
                 zoom_user_id: String(item?.zoomUserId ?? '').trim(),
             }))
             .filter((item) => item.schedule_id && item.zoom_user_id) as PreferredHostSelection[];
+    }
+
+    private normalizeTemporaryOverrides(
+        input: Array<{
+            scheduleId?: string;
+            conferenceDate?: string;
+            overrideDate?: string;
+            overrideStartTime?: string;
+            overrideEndTime?: string;
+            reasonCode?: string;
+            notes?: string;
+            topicOverride?: string;
+        }> | undefined,
+        rowMap: Map<string, ScheduleContextRow>,
+    ) {
+        const items = Array.isArray(input) ? input : [];
+        return items.map((item) => {
+            const scheduleId = String(item?.scheduleId ?? '').trim();
+            if (!scheduleId) {
+                throw new BadRequestException('scheduleId es requerido en temporaryOverrides.');
+            }
+            const row = rowMap.get(scheduleId);
+            if (!row) {
+                throw new BadRequestException(`No se encontro el horario ${scheduleId} para aplicar la reprogramacion temporal.`);
+            }
+            return this.buildValidatedRescheduleOverride({
+                schedule_id: scheduleId,
+                conference_date: String(item?.conferenceDate ?? ''),
+                day_of_week: row.day_of_week,
+                start_time: compactTime(row.start_time),
+                end_time: compactTime(row.end_time),
+                overrideDate: item?.overrideDate,
+                overrideStartTime: item?.overrideStartTime,
+                overrideEndTime: item?.overrideEndTime,
+                reasonCode: item?.reasonCode,
+                notes: item?.notes,
+                topicOverride: item?.topicOverride,
+                id: `tmp:${scheduleId}:${String(item?.conferenceDate ?? '').trim()}`,
+                isTemporary: true,
+            });
+        });
     }
 
     private findPreferredZoomUserId(
@@ -2660,6 +2710,107 @@ export class VideoconferenceService implements OnModuleInit {
         return group;
     }
 
+    private buildValidatedRescheduleOverride(input: {
+        schedule_id: string;
+        conference_date: string;
+        day_of_week: string;
+        start_time: string;
+        end_time: string;
+        overrideDate?: string | null;
+        overrideStartTime?: string | null;
+        overrideEndTime?: string | null;
+        reasonCode?: string | null;
+        notes?: string | null;
+        topicOverride?: string | null;
+        id?: string;
+        isTemporary?: boolean;
+    }): StoredOccurrenceOverride {
+        const conferenceDate = normalizeIsoDate(input.conference_date);
+        const scheduleDay = String(input.day_of_week ?? '').trim().toUpperCase();
+        const conferenceDay = dayCodeForDate(conferenceDate);
+        if (scheduleDay && conferenceDay !== scheduleDay) {
+            throw new BadRequestException(
+                `El dia a reprogramar (${conferenceDate}) debe ser ${displayDay(scheduleDay)} para este horario base.`,
+            );
+        }
+
+        const overrideDate = normalizeIsoDate(input.overrideDate ?? '');
+        const overrideStartTime = normalizeTimeValue(input.overrideStartTime ?? '');
+        const overrideEndTime = normalizeTimeValue(input.overrideEndTime ?? '');
+        if (!overrideDate || !overrideStartTime || !overrideEndTime) {
+            throw new BadRequestException('La reprogramacion requiere fecha, hora inicio y hora fin.');
+        }
+        if (overrideStartTime >= overrideEndTime) {
+            throw new BadRequestException('La hora inicio debe ser menor que la hora fin.');
+        }
+
+        const expectedDurationMinutes = calculateDurationMinutes(
+            compactTime(input.start_time),
+            compactTime(input.end_time),
+        );
+        if (expectedDurationMinutes <= 0) {
+            throw new BadRequestException('El horario base tiene una duracion invalida para reprogramar.');
+        }
+        const overrideDurationMinutes = calculateDurationMinutes(
+            overrideStartTime,
+            overrideEndTime,
+        );
+        if (overrideDurationMinutes !== expectedDurationMinutes) {
+            throw new BadRequestException(
+                `La reprogramacion debe conservar ${expectedDurationMinutes} minutos de la clase base; se recibieron ${overrideDurationMinutes}.`,
+            );
+        }
+
+        return {
+            id: input.id ?? newId(),
+            schedule_id: input.schedule_id,
+            conference_date: conferenceDate,
+            action: 'RESCHEDULE',
+            override_date: overrideDate,
+            override_start_time: overrideStartTime,
+            override_end_time: overrideEndTime,
+            reason_code: normalizeOverrideReason(input.reasonCode),
+            notes: emptyTextToNull(input.notes),
+            topic_override: emptyTextToNull(input.topicOverride),
+            is_temporary: Boolean(input.isTemporary),
+        };
+    }
+
+    private async persistOccurrenceOverride(override: StoredOccurrenceOverride) {
+        const now = new Date();
+        const current = await this.planningVideoconferenceOverridesRepo.findOne({
+            where: {
+                planning_subsection_schedule_id: override.schedule_id,
+                conference_date: override.conference_date,
+            },
+        });
+        const entity = current
+            ? this.planningVideoconferenceOverridesRepo.merge(current, {
+                action: override.action,
+                override_date: override.override_date,
+                override_start_time: override.override_start_time,
+                override_end_time: override.override_end_time,
+                reason_code: normalizeOverrideReason(override.reason_code),
+                notes: emptyTextToNull(override.notes),
+                updated_at: now,
+            })
+            : this.planningVideoconferenceOverridesRepo.create({
+                id: override.id || newId(),
+                planning_subsection_schedule_id: override.schedule_id,
+                conference_date: override.conference_date,
+                action: override.action,
+                override_date: override.override_date,
+                override_start_time: override.override_start_time,
+                override_end_time: override.override_end_time,
+                reason_code: normalizeOverrideReason(override.reason_code),
+                notes: emptyTextToNull(override.notes),
+                created_at: now,
+                updated_at: now,
+            });
+        const saved = await this.planningVideoconferenceOverridesRepo.save(entity);
+        return this.serializeOverride(saved);
+    }
+
     async upsertOverride(dto: UpsertVideoconferenceOverrideDto) {
         const scheduleId = dto.scheduleId.trim();
         if (!scheduleId) {
@@ -2683,44 +2834,30 @@ export class VideoconferenceService implements OnModuleInit {
         if (!schedule) {
             throw new BadRequestException('No se encontro el horario base para el override.');
         }
-        const scheduleDay = String(schedule.day_of_week ?? '').trim().toUpperCase();
-        const conferenceDay = dayCodeForDate(conferenceDate);
-        if (scheduleDay && conferenceDay !== scheduleDay) {
-            throw new BadRequestException(
-                `El dia a reprogramar (${conferenceDate}) debe ser ${displayDay(scheduleDay)} para este horario base.`,
-            );
-        }
 
         let overrideDate: string | null = null;
         let overrideStartTime: string | null = null;
         let overrideEndTime: string | null = null;
+        let validatedOverride: StoredOccurrenceOverride | null = null;
         if (action === 'RESCHEDULE') {
-            overrideDate = normalizeIsoDate(dto.overrideDate ?? '');
-            overrideStartTime = normalizeTimeValue(dto.overrideStartTime ?? '');
-            overrideEndTime = normalizeTimeValue(dto.overrideEndTime ?? '');
-            if (!overrideDate || !overrideStartTime || !overrideEndTime) {
-                throw new BadRequestException('La reprogramacion requiere fecha, hora inicio y hora fin.');
-            }
-            if (overrideStartTime >= overrideEndTime) {
-                throw new BadRequestException('La hora inicio debe ser menor que la hora fin.');
-            }
-
-            const expectedDurationMinutes = calculateDurationMinutes(
-                compactTime(schedule.start_time),
-                compactTime(schedule.end_time),
-            );
-            if (expectedDurationMinutes <= 0) {
-                throw new BadRequestException('El horario base tiene una duracion invalida para reprogramar.');
-            }
-            const overrideDurationMinutes = calculateDurationMinutes(
-                overrideStartTime,
-                overrideEndTime,
-            );
-            if (overrideDurationMinutes !== expectedDurationMinutes) {
-                throw new BadRequestException(
-                    `La reprogramacion debe conservar ${expectedDurationMinutes} minutos de la clase base; se recibieron ${overrideDurationMinutes}.`,
-                );
-            }
+            validatedOverride = this.buildValidatedRescheduleOverride({
+                schedule_id: scheduleId,
+                conference_date: conferenceDate,
+                day_of_week: schedule.day_of_week,
+                start_time: compactTime(schedule.start_time),
+                end_time: compactTime(schedule.end_time),
+                overrideDate: dto.overrideDate,
+                overrideStartTime: dto.overrideStartTime,
+                overrideEndTime: dto.overrideEndTime,
+                reasonCode: dto.reasonCode,
+                notes: dto.notes,
+            });
+            overrideDate = validatedOverride.override_date;
+            overrideStartTime = validatedOverride.override_start_time;
+            overrideEndTime = validatedOverride.override_end_time;
+        }
+        if (validatedOverride) {
+            return this.persistOccurrenceOverride(validatedOverride);
         }
 
         const now = new Date();
@@ -2785,6 +2922,84 @@ export class VideoconferenceService implements OnModuleInit {
         };
     }
 
+    async listReschedules() {
+        const entities = await this.planningVideoconferenceOverridesRepo.find({
+            where: { action: 'RESCHEDULE' },
+            order: { updated_at: 'DESC' },
+        });
+        const overrides = entities.map((item) => this.serializeOverride(item));
+        const scheduleIds = uniqueIds(overrides.map((item) => item.schedule_id));
+        const rows = scheduleIds.length
+            ? (await this.buildExpandedScheduleContext(scheduleIds)).requestedRows
+            : [];
+        const rowMap = new Map(rows.map((row) => [row.schedule_id, row] as const));
+        const overrideDates = uniqueIds(overrides.map((item) => item.override_date || '').filter(Boolean));
+
+        const conferences = scheduleIds.length && overrideDates.length
+            ? await this.planningVideoconferencesRepo
+                .createQueryBuilder('conference')
+                .where('conference.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds })
+                .andWhere('DATE(conference.conference_date) IN (:...conferenceDates)', { conferenceDates: overrideDates })
+                .orderBy('conference.created_at', 'DESC')
+                .getMany()
+            : [];
+        const conferenceMap = new Map<string, PlanningSubsectionVideoconferenceEntity>();
+        for (const conference of conferences) {
+            const key = `${conference.planning_subsection_schedule_id}::${toDateOnly(conference.conference_date)}`;
+            if (!conferenceMap.has(key)) {
+                conferenceMap.set(key, conference);
+            }
+        }
+
+        const items = overrides.map((override) => {
+            const row = rowMap.get(override.schedule_id) ?? null;
+            const record = conferenceMap.get(`${override.schedule_id}::${override.override_date || ''}`) ?? null;
+            const teacher = row ? resolveTeacher(row) : { name: null, dni: null };
+            const resetAllowed = !record;
+            return {
+                id: override.id,
+                schedule_id: override.schedule_id,
+                conference_date: override.conference_date,
+                override_date: override.override_date,
+                override_start_time: override.override_start_time,
+                override_end_time: override.override_end_time,
+                reason_code: override.reason_code,
+                notes: override.notes,
+                created_at: entities.find((item) => item.id === override.id)?.created_at ?? null,
+                updated_at: entities.find((item) => item.id === override.id)?.updated_at ?? null,
+                semester_id: row?.semester_id ?? null,
+                semester_name: row?.semester_name ?? null,
+                course_label: row ? buildCourseLabel(row.course_code, row.course_name) : '(Sin curso)',
+                section_label: row ? buildSectionLabel(row) : 'Seccion sin contexto',
+                subsection_label: row ? buildGroupLabel(row) : 'Grupo sin contexto',
+                teacher_name: teacher.name,
+                teacher_dni: teacher.dni,
+                campus_name: row?.campus_name ?? null,
+                faculty_name: row?.faculty_name ?? null,
+                program_name: row?.program_name ?? null,
+                cycle: row?.cycle ?? null,
+                topic: record?.topic ?? null,
+                payload_json: record?.payload_json ?? null,
+                record_id: record?.id ?? null,
+                conference_status: record?.status ?? null,
+                audit_sync_status: record?.audit_sync_status ?? null,
+                zoom_meeting_id: record?.zoom_meeting_id ?? null,
+                zoom_user_email: record?.zoom_user_email ?? null,
+                zoom_user_name: record?.zoom_user_name ?? null,
+                can_reset: resetAllowed,
+            };
+        });
+
+        return {
+            totals: {
+                total: items.length,
+                created: items.filter((item) => Boolean(item.record_id)).length,
+                pending: items.filter((item) => !item.record_id).length,
+            },
+            items,
+        };
+    }
+
     async generate(payload: GenerateVideoconferenceDto) {
         const zoomGroupId = String(payload.zoomGroupId ?? '').trim();
         if (!zoomGroupId) {
@@ -2814,6 +3029,7 @@ export class VideoconferenceService implements OnModuleInit {
         const rowMap = new Map(rows.map((row) => [row.schedule_id, row] as const));
         const inheritanceIndex = await this.buildOperationalInheritanceIndex(Array.from(rowMap.values()));
         const preferredHosts = this.normalizePreferredHosts(payload.preferredHosts);
+        const temporaryOverrides = this.normalizeTemporaryOverrides(payload.temporaryOverrides, rowMap);
 
         const aulaVirtualContext = await this.getAulaVirtualRequestContext();
         const zoomConfig = await this.zoomAccountService.requireConfiguredConfig();
@@ -2834,6 +3050,7 @@ export class VideoconferenceService implements OnModuleInit {
             endDate,
             zoomConfig.timezone,
             inheritanceIndex,
+            temporaryOverrides,
         );
         const selectedOccurrences = occurrenceKeys.length
             ? resolvedOccurrences.filter((item) => occurrenceKeys.includes(item.occurrence_key))
@@ -2915,6 +3132,19 @@ export class VideoconferenceService implements OnModuleInit {
             // Brief pause after each successful creation attempt to respect Aula Virtual
             // and Zoom rate limits during bulk operations. Skipped when blocked/validation/error.
             if (ownerResult.status === 'MATCHED' || ownerResult.status === 'CREATED_UNMATCHED') {
+                if (ownerOccurrence.override_is_temporary && ownerOccurrence.occurrence_type === 'RESCHEDULED') {
+                    await this.persistOccurrenceOverride({
+                        id: ownerOccurrence.override_id ?? newId(),
+                        schedule_id: ownerOccurrence.row.schedule_id,
+                        conference_date: ownerOccurrence.base_conference_date,
+                        action: 'RESCHEDULE',
+                        override_date: ownerOccurrence.effective_conference_date,
+                        override_start_time: compactTime(ownerOccurrence.effective_start_time),
+                        override_end_time: compactTime(ownerOccurrence.effective_end_time),
+                        reason_code: ownerOccurrence.override_reason_code,
+                        notes: ownerOccurrence.override_notes,
+                    });
+                }
                 await new Promise((resolve) => setTimeout(resolve, AULA_VIRTUAL_THROTTLE_MS));
             }
 
@@ -3146,7 +3376,7 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         const teacher = resolveTeacher(occurrence.row);
-        const topic = buildMeetingTopic(occurrence, teacher);
+        const topic = occurrence.override_topic?.trim() || buildMeetingTopic(occurrence, teacher);
         const aulaVirtualPayload = this.buildAulaVirtualPayload(
             occurrence,
             selectedZoomUser.zoom_user_id,
@@ -3191,6 +3421,7 @@ export class VideoconferenceService implements OnModuleInit {
                 override_id: occurrence.override_id,
                 override_reason_code: occurrence.override_reason_code,
                 override_notes: occurrence.override_notes,
+                override_topic: occurrence.override_topic,
             },
             response_json: null,
             created_at: now,
@@ -4172,6 +4403,7 @@ export class VideoconferenceService implements OnModuleInit {
         endDate: string,
         timezone: string,
         inheritanceIndex?: InheritanceIndex,
+        temporaryOverrides: StoredOccurrenceOverride[] = [],
     ) {
         const effectiveInheritanceIndex =
             inheritanceIndex ?? (await this.buildOperationalInheritanceIndex(rows));
@@ -4186,6 +4418,9 @@ export class VideoconferenceService implements OnModuleInit {
         const overrideMap = new Map(
             overrides.map((item) => [`${item.schedule_id}::${item.conference_date}`, item] as const),
         );
+        for (const override of temporaryOverrides) {
+            overrideMap.set(`${override.schedule_id}::${override.conference_date}`, override);
+        }
         const ownerOccurrenceMap = new Map<string, ExpandedOccurrence>();
         for (const row of ownerRows) {
             for (const conferenceDate of enumerateConferenceDates(row.day_of_week, startDate, endDate)) {
@@ -5435,6 +5670,8 @@ function buildOccurrence(
         override_id: override?.id ?? null,
         override_reason_code: override?.reason_code ?? null,
         override_notes: override?.notes ?? null,
+        override_topic: override?.topic_override ?? null,
+        override_is_temporary: Boolean(override?.is_temporary),
         inheritance,
     };
 }

@@ -56,6 +56,20 @@ export class SyncService {
       );
 
       const offerings = await this.upsertOfferings(offeringsRepo, dto.class_offerings ?? []);
+      
+      // Delta-based cleanup: delete offerings that no longer exist in incoming data
+      const incomingOfferingIds = (dto.class_offerings ?? []).map((o) => o.id);
+      const orphanCleanup = await this.cleanupOrphanOfferings(
+        semesterId,
+        incomingOfferingIds,
+        offeringsRepo,
+        groupsRepo,
+        meetingsRepo,
+        classTeachersRepo,
+        groupTeachersRepo,
+        conflictsRepo,
+      );
+
       const groups = await this.upsertGroups(groupsRepo, dto.class_groups ?? []);
       const meetings = await this.upsertMeetings(meetingsRepo, dto.class_meetings ?? []);
       const classTeachers = await this.upsertClassTeachers(
@@ -76,6 +90,7 @@ export class SyncService {
         semester_id: semesterId,
         replace_semester_applied: cleanup.applied,
         cleanup,
+        orphan_cleanup: orphanCleanup,
         imported: {
           class_offerings: offerings,
           class_groups: groups,
@@ -128,6 +143,106 @@ export class SyncService {
 
   private inferSemesterId(offerings: Array<{ semester_id: string }>) {
     return offerings.find((item) => item.semester_id?.trim())?.semester_id;
+  }
+
+  private async cleanupOrphanOfferings(
+    semesterId: string | null,
+    incomingOfferingIds: string[],
+    offeringsRepo: Repository<ClassOfferingEntity>,
+    groupsRepo: Repository<ClassGroupEntity>,
+    meetingsRepo: Repository<ClassMeetingEntity>,
+    classTeachersRepo: Repository<ClassTeacherEntity>,
+    groupTeachersRepo: Repository<ClassGroupTeacherEntity>,
+    conflictsRepo: Repository<ScheduleConflictEntity>,
+  ) {
+    if (!semesterId || incomingOfferingIds.length === 0) {
+      return {
+        applied: false,
+        semester_id: semesterId,
+        deleted: {
+          schedule_conflicts: 0,
+          class_group_teachers: 0,
+          class_meetings: 0,
+          class_teachers: 0,
+          class_groups: 0,
+          class_offerings: 0,
+        },
+      };
+    }
+
+    // Find all offerings in this semester
+    const allOfferingsInSemester = await offeringsRepo.find({
+      where: { semester_id: semesterId },
+      select: { id: true },
+    });
+    const allOfferingsIds = allOfferingsInSemester.map((o) => o.id);
+
+    // Find orphan offerings (exist in DB but not in incoming sync data)
+    const orphanOfferingIds = allOfferingsIds.filter(
+      (id) => !incomingOfferingIds.includes(id),
+    );
+
+    if (orphanOfferingIds.length === 0) {
+      return {
+        applied: false,
+        semester_id: semesterId,
+        detected_orphans: 0,
+        deleted: {
+          schedule_conflicts: 0,
+          class_group_teachers: 0,
+          class_meetings: 0,
+          class_teachers: 0,
+          class_groups: 0,
+          class_offerings: 0,
+        },
+      };
+    }
+
+    // Find all groups related to orphan offerings
+    const orphanGroupRows = await groupsRepo.find({
+      where: { class_offering_id: In(orphanOfferingIds) },
+      select: { id: true },
+    });
+    const orphanGroupIds = orphanGroupRows.map((g) => g.id);
+
+    // Delete in cascade
+    const [
+      deletedConflicts,
+      deletedGroupTeachers,
+      deletedMeetings,
+      deletedClassTeachers,
+      deletedGroups,
+      deletedOfferings,
+    ] = await Promise.all([
+      conflictsRepo.delete({ semester_id: semesterId }),
+      orphanGroupIds.length > 0
+        ? groupTeachersRepo.delete({ class_group_id: In(orphanGroupIds) })
+        : Promise.resolve({ affected: 0 } as DeleteResult),
+      orphanOfferingIds.length > 0
+        ? meetingsRepo.delete({ class_offering_id: In(orphanOfferingIds) })
+        : Promise.resolve({ affected: 0 } as DeleteResult),
+      orphanOfferingIds.length > 0
+        ? classTeachersRepo.delete({ class_offering_id: In(orphanOfferingIds) })
+        : Promise.resolve({ affected: 0 } as DeleteResult),
+      orphanGroupIds.length > 0
+        ? groupsRepo.delete({ class_offering_id: In(orphanOfferingIds) })
+        : Promise.resolve({ affected: 0 } as DeleteResult),
+      offeringsRepo.delete({ id: In(orphanOfferingIds) }),
+    ]);
+
+    return {
+      applied: true,
+      semester_id: semesterId,
+      detected_orphans: orphanOfferingIds.length,
+      deleted: {
+        schedule_conflicts: deletedConflicts.affected ?? 0,
+        class_group_teachers: deletedGroupTeachers.affected ?? 0,
+        class_meetings: deletedMeetings.affected ?? 0,
+        class_teachers: deletedClassTeachers.affected ?? 0,
+        class_groups: deletedGroups.affected ?? 0,
+        class_offerings: deletedOfferings.affected ?? 0,
+      },
+    };
   }
 
   private async cleanupSemesterData(

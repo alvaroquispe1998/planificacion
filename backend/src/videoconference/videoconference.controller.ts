@@ -119,6 +119,11 @@ export class VideoconferenceController {
         return this.service.generate(payload);
     }
 
+    @Get('reschedules')
+    async listReschedules() {
+        return this.service.listReschedules();
+    }
+
     @Post('reconcile/:id')
     async reconcile(@Param('id') id: string) {
         return this.service.reconcile(id);

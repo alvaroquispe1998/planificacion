@@ -111,6 +111,12 @@ export class AssignmentPreviewVideoconferenceDto extends FilterOptionsDto {
     @IsOptional()
     @IsDateString()
     endDate?: string;
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => TemporaryVideoconferenceOverrideDto)
+    temporaryOverrides?: TemporaryVideoconferenceOverrideDto[];
 }
 
 export class GenerateVideoconferenceDto {
@@ -146,6 +152,12 @@ export class GenerateVideoconferenceDto {
     @ValidateNested({ each: true })
     @Type(() => GeneratePreferredHostDto)
     preferredHosts?: GeneratePreferredHostDto[];
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => TemporaryVideoconferenceOverrideDto)
+    temporaryOverrides?: TemporaryVideoconferenceOverrideDto[];
 }
 
 export class GeneratePreferredHostDto {
@@ -211,6 +223,35 @@ export class UpsertVideoconferenceOverrideDto {
     @IsOptional()
     @IsString()
     notes?: string;
+}
+
+export class TemporaryVideoconferenceOverrideDto {
+    @IsString()
+    scheduleId!: string;
+
+    @IsDateString()
+    conferenceDate!: string;
+
+    @IsDateString()
+    overrideDate!: string;
+
+    @IsString()
+    overrideStartTime!: string;
+
+    @IsString()
+    overrideEndTime!: string;
+
+    @IsOptional()
+    @IsString()
+    reasonCode?: string;
+
+    @IsOptional()
+    @IsString()
+    notes?: string;
+
+    @IsOptional()
+    @IsString()
+    topicOverride?: string;
 }
 
 export class UpdateZoomConfigDto {

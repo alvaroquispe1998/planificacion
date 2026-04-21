@@ -19,6 +19,7 @@ import { SettingsPageComponent } from './pages/settings/settings.page';
 import { VideoconferenceZoomConfigPageComponent } from './pages/videoconference-zoom-config/videoconference-zoom-config.page';
 import { VideoconferenceInheritancesPageComponent } from './pages/videoconference-inheritances/videoconference-inheritances.page';
 import { VideoconferenceZoomUsersPageComponent } from './pages/videoconference-zoom-users/videoconference-zoom-users.page';
+import { VideoconferenceReschedulesPageComponent } from './pages/videoconference-reschedules/videoconference-reschedules.page';
 
 import { VideoconferencesPageComponent } from './pages/videoconferences/videoconferences.page';
 import { VideoconferenceEspecialesPageComponent } from './pages/videoconference-especiales/videoconference-especiales.page';
@@ -136,6 +137,12 @@ export const routes: Routes = [
       requiredWindow: 'window.settings',
       requiredPermission: 'action.settings.manage',
     },
+  },
+  {
+    path: 'videoconferences/reprogramaciones',
+    component: VideoconferenceReschedulesPageComponent,
+    canActivate: [windowGuard],
+    data: { requiredWindow: 'window.videoconferences' },
   },
   {
     path: 'integrations/sync',

@@ -1,0 +1,180 @@
+<section class="reschedules-page">
+  <header class="hero">
+    <div class="hero-copy-block">
+      <p class="eyebrow">Seguimiento operativo</p>
+      <h1>Reprogramaciones</h1>
+      <p class="hero-copy">
+        Revisa que clases quedaron reprogramadas, su motivo, el tema final usado y si ya tienen videoconferencia creada.
+      </p>
+    </div>
+    <div class="hero-actions">
+      <a class="btn btn-secondary" routerLink="/videoconferences">Volver a gestion</a>
+      <button type="button" class="btn btn-primary" (click)="loadRows()" [disabled]="loading">
+        {{ loading ? 'Actualizando...' : 'Recargar lista' }}
+      </button>
+    </div>
+  </header>
+
+  <section class="stats-grid">
+    <article class="stat-card">
+      <span class="stat-label">Total</span>
+      <strong>{{ filteredTotals.total }}</strong>
+      <small>Reprogramaciones visibles con los filtros actuales</small>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Con videoconferencia</span>
+      <strong>{{ filteredTotals.created }}</strong>
+      <small>Ya enlazadas a una videoconferencia creada</small>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Pendientes</span>
+      <strong>{{ filteredTotals.pending }}</strong>
+      <small>Sin registro de videoconferencia asociada</small>
+    </article>
+  </section>
+
+  <section class="panel table-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Listado</p>
+        <h2>Clases reprogramadas</h2>
+        <p class="section-copy">
+          La base sale de <code>planning_subsection_videoconference_overrides</code> enriquecida con planificacion y videoconferencias.
+        </p>
+      </div>
+      <span class="count">{{ filteredTotals.total }} registros</span>
+    </div>
+
+    <p *ngIf="error" class="feedback error">{{ error }}</p>
+
+    <section class="filters-panel">
+      <div class="filters-head">
+        <div>
+          <p class="eyebrow">Filtros</p>
+          <h3>Filtra por periodo y curso</h3>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="clearFilters()">
+          Limpiar filtros
+        </button>
+      </div>
+
+      <div class="filters-grid">
+        <label class="field">
+          <span>Periodo</span>
+          <select [(ngModel)]="filters.semesterId">
+            <option value="">Todos los periodos</option>
+            <option *ngFor="let option of periodOptions" [value]="option.id">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+
+        <label class="field field-wide">
+          <span>Curso</span>
+          <input
+            type="text"
+            [(ngModel)]="filters.courseQuery"
+            placeholder="Nombre o codigo del curso" />
+        </label>
+      </div>
+    </section>
+
+    <div class="table-wrap" *ngIf="filteredRows.length > 0; else emptyState">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Clase</th>
+            <th>Reprogramacion</th>
+            <th>Motivo</th>
+            <th>Videoconferencia</th>
+            <th>Trazabilidad</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of filteredRows">
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.course_label }}</strong>
+                <span>{{ row.semester_name || 'Sin periodo' }}</span>
+                <span>{{ row.subsection_label }}</span>
+                <span>{{ row.teacher_name || 'Sin docente' }}<ng-container *ngIf="row.teacher_dni"> | DNI {{ row.teacher_dni }}</ng-container></span>
+                <span>{{ row.faculty_name || 'Sin facultad' }} | {{ row.program_name || 'Sin programa' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ formatDateSafe(row.conference_date) }} -> {{ formatDateSafe(row.override_date) }}</strong>
+                <span>{{ timeRange(row) }}</span>
+                <span>Actualizada: {{ formatDateTime(row.updated_at) }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <span class="pill">{{ reasonLabel(row.reason_code) }}</span>
+                <span>{{ row.notes || 'Sin nota registrada' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.zoom_meeting_id || 'Sin meeting_id conciliado' }}</strong>
+                <span>{{ row.topic || 'Sin topic persistido' }}</span>
+                <span>{{ row.zoom_user_name || row.zoom_user_email || 'Sin host asignado' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="status-stack">
+                <span class="pill" [ngClass]="statusToneClass(row.conference_status)">{{ statusLabel(row.conference_status) }}</span>
+                <span class="pill" [class.pill-ok]="row.audit_sync_status === 'SYNCED'" [class.pill-error]="row.audit_sync_status === 'ERROR'">
+                  {{ auditStatusLabel(row.audit_sync_status) }}
+                </span>
+                <span>Creada: {{ formatDateTime(row.created_at) }}</span>
+              </div>
+            </td>
+            <td class="action-col">
+              <div class="action-stack">
+                <button type="button" class="btn btn-secondary btn-sm" (click)="openPayloadPreview(row)">
+                  Ver payload/topic
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" (click)="openDetail(row)" [disabled]="!row.record_id">
+                  Abrir auditoria
+                </button>
+                <button type="button" class="btn btn-danger btn-sm" (click)="resetOverride(row)" [disabled]="!row.can_reset || loading">
+                  Restablecer
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <ng-template #emptyState>
+      <div class="empty-block" [class.empty-block-loading]="loading">
+        <h3>{{ loading ? 'Cargando reprogramaciones...' : (rows.length ? 'No hay resultados con esos filtros.' : 'No hay reprogramaciones registradas.') }}</h3>
+        <p>
+          {{
+            loading
+              ? 'Consultando overrides y videoconferencias relacionadas.'
+              : (rows.length
+                  ? 'Prueba con otro periodo o ajusta el nombre del curso.'
+                  : 'Todavia no hay clases reprogramadas para mostrar en este apartado.')
+          }}
+        </p>
+      </div>
+    </ng-template>
+  </section>
+
+  <section class="modal-backdrop" *ngIf="payloadPreviewOpen" (click)="closePayloadPreview()">
+    <article class="modal-card payload-preview-modal" (click)="$event.stopPropagation()">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Payload preview</p>
+          <h2>{{ payloadPreviewTitle || 'Payload de reprogramacion' }}</h2>
+        </div>
+        <button class="btn btn-secondary btn-sm" type="button" (click)="closePayloadPreview()">Cerrar</button>
+      </div>
+      <pre class="payload-preview-content">{{ payloadPreviewJson }}</pre>
+    </article>
+  </section>
+</section>

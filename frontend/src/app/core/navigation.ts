@@ -154,6 +154,15 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             },
           },
           {
+            label: 'Reprogramaciones',
+            path: '/videoconferences/reprogramaciones',
+            icon: 'history',
+            window: 'window.videoconferences',
+            match: {
+              exact: ['/videoconferences/reprogramaciones'],
+            },
+          },
+          {
             label: 'Auditoria Zoom',
             path: '/videoconferences/audit',
             icon: 'search',
