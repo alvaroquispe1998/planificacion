@@ -189,6 +189,17 @@ export interface VideoconferenceOverridePayload {
     notes?: string;
 }
 
+export interface VideoconferenceTemporaryOverridePayload {
+    scheduleId: string;
+    conferenceDate: string;
+    overrideDate: string;
+    overrideStartTime: string;
+    overrideEndTime: string;
+    reasonCode?: 'HOLIDAY' | 'WEATHER' | 'OTHER';
+    notes?: string;
+    topicOverride?: string;
+}
+
 export type VideoconferenceGenerationStatus =
     | 'MATCHED'
     | 'CREATED_UNMATCHED'
@@ -236,6 +247,48 @@ export interface VideoconferenceReconcileResponse {
     matched: boolean;
     message: string;
     result: VideoconferenceGenerationResultItem;
+}
+
+export interface VideoconferenceRescheduleItem {
+    id: string;
+    schedule_id: string;
+    conference_date: string;
+    override_date: string | null;
+    override_start_time: string | null;
+    override_end_time: string | null;
+    reason_code: string | null;
+    notes: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+    semester_id: string | null;
+    semester_name: string | null;
+    course_label: string;
+    section_label: string;
+    subsection_label: string;
+    teacher_name: string | null;
+    teacher_dni: string | null;
+    campus_name: string | null;
+    faculty_name: string | null;
+    program_name: string | null;
+    cycle: number | null;
+    topic: string | null;
+    payload_json: Record<string, unknown> | null;
+    record_id: string | null;
+    conference_status: string | null;
+    audit_sync_status: string | null;
+    zoom_meeting_id: string | null;
+    zoom_user_email: string | null;
+    zoom_user_name: string | null;
+    can_reset: boolean;
+}
+
+export interface VideoconferenceRescheduleListResponse {
+    totals: {
+        total: number;
+        created: number;
+        pending: number;
+    };
+    items: VideoconferenceRescheduleItem[];
 }
 
 export type ZoomPoolLicenseStatus = 'LICENSED' | 'BASIC' | 'ON_PREM' | 'UNKNOWN';
@@ -517,6 +570,7 @@ export class VideoconferenceApiService {
         occurrenceKeys?: string[];
         startDate?: string;
         endDate?: string;
+        temporaryOverrides?: VideoconferenceTemporaryOverridePayload[];
     }) {
         return this.http.post<VideoconferenceAssignmentPreviewResponse>(`${this.baseUrl}/assignment-preview`, payload);
     }
@@ -533,6 +587,7 @@ export class VideoconferenceApiService {
             conferenceDate?: string;
             zoomUserId: string;
         }>;
+        temporaryOverrides?: VideoconferenceTemporaryOverridePayload[];
     }) {
         return this.http.post<VideoconferenceGenerationResponse>(`${this.baseUrl}/generate`, payload);
     }
@@ -566,6 +621,10 @@ export class VideoconferenceApiService {
 
     listZoomGroups() {
         return this.http.get<ZoomGroupItem[]>(`${this.baseUrl}/zoom-groups`);
+    }
+
+    listReschedules() {
+        return this.http.get<VideoconferenceRescheduleListResponse>(`${this.baseUrl}/reschedules`);
     }
 
     reconcile(id: string) {

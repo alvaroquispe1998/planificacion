@@ -737,6 +737,7 @@
           <input
             type="date"
             [(ngModel)]="overrideForm.conferenceDate"
+            (ngModelChange)="onOverrideScheduleInputChange()"
             [disabled]="!overrideNeedsConferenceDateInput" />
           <small class="meta-inline" *ngIf="!overrideNeedsConferenceDateInput">
             Esta ocurrencia ya tiene dia base definido.
@@ -750,12 +751,12 @@
 
         <label class="field">
           <span>Nueva fecha</span>
-          <input type="date" [(ngModel)]="overrideForm.overrideDate" />
+          <input type="date" [(ngModel)]="overrideForm.overrideDate" (ngModelChange)="onOverrideScheduleInputChange()" />
         </label>
 
         <label class="field">
           <span>Nueva hora inicio</span>
-          <input type="time" [(ngModel)]="overrideForm.overrideStartTime" />
+          <input type="time" [(ngModel)]="overrideForm.overrideStartTime" (ngModelChange)="onOverrideScheduleInputChange()" />
         </label>
 
         <label class="field">
@@ -777,8 +778,22 @@
           <span>Vista previa</span>
           <input
             type="text"
-            [value]="(overridePreviewSourceDate || '--') + ' -> ' + (overrideForm.overrideDate || '--') + ' | ' + (overrideForm.overrideStartTime || '--:--') + ' - ' + (overrideComputedEndTime || '--:--')"
+            [value]="overridePreviewDateTimeLabel"
             disabled />
+        </label>
+
+        <label class="field modal-span-2">
+          <span>Tema final</span>
+          <textarea [(ngModel)]="overrideForm.topic" (ngModelChange)="onOverrideTopicChange()" rows="3" placeholder="Tema de la videoconferencia"></textarea>
+          <small class="meta-inline">Sugerido: {{ overrideSuggestedTopic || 'Completa fecha y hora para calcularlo.' }}</small>
+        </label>
+
+        <label class="field modal-span-2">
+          <span>Host sugerido</span>
+          <input type="text" [value]="overrideHostPreviewLabel" disabled />
+          <small class="meta-inline">
+            {{ overrideHostPreview?.message || 'Usa Preview host para calcular el Zoom segun la reprogramacion.' }}
+          </small>
         </label>
 
         <label class="field modal-span-2">
@@ -789,8 +804,11 @@
 
       <div class="modal-actions">
         <button class="btn btn-secondary btn-sm" type="button" (click)="closeOverrideEditor()">Cancelar</button>
-        <button class="btn btn-primary btn-sm" type="button" (click)="saveOverride()" [disabled]="overrideSaving">
-          {{ overrideSaving ? 'Guardando...' : 'Guardar reprogramacion' }}
+        <button class="btn btn-secondary btn-sm" type="button" (click)="previewOverrideHost()" [disabled]="overrideHostPreviewing || overrideSaving">
+          {{ overrideHostPreviewing ? 'Calculando host...' : 'Preview host' }}
+        </button>
+        <button class="btn btn-primary btn-sm" type="button" (click)="createOverrideVideoconference()" [disabled]="overrideSaving || overrideHostPreviewing">
+          {{ overrideSaving ? 'Creando...' : 'Crear videoconferencia' }}
         </button>
       </div>
     </article>
