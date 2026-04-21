@@ -44,6 +44,7 @@ export interface VideoconferencePreviewItem {
     grouped_schedule_ids?: string[];
     section_id: string;
     section_code: string;
+    section_external_code?: string | null;
     section_label: string;
     subsection_id: string;
     subsection_code: string;

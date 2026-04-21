@@ -589,7 +589,18 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   getVcContext(item: VideoconferencePreviewItem) {
-    return item.vc_section_name ? `VC: ${item.vc_section_name}` : 'VC sin seccion';
+    const vc = (item.vc_section_name || '').trim();
+    const planning = (item.section_external_code || '').trim();
+    if (vc && planning) {
+      return `VC: ${vc} | PL: ${planning}`;
+    }
+    if (vc) {
+      return `VC: ${vc}`;
+    }
+    if (planning) {
+      return `PL: ${planning}`;
+    }
+    return 'VC/PL sin seccion';
   }
 
   getVcSourceLabel(item: VideoconferencePreviewItem) {
