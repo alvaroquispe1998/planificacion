@@ -2683,6 +2683,13 @@ export class VideoconferenceService implements OnModuleInit {
         if (!schedule) {
             throw new BadRequestException('No se encontro el horario base para el override.');
         }
+        const scheduleDay = String(schedule.day_of_week ?? '').trim().toUpperCase();
+        const conferenceDay = dayCodeForDate(conferenceDate);
+        if (scheduleDay && conferenceDay !== scheduleDay) {
+            throw new BadRequestException(
+                `El dia a reprogramar (${conferenceDate}) debe ser ${displayDay(scheduleDay)} para este horario base.`,
+            );
+        }
 
         let overrideDate: string | null = null;
         let overrideStartTime: string | null = null;
@@ -2696,6 +2703,23 @@ export class VideoconferenceService implements OnModuleInit {
             }
             if (overrideStartTime >= overrideEndTime) {
                 throw new BadRequestException('La hora inicio debe ser menor que la hora fin.');
+            }
+
+            const expectedDurationMinutes = calculateDurationMinutes(
+                compactTime(schedule.start_time),
+                compactTime(schedule.end_time),
+            );
+            if (expectedDurationMinutes <= 0) {
+                throw new BadRequestException('El horario base tiene una duracion invalida para reprogramar.');
+            }
+            const overrideDurationMinutes = calculateDurationMinutes(
+                overrideStartTime,
+                overrideEndTime,
+            );
+            if (overrideDurationMinutes !== expectedDurationMinutes) {
+                throw new BadRequestException(
+                    `La reprogramacion debe conservar ${expectedDurationMinutes} minutos de la clase base; se recibieron ${overrideDurationMinutes}.`,
+                );
             }
         }
 
@@ -3884,6 +3908,9 @@ export class VideoconferenceService implements OnModuleInit {
             start_time: compactTime(row.start_time),
             end_time: compactTime(row.end_time),
             duration_minutes: row.duration_minutes,
+            base_start_time: compactTime(row.start_time),
+            base_end_time: compactTime(row.end_time),
+            base_duration_minutes: row.duration_minutes,
             vc_period_id: row.vc_period_id,
             vc_faculty_id: row.vc_faculty_id,
             vc_faculty_name: row.vc_faculty_name,
@@ -3959,6 +3986,9 @@ export class VideoconferenceService implements OnModuleInit {
                 occurrence.effective_start_time,
                 occurrence.effective_end_time,
             ),
+            base_start_time: compactTime(row.start_time),
+            base_end_time: compactTime(row.end_time),
+            base_duration_minutes: row.duration_minutes,
             vc_period_id: row.vc_period_id,
             vc_faculty_id: row.vc_faculty_id,
             vc_faculty_name: row.vc_faculty_name,
