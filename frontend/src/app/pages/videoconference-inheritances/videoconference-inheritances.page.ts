@@ -32,6 +32,8 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   programOptions: FilterCatalogOption[] = [];
 
   mappings: VideoconferenceInheritanceItem[] = [];
+  mappingSearch = '';
+  mappingDayFilter = '';
   schedules: VideoconferenceInheritanceCatalogSchedule[] = [];
   inheritanceCandidates: VideoconferenceInheritanceCandidateItem[] = [];
   /** Set of candidate IDs where the user has manually swapped parent ↔ first child */
@@ -209,15 +211,62 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   }
 
   get invalidActiveMappings() {
-    return this.mappings.filter(
+    return this.filteredMappings.filter(
       (m) => m.is_active && m.validity !== 'ok' && m.validity !== 'inactive',
     );
   }
 
   get normalMappings() {
-    return this.mappings.filter(
+    return this.filteredMappings.filter(
       (m) => !m.is_active || m.validity === 'ok' || m.validity === 'inactive',
     );
+  }
+
+  get dayFilterOptions() {
+    const options = new Map<string, string>();
+    for (const item of this.mappings) {
+      if (item.parent?.day_of_week) {
+        options.set(item.parent.day_of_week, item.parent.day_label || item.parent.day_of_week);
+      }
+      if (item.child?.day_of_week) {
+        options.set(item.child.day_of_week, item.child.day_label || item.child.day_of_week);
+      }
+    }
+    return Array.from(options.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  get filteredMappings() {
+    const query = this.normalizeSearch(this.mappingSearch);
+    const day = String(this.mappingDayFilter ?? '').trim().toUpperCase();
+    return this.mappings.filter((item) => {
+      const matchesDay = !day || item.parent?.day_of_week === day || item.child?.day_of_week === day;
+      if (!matchesDay) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      const source = [
+        item.parent?.course_label,
+        item.child?.course_label,
+        item.parent?.section_label,
+        item.child?.section_label,
+        item.parent?.vc_section_name,
+        item.child?.vc_section_name,
+        item.parent?.teacher_name,
+        item.child?.teacher_name,
+        item.parent?.campus_name,
+        item.child?.campus_name,
+        item.parent?.program_name,
+        item.child?.program_name,
+      ]
+        .map((v) => String(v ?? '').trim())
+        .filter(Boolean)
+        .join(' ');
+      return this.normalizeSearch(source).includes(query);
+    });
   }
 
   validityLabel(validity: VideoconferenceInheritanceItem['validity']): string {
@@ -403,32 +452,57 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
 
   exportToExcel() {
     const header = [
-      'Padre',
-      'Padre - Grupo',
+      'Padre - Sede',
+      'Padre - Programa',
+      'Padre - Curso',
+      'Padre - Ciclo',
+      'Padre - Seccion completa',
+      'Padre - Vacantes',
+      'Padre - Dia',
       'Padre - Horario',
-      'Hijo',
-      'Hijo - Grupo',
+      'Padre - Docente',
+      'Hijo - Sede',
+      'Hijo - Programa',
+      'Hijo - Curso',
+      'Hijo - Ciclo',
+      'Hijo - Seccion completa',
+      'Hijo - Vacantes',
+      'Hijo - Dia',
       'Hijo - Horario',
+      'Hijo - Docente',
       'Creada el',
       'Estado',
     ];
 
-    const rows = this.mappings.map((item) => [
-      item.parent?.section_label ?? '',
-      item.parent?.subsection_label ?? '',
+    const rows = this.filteredMappings.map((item) => [
+      item.parent?.campus_name ?? '',
+      item.parent?.program_name ?? '',
+      item.parent?.course_label ?? '',
+      item.parent?.cycle ?? '',
+      this.getCompleteSectionLabel(item.parent),
+      item.parent?.section_projected_vacancies ?? 0,
+      item.parent?.day_label ?? item.parent?.day_of_week ?? '',
       item.parent?.schedule_label ?? '',
-      item.child?.section_label ?? '',
-      item.child?.subsection_label ?? '',
+      item.parent?.teacher_name ?? '',
+      item.child?.campus_name ?? '',
+      item.child?.program_name ?? '',
+      item.child?.course_label ?? '',
+      item.child?.cycle ?? '',
+      this.getCompleteSectionLabel(item.child),
+      item.child?.section_projected_vacancies ?? 0,
+      item.child?.day_label ?? item.child?.day_of_week ?? '',
       item.child?.schedule_label ?? '',
+      item.child?.teacher_name ?? '',
       item.created_at ? new Date(item.created_at).toLocaleString('es-PE') : '',
       item.is_active ? 'Activa' : 'Inactiva',
     ]);
 
-    const escape = (value: string) => {
-      if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-        return '"' + value.replace(/"/g, '""') + '"';
+    const escape = (value: string | number) => {
+      const text = String(value ?? '');
+      if (text.includes(',') || text.includes('"') || text.includes('\n')) {
+        return '"' + text.replace(/"/g, '""') + '"';
       }
-      return value;
+      return text;
     };
 
     const csv = [header, ...rows]
@@ -445,6 +519,59 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  getCompleteSectionLabel(
+    side:
+      | {
+          vc_section_name?: string | null;
+          section_label?: string | null;
+        }
+      | null
+      | undefined,
+  ) {
+    const vcSectionName = String(side?.vc_section_name ?? '').trim();
+    if (vcSectionName) {
+      return vcSectionName;
+    }
+    const sectionLabel = String(side?.section_label ?? '').trim();
+    if (!sectionLabel) {
+      return '--';
+    }
+    return sectionLabel;
+  }
+
+  formatSavedMappingLine(
+    side:
+      | {
+          campus_name?: string | null;
+          program_name?: string | null;
+          course_label?: string | null;
+          cycle?: number | null;
+          vc_section_name?: string | null;
+          section_label?: string | null;
+          section_projected_vacancies?: number | null;
+          day_label?: string | null;
+          day_of_week?: string | null;
+          start_time?: string | null;
+          end_time?: string | null;
+        }
+      | null
+      | undefined,
+  ) {
+    return [
+      side?.campus_name || '(Sin sede)',
+      side?.program_name || '(Sin programa)',
+      side?.course_label || '(Sin curso)',
+      `Ciclo ${side?.cycle ?? '-'}`,
+      this.getCompleteSectionLabel(side),
+      `Vacantes: ${side?.section_projected_vacancies ?? 0}`,
+      side?.day_label || side?.day_of_week || '(Sin dia)',
+      `${side?.start_time ?? '--:--'} - ${side?.end_time ?? '--:--'}`,
+    ]
+      .map((part) => String(part ?? '').trim())
+      .filter(Boolean)
+      .join(' - ');
   }
 
   edit(item: VideoconferenceInheritanceItem) {

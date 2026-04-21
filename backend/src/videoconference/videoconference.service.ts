@@ -4949,12 +4949,18 @@ export class VideoconferenceService implements OnModuleInit {
                 parent: parent
                     ? {
                         schedule_id: parent.schedule_id,
+                        campus_name: parent.campus_name,
+                        program_name: parent.program_name,
+                        cycle: parent.cycle,
                         course_label: buildCourseLabel(parent.course_code, parent.course_name),
+                        vc_section_name: parent.vc_section_name,
                         section_label: buildSectionLabel(parent),
+                        section_projected_vacancies: parent.section_projected_vacancies,
                         subsection_label: buildGroupLabel(parent),
                         schedule_label: buildScheduleLabel(parent),
                         teacher_name: resolveTeacher(parent).name ?? null,
                         day_of_week: parent.day_of_week,
+                        day_label: displayDay(parent.day_of_week),
                         start_time: parent.start_time,
                         end_time: parent.end_time,
                     }
@@ -4962,12 +4968,18 @@ export class VideoconferenceService implements OnModuleInit {
                 child: child
                     ? {
                         schedule_id: child.schedule_id,
+                        campus_name: child.campus_name,
+                        program_name: child.program_name,
+                        cycle: child.cycle,
                         course_label: buildCourseLabel(child.course_code, child.course_name),
+                        vc_section_name: child.vc_section_name,
                         section_label: buildSectionLabel(child),
+                        section_projected_vacancies: child.section_projected_vacancies,
                         subsection_label: buildGroupLabel(child),
                         schedule_label: buildScheduleLabel(child),
                         teacher_name: resolveTeacher(child).name ?? null,
                         day_of_week: child.day_of_week,
+                        day_label: displayDay(child.day_of_week),
                         start_time: child.start_time,
                         end_time: child.end_time,
                     }
