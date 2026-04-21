@@ -232,9 +232,25 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
         options.set(item.child.day_of_week, item.child.day_label || item.child.day_of_week);
       }
     }
+    const dayOrder: Record<string, number> = {
+      LUNES: 1,
+      MARTES: 2,
+      MIERCOLES: 3,
+      JUEVES: 4,
+      VIERNES: 5,
+      SABADO: 6,
+      DOMINGO: 7,
+    };
     return Array.from(options.entries())
       .map(([id, label]) => ({ id, label }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+      .sort((a, b) => {
+        const left = dayOrder[String(a.id).toUpperCase()] ?? 999;
+        const right = dayOrder[String(b.id).toUpperCase()] ?? 999;
+        if (left !== right) {
+          return left - right;
+        }
+        return a.label.localeCompare(b.label);
+      });
   }
 
   get filteredMappings() {

@@ -4114,6 +4114,7 @@ export class VideoconferenceService implements OnModuleInit {
             grouped_schedule_ids: groupedScheduleIds,
             section_id: row.section_id,
             section_code: row.section_code,
+            section_external_code: row.section_external_code,
             section_label: buildSectionLabel(row),
             subsection_id: row.subsection_id,
             subsection_code: row.subsection_code,
@@ -4189,6 +4190,7 @@ export class VideoconferenceService implements OnModuleInit {
             grouped_schedule_ids: groupedScheduleIds,
             section_id: row.section_id,
             section_code: row.section_code,
+            section_external_code: row.section_external_code,
             section_label: buildSectionLabel(row),
             subsection_id: row.subsection_id,
             subsection_code: row.subsection_code,
@@ -5586,7 +5588,9 @@ function resolveSectionCodeModality(
     if (isCepea) {
         return { code: 'VIRTUAL', name: 'Virtual' };
     }
-    const sectionToken = extractSectionToken(vcSectionName) ?? extractSectionToken(sectionExternalCode);
+    // Prefer external section code (Akademic/planning source) because VC label can be stale
+    // after section modality changes (e.g. BHV->BV, DHV->DV).
+    const sectionToken = extractSectionToken(sectionExternalCode) ?? extractSectionToken(vcSectionName);
     if (!sectionToken) {
         return null;
     }
