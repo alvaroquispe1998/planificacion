@@ -360,25 +360,35 @@ export interface VideoconferenceInheritanceItem {
     validity: 'ok' | 'inactive' | 'schedule_missing' | 'schedule_mismatch' | 'teacher_mismatch';
     parent: {
         schedule_id: string;
+        campus_name: string | null;
+        program_name: string | null;
+        cycle: number | null;
         course_label: string;
+        vc_section_name: string | null;
         section_label: string;
         subsection_label: string;
         schedule_label: string;
         section_projected_vacancies: number | null;
         teacher_name: string | null;
         day_of_week: string;
+        day_label: string;
         start_time: string;
         end_time: string;
     } | null;
     child: {
         schedule_id: string;
+        campus_name: string | null;
+        program_name: string | null;
+        cycle: number | null;
         course_label: string;
+        vc_section_name: string | null;
         section_label: string;
         subsection_label: string;
         schedule_label: string;
         section_projected_vacancies: number | null;
         teacher_name: string | null;
         day_of_week: string;
+        day_label: string;
         start_time: string;
         end_time: string;
     } | null;

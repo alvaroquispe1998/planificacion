@@ -305,10 +305,26 @@
         <span class="eyebrow">Matriz actual</span>
         <h2>Herencias configuradas</h2>
       </div>
+      <div class="filters-grid" style="max-width: 560px; margin-right: 8px;">
+        <label class="field">
+          <span>Buscar global (curso/docente/seccion)</span>
+          <input
+            type="text"
+            [(ngModel)]="mappingSearch"
+            placeholder="Ej: FONOAUDIOLOGIA, AP-CH, CALDERON..." />
+        </label>
+        <label class="field">
+          <span>Filtrar por dia</span>
+          <select [(ngModel)]="mappingDayFilter">
+            <option value="">Todos</option>
+            <option *ngFor="let option of dayFilterOptions" [value]="option.id">{{ option.label }}</option>
+          </select>
+        </label>
+      </div>
       <div class="panel-head-actions">
-        <span class="pill">{{ mappings.length }} herencias</span>
+        <span class="pill">{{ filteredMappings.length }} / {{ mappings.length }} herencias</span>
         <button
-          *ngIf="mappings.length"
+          *ngIf="filteredMappings.length"
           type="button"
           class="btn-export-excel"
           (click)="exportToExcel()"
@@ -340,13 +356,15 @@
             <div>
               <span class="summary-label">Padre</span>
               <strong>{{ item.parent?.course_label || item.parent_schedule_id }}</strong>
-              <span>{{ item.parent?.section_label || '--' }} | {{ item.parent?.subsection_label || '--' }}</span>
+              <span>{{ formatSavedMappingLine(item.parent) }}</span>
+              <span>Docente: {{ item.parent?.teacher_name || 'Por asignar' }}</span>
               <span>{{ item.parent?.schedule_label || '--' }}</span>
             </div>
             <div>
               <span class="summary-label">Hijo</span>
               <strong>{{ item.child?.course_label || item.child_schedule_id }}</strong>
-              <span>{{ item.child?.section_label || '--' }} | {{ item.child?.subsection_label || '--' }}</span>
+              <span>{{ formatSavedMappingLine(item.child) }}</span>
+              <span>Docente: {{ item.child?.teacher_name || 'Por asignar' }}</span>
               <span>{{ item.child?.schedule_label || '--' }}</span>
             </div>
           </div>
@@ -375,13 +393,15 @@
           <div>
             <span class="summary-label">Padre</span>
             <strong>{{ item.parent?.course_label || item.parent_schedule_id }}</strong>
-            <span>{{ item.parent?.section_label || '--' }} | {{ item.parent?.subsection_label || '--' }}</span>
+            <span>{{ formatSavedMappingLine(item.parent) }}</span>
+            <span>Docente: {{ item.parent?.teacher_name || 'Por asignar' }}</span>
             <span>{{ item.parent?.schedule_label || '--' }}</span>
           </div>
           <div>
             <span class="summary-label">Hijo</span>
             <strong>{{ item.child?.course_label || item.child_schedule_id }}</strong>
-            <span>{{ item.child?.section_label || '--' }} | {{ item.child?.subsection_label || '--' }}</span>
+            <span>{{ formatSavedMappingLine(item.child) }}</span>
+            <span>Docente: {{ item.child?.teacher_name || 'Por asignar' }}</span>
             <span>{{ item.child?.schedule_label || '--' }}</span>
           </div>
         </div>

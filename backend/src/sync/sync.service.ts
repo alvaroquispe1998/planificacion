@@ -67,7 +67,6 @@ export class SyncService {
         meetingsRepo,
         classTeachersRepo,
         groupTeachersRepo,
-        conflictsRepo,
       );
 
       const groups = await this.upsertGroups(groupsRepo, dto.class_groups ?? []);
@@ -153,7 +152,6 @@ export class SyncService {
     meetingsRepo: Repository<ClassMeetingEntity>,
     classTeachersRepo: Repository<ClassTeacherEntity>,
     groupTeachersRepo: Repository<ClassGroupTeacherEntity>,
-    conflictsRepo: Repository<ScheduleConflictEntity>,
   ) {
     if (!semesterId || incomingOfferingIds.length === 0) {
       return {
@@ -207,14 +205,12 @@ export class SyncService {
 
     // Delete in cascade
     const [
-      deletedConflicts,
       deletedGroupTeachers,
       deletedMeetings,
       deletedClassTeachers,
       deletedGroups,
       deletedOfferings,
     ] = await Promise.all([
-      conflictsRepo.delete({ semester_id: semesterId }),
       orphanGroupIds.length > 0
         ? groupTeachersRepo.delete({ class_group_id: In(orphanGroupIds) })
         : Promise.resolve({ affected: 0 } as DeleteResult),
@@ -235,7 +231,7 @@ export class SyncService {
       semester_id: semesterId,
       detected_orphans: orphanOfferingIds.length,
       deleted: {
-        schedule_conflicts: deletedConflicts.affected ?? 0,
+        schedule_conflicts: 0,
         class_group_teachers: deletedGroupTeachers.affected ?? 0,
         class_meetings: deletedMeetings.affected ?? 0,
         class_teachers: deletedClassTeachers.affected ?? 0,

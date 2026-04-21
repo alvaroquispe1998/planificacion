@@ -2271,6 +2271,10 @@ export class PlanningImportService {
       value = 'VIRTUAL';
     } else if (normalizedToken === 'P') {
       value = 'PRESENCIAL';
+    } else if (normalizedToken === 'HV') {
+      value = 'HIBRIDO VIRTUAL';
+    } else if (normalizedToken === 'HP') {
+      value = 'HIBRIDO PRESENCIAL';
     } else {
       value = `${rawValue ?? ''}`;
     }
@@ -2285,12 +2289,28 @@ export class PlanningImportService {
       );
     }
     const modality = catalog.courseModalities.find((item) => {
+      const normalizedName = normalizeLoose(item.name);
+      const normalizedCode = normalizeLoose(item.code);
       const normalized = normalizeLoose(item.name || item.code);
       if (normalizedToken === 'V') {
-        return normalized.includes('VIRTUAL');
+        return (
+          normalizedCode === 'V' ||
+          normalizedName === 'VIRTUAL' ||
+          (normalized.includes('VIRTUAL') && !normalized.includes('HIBRIDO'))
+        );
       }
       if (normalizedToken === 'P') {
-        return normalized.includes('PRESENCIAL');
+        return (
+          normalizedCode === 'P' ||
+          normalizedName === 'PRESENCIAL' ||
+          (normalized.includes('PRESENCIAL') && !normalized.includes('HIBRIDO'))
+        );
+      }
+      if (normalizedToken === 'HV') {
+        return normalized.includes('HIBRIDO') && normalized.includes('VIRTUAL');
+      }
+      if (normalizedToken === 'HP') {
+        return normalized.includes('HIBRIDO') && normalized.includes('PRESENCIAL');
       }
       return normalized === normalizeLoose(value);
     }) ?? null;
@@ -3066,6 +3086,17 @@ export class PlanningImportService {
       : [];
     // key = `${offerId}::${sectionCode}`
     const existingSectionByKey = new Map(existingSections.map((s) => [`${s.planning_offer_id}::${s.code}`, s]));
+    // key = `${offerId}::${sourceSectionId}` (preferred for stable matching when code/name changes)
+    const existingSectionBySourceId = new Map<string, PlanningSectionEntity>();
+    for (const section of existingSections) {
+      if (!section.source_section_id) {
+        continue;
+      }
+      existingSectionBySourceId.set(
+        `${section.planning_offer_id}::${section.source_section_id}`,
+        section,
+      );
+    }
     const existingSectionIds = existingSections.map((s) => s.id);
 
     const existingSubsections = existingSectionIds.length
@@ -3265,20 +3296,27 @@ export class PlanningImportService {
       for (const [sectionCode, sectionRows] of rowsBySection.entries()) {
         if (sectionCode === '__NO_SECTION__') continue;
         const sectionResolutions = sectionRows.map((row) => asRecord(row.resolution_json));
+        const sourceSectionId = firstNonEmpty(
+          sectionResolutions.map((row) => recordString(row, 'source_section_id')),
+        );
         const sourceVcSectionId = firstNonEmpty(
           sectionResolutions.map((row) => recordString(row, 'source_vc_section_id')),
         );
         const sectionMapKey = `${offer.id}::${sectionCode}`;
-        const existingSection = existingSectionByKey.get(sectionMapKey);
+        const sectionSourceMapKey = sourceSectionId ? `${offer.id}::${sourceSectionId}` : null;
+        const existingSection =
+          (sectionSourceMapKey ? existingSectionBySourceId.get(sectionSourceMapKey) : null) ??
+          existingSectionByKey.get(sectionMapKey);
 
         let section: PlanningSectionEntity;
         if (existingSection) {
           // Update in-place — keep same id
+          existingSection.code = sectionCode;
           existingSection.external_code =
             firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'external_section_code'))) ??
             existingSection.external_code;
           existingSection.source_section_id =
-            firstNonEmpty(sectionResolutions.map((row) => recordString(row, 'source_section_id'))) ??
+            sourceSectionId ??
             existingSection.source_section_id;
           existingSection.teacher_id = firstNonEmpty(
             sectionResolutions.map((row) => recordString(row, 'teacher_id')),
