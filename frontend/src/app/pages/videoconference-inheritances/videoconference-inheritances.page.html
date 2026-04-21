@@ -322,9 +322,9 @@
         </label>
       </div>
       <div class="panel-head-actions">
-        <span class="pill">{{ filteredMappings.length }} / {{ mappings.length }} herencias</span>
+        <span class="pill">{{ groupedFilteredMappings.length }} / {{ groupedMappings.length }} bloques</span>
         <button
-          *ngIf="filteredMappings.length"
+          *ngIf="groupedFilteredMappings.length"
           type="button"
           class="btn-export-excel"
           (click)="exportToExcel()"
@@ -337,7 +337,7 @@
       </div>
     </div>
 
-    <div class="mapping-list" *ngIf="mappings.length; else emptyState">
+    <div class="mapping-list" *ngIf="groupedFilteredMappings.length; else emptyState">
 
       <!-- ── Sección de conflictos ── -->
       <div class="conflict-section" *ngIf="invalidActiveMappings.length">
@@ -358,14 +358,12 @@
               <strong>{{ item.parent?.course_label || item.parent_schedule_id }}</strong>
               <span>{{ formatSavedMappingLine(item.parent) }}</span>
               <span>Docente: {{ item.parent?.teacher_name || 'Por asignar' }}</span>
-              <span>{{ item.parent?.schedule_label || '--' }}</span>
             </div>
             <div>
               <span class="summary-label">Hijo</span>
               <strong>{{ item.child?.course_label || item.child_schedule_id }}</strong>
               <span>{{ formatSavedMappingLine(item.child) }}</span>
               <span>Docente: {{ item.child?.teacher_name || 'Por asignar' }}</span>
-              <span>{{ item.child?.schedule_label || '--' }}</span>
             </div>
           </div>
           <div class="mapping-meta">
@@ -380,9 +378,9 @@
             <span class="muted" *ngIf="item.notes">{{ item.notes }}</span>
           </div>
           <div class="mapping-actions">
-            <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="edit(item)">Editar</button>
-            <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="toggleActive(item)">Desactivar</button>
-            <button type="button" class="mapping-action-btn mapping-action-btn-danger" (click)="remove(item)">Eliminar</button>
+            <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="editGrouped(item)">Editar</button>
+            <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="toggleActiveGrouped(item)">Desactivar</button>
+            <button type="button" class="mapping-action-btn mapping-action-btn-danger" (click)="removeGrouped(item)">Eliminar</button>
           </div>
         </article>
       </div>
@@ -395,17 +393,16 @@
             <strong>{{ item.parent?.course_label || item.parent_schedule_id }}</strong>
             <span>{{ formatSavedMappingLine(item.parent) }}</span>
             <span>Docente: {{ item.parent?.teacher_name || 'Por asignar' }}</span>
-            <span>{{ item.parent?.schedule_label || '--' }}</span>
           </div>
           <div>
             <span class="summary-label">Hijo</span>
             <strong>{{ item.child?.course_label || item.child_schedule_id }}</strong>
             <span>{{ formatSavedMappingLine(item.child) }}</span>
             <span>Docente: {{ item.child?.teacher_name || 'Por asignar' }}</span>
-            <span>{{ item.child?.schedule_label || '--' }}</span>
           </div>
         </div>
         <div class="mapping-meta">
+          <span class="pill" *ngIf="item.group_size > 1">{{ item.group_size }} horarios continuos</span>
           <span class="pill" [class.pill-muted]="!item.is_active">{{ item.is_active ? 'Activa' : 'Inactiva' }}</span>
           <span
             *ngIf="item.is_active && item.validity !== 'ok' && item.validity !== 'inactive'"
@@ -418,19 +415,19 @@
           <span class="muted" *ngIf="item.notes">{{ item.notes }}</span>
         </div>
         <div class="mapping-actions">
-          <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="edit(item)">Editar</button>
-          <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="toggleActive(item)">
+          <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="editGrouped(item)">Editar</button>
+          <button type="button" class="mapping-action-btn mapping-action-btn-secondary" (click)="toggleActiveGrouped(item)">
             {{ item.is_active ? 'Desactivar' : 'Activar' }}
           </button>
-          <button type="button" class="mapping-action-btn mapping-action-btn-danger" (click)="remove(item)">Eliminar</button>
+          <button type="button" class="mapping-action-btn mapping-action-btn-danger" (click)="removeGrouped(item)">Eliminar</button>
         </div>
       </article>
     </div>
 
     <ng-template #emptyState>
       <div class="empty-block">
-        <h3>No hay herencias registradas.</h3>
-        <p>Cuando guardes la primera herencia, aparecera aqui para poder editarla o desactivarla.</p>
+        <h3>{{ mappings.length ? 'No hay resultados para los filtros.' : 'No hay herencias registradas.' }}</h3>
+        <p>{{ mappings.length ? 'Ajusta el buscador global o el filtro por dia.' : 'Cuando guardes la primera herencia, aparecera aqui para poder editarla o desactivarla.' }}</p>
       </div>
     </ng-template>
   </section>

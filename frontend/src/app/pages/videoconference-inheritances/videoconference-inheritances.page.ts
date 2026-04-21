@@ -11,6 +11,22 @@ import {
   VideoconferenceInheritanceItem,
 } from '../../services/videoconference-api.service';
 
+type GroupedInheritanceView = {
+  id: string;
+  parent_schedule_id: string;
+  child_schedule_id: string;
+  ids: string[];
+  group_size: number;
+  is_active: boolean;
+  validity: VideoconferenceInheritanceItem['validity'];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  items: VideoconferenceInheritanceItem[];
+  parent: NonNullable<VideoconferenceInheritanceItem['parent']> | null;
+  child: NonNullable<VideoconferenceInheritanceItem['child']> | null;
+};
+
 @Component({
   selector: 'app-videoconference-inheritances-page',
   standalone: true,
@@ -211,15 +227,23 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
   }
 
   get invalidActiveMappings() {
-    return this.filteredMappings.filter(
+    return this.groupedFilteredMappings.filter(
       (m) => m.is_active && m.validity !== 'ok' && m.validity !== 'inactive',
     );
   }
 
   get normalMappings() {
-    return this.filteredMappings.filter(
+    return this.groupedFilteredMappings.filter(
       (m) => !m.is_active || m.validity === 'ok' || m.validity === 'inactive',
     );
+  }
+
+  get groupedMappings() {
+    return this.groupMappings(this.mappings);
+  }
+
+  get groupedFilteredMappings() {
+    return this.groupMappings(this.filteredMappings);
   }
 
   get dayFilterOptions() {
@@ -490,7 +514,7 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
       'Estado',
     ];
 
-    const rows = this.filteredMappings.map((item) => [
+    const rows = this.groupedFilteredMappings.map((item) => [
       item.parent?.campus_name ?? '',
       item.parent?.program_name ?? '',
       item.parent?.course_label ?? '',
@@ -618,6 +642,19 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
     this.inheritanceCandidates = [];
     this.message = '';
     this.error = '';
+  }
+
+  editGrouped(item: GroupedInheritanceView) {
+    if (item.group_size > 1) {
+      this.error = 'Este bloque agrupa varios horarios. Edita cada herencia por separado desde el detalle individual.';
+      this.cdr.detectChanges();
+      return;
+    }
+    const first = item.items[0];
+    if (!first) {
+      return;
+    }
+    this.edit(first);
   }
 
   resetForm() {
@@ -860,6 +897,32 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
       });
   }
 
+  toggleActiveGrouped(item: GroupedInheritanceView) {
+    const targetIds = item.ids;
+    if (!targetIds.length) {
+      return;
+    }
+    forkJoin(
+      targetIds.map((id) =>
+        this.api.updateInheritance(id, {
+          isActive: !item.is_active,
+        }),
+      ),
+    ).subscribe({
+      next: () => {
+        this.message = !item.is_active
+          ? `Se activaron ${targetIds.length} herencia(s) del bloque.`
+          : `Se desactivaron ${targetIds.length} herencia(s) del bloque.`;
+        this.loadMappings();
+        this.loadCatalogSchedules();
+      },
+      error: (err) => {
+        this.error = err?.error?.message ?? 'No se pudo actualizar el estado del bloque.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
   remove(item: VideoconferenceInheritanceItem) {
     if (!window.confirm('Se eliminara este mapeo de herencia. Deseas continuar?')) {
       return;
@@ -878,6 +941,140 @@ export class VideoconferenceInheritancesPageComponent implements OnInit {
         this.cdr.detectChanges();
       },
     });
+  }
+
+  removeGrouped(item: GroupedInheritanceView) {
+    if (!window.confirm(`Se eliminara este bloque (${item.group_size} herencia(s)). Deseas continuar?`)) {
+      return;
+    }
+    forkJoin(item.ids.map((id) => this.api.deleteInheritance(id))).subscribe({
+      next: () => {
+        this.message = `Se eliminaron ${item.ids.length} herencia(s) del bloque.`;
+        if (item.ids.includes(this.form.id)) {
+          this.resetForm();
+        }
+        this.loadMappings();
+        this.loadCatalogSchedules();
+      },
+      error: (err) => {
+        this.error = err?.error?.message ?? 'No se pudo eliminar el bloque de herencias.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  private groupMappings(items: VideoconferenceInheritanceItem[]): GroupedInheritanceView[] {
+    const groups = new Map<string, VideoconferenceInheritanceItem[]>();
+    for (const item of items) {
+      const key = [
+        item.is_active ? '1' : '0',
+        item.validity,
+        item.parent?.section_label ?? '',
+        item.parent?.vc_section_name ?? '',
+        item.parent?.day_of_week ?? '',
+        item.parent?.teacher_name ?? '',
+        item.child?.section_label ?? '',
+        item.child?.vc_section_name ?? '',
+        item.child?.day_of_week ?? '',
+        item.child?.teacher_name ?? '',
+      ].join('||');
+      const current = groups.get(key) ?? [];
+      current.push(item);
+      groups.set(key, current);
+    }
+
+    const toMinutes = (value: string | null | undefined) => {
+      const text = String(value ?? '').trim();
+      const [h, m] = text.split(':').map((part) => Number(part));
+      if (!Number.isFinite(h) || !Number.isFinite(m)) {
+        return null;
+      }
+      return h * 60 + m;
+    };
+    const toTime = (minutes: number | null) => {
+      if (minutes == null || minutes < 0) {
+        return '--:--';
+      }
+      const h = Math.floor(minutes / 60).toString().padStart(2, '0');
+      const m = Math.floor(minutes % 60).toString().padStart(2, '0');
+      return `${h}:${m}`;
+    };
+    const mergeSide = (
+      rows: VideoconferenceInheritanceItem[],
+      pick: (item: VideoconferenceInheritanceItem) => VideoconferenceInheritanceItem['parent'] | VideoconferenceInheritanceItem['child'],
+    ) => {
+      const first = pick(rows[0]);
+      if (!first) {
+        return null;
+      }
+      const starts = rows.map((r) => toMinutes(pick(r)?.start_time)).filter((v): v is number => v != null);
+      const ends = rows.map((r) => toMinutes(pick(r)?.end_time)).filter((v): v is number => v != null);
+      const minStart = starts.length ? Math.min(...starts) : null;
+      const maxEnd = ends.length ? Math.max(...ends) : null;
+      return {
+        ...first,
+        start_time: toTime(minStart),
+        end_time: toTime(maxEnd),
+        schedule_label: `${first.day_label || first.day_of_week || 'Sin dia'} ${toTime(minStart)}-${toTime(maxEnd)}`,
+      };
+    };
+
+    const isContinuous = (left: VideoconferenceInheritanceItem, right: VideoconferenceInheritanceItem) => {
+      const parentContinuous =
+        String(left.parent?.end_time ?? '').trim() !== '' &&
+        String(left.parent?.end_time ?? '').trim() === String(right.parent?.start_time ?? '').trim();
+      const childContinuous =
+        String(left.child?.end_time ?? '').trim() !== '' &&
+        String(left.child?.end_time ?? '').trim() === String(right.child?.start_time ?? '').trim();
+      return parentContinuous || childContinuous;
+    };
+
+    const result: GroupedInheritanceView[] = [];
+    for (const rows of groups.values()) {
+      const ordered = [...rows].sort((a, b) =>
+        String(a.parent?.start_time ?? '').localeCompare(String(b.parent?.start_time ?? '')),
+      );
+      let block: VideoconferenceInheritanceItem[] = [];
+
+      const flushBlock = () => {
+        if (!block.length) {
+          return;
+        }
+        const first = block[0];
+        result.push({
+          id: first.id,
+          parent_schedule_id: first.parent_schedule_id,
+          child_schedule_id: first.child_schedule_id,
+          ids: block.map((item) => item.id),
+          group_size: block.length,
+          is_active: first.is_active,
+          validity: first.validity,
+          notes: first.notes,
+          created_at: first.created_at,
+          updated_at: first.updated_at,
+          items: [...block],
+          parent: mergeSide(block, (item) => item.parent),
+          child: mergeSide(block, (item) => item.child),
+        });
+      };
+
+      for (const row of ordered) {
+        if (!block.length) {
+          block = [row];
+          continue;
+        }
+        const previous = block[block.length - 1];
+        if (isContinuous(previous, row)) {
+          block.push(row);
+          continue;
+        }
+        flushBlock();
+        block = [row];
+      }
+      flushBlock();
+    }
+
+    return result;
   }
 
   private resetFormSelections() {
