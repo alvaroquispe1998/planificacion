@@ -311,7 +311,8 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     if (value && this.isHybridGroup) {
       this.api.getZoomGroupPool(value).subscribe({
         next: (res) => {
-          this.hybridZoomUsers = (res.users ?? res.items ?? []).map((u) => ({
+          // Use res.items (pool members only, from Zoom group config), NOT res.users (all Zoom users)
+          this.hybridZoomUsers = (res.items ?? []).map((u) => ({
             id: u.zoom_user_id ?? u.id ?? '',
             label: u.email ? `${u.name ?? ''} (${u.email})`.trim() : (u.name ?? u.zoom_user_id ?? u.id ?? ''),
           })).filter((u) => u.id);
