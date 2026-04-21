@@ -116,9 +116,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   overrideEditorOpen = false;
   overrideTarget: PreviewSelectionItem | null = null;
   overrideForm = {
+    conferenceDate: '',
     overrideDate: '',
     overrideStartTime: '',
-    overrideEndTime: '',
     reasonCode: 'OTHER' as 'HOLIDAY' | 'WEATHER' | 'OTHER',
     notes: '',
   };
@@ -646,16 +646,44 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   canManageOccurrence(item: VideoconferencePreviewItem) {
-    return Boolean(item.base_conference_date) && !item.inheritance?.is_inherited;
+    return !item.inheritance?.is_inherited;
+  }
+
+  get overrideNeedsConferenceDateInput() {
+    return Boolean(this.overrideTarget) && !this.overrideTarget?.base_conference_date;
+  }
+
+  get overrideDurationMinutes() {
+    return this.getOverrideDurationMinutes(this.overrideTarget);
+  }
+
+  get overrideComputedEndTime() {
+    if (!this.overrideTarget || !this.overrideForm.overrideStartTime) {
+      return '';
+    }
+    return this.computeEndTimeWithDuration(
+      this.overrideForm.overrideStartTime,
+      this.getOverrideDurationMinutes(this.overrideTarget),
+    ) ?? '';
+  }
+
+  get overridePreviewSourceDate() {
+    return (this.overrideForm.conferenceDate || this.overrideTarget?.base_conference_date || '').trim();
+  }
+
+  get overrideBaseTimeRange() {
+    const startTime = this.overrideTarget?.base_start_time || this.overrideTarget?.start_time || '--:--';
+    const endTime = this.overrideTarget?.base_end_time || this.overrideTarget?.end_time || '--:--';
+    return `${startTime} - ${endTime}`;
   }
 
   openOverrideEditor(item: PreviewSelectionItem) {
     this.overrideTarget = item;
     this.overrideEditorOpen = true;
     this.overrideForm = {
-      overrideDate: item.effective_conference_date,
-      overrideStartTime: item.effective_start_time,
-      overrideEndTime: item.effective_end_time,
+      conferenceDate: item.base_conference_date || '',
+      overrideDate: item.effective_conference_date || item.base_conference_date || '',
+      overrideStartTime: item.effective_start_time || item.start_time,
       reasonCode: (item.override_reason_code as 'HOLIDAY' | 'WEATHER' | 'OTHER') || 'OTHER',
       notes: item.override_notes || '',
     };
@@ -666,9 +694,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     this.overrideTarget = null;
     this.overrideSaving = false;
     this.overrideForm = {
+      conferenceDate: '',
       overrideDate: '',
       overrideStartTime: '',
-      overrideEndTime: '',
       reasonCode: 'OTHER',
       notes: '',
     };
@@ -678,17 +706,37 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     if (!this.overrideTarget) {
       return;
     }
-    if (!this.overrideForm.overrideDate || !this.overrideForm.overrideStartTime || !this.overrideForm.overrideEndTime) {
+
+    const conferenceDate = (this.overrideForm.conferenceDate || this.overrideTarget.base_conference_date || '').trim();
+    if (!conferenceDate || !this.overrideForm.overrideDate || !this.overrideForm.overrideStartTime) {
       await this.dialog.alert({
         title: 'Datos incompletos',
-        message: 'La reprogramacion requiere fecha, hora inicio y hora fin.',
+        message: 'La reprogramacion requiere dia a reprogramar, nueva fecha y hora inicio.',
       });
       return;
     }
-    if (this.overrideForm.overrideStartTime >= this.overrideForm.overrideEndTime) {
+
+    const durationMinutes = this.getOverrideDurationMinutes(this.overrideTarget);
+    if (durationMinutes <= 0) {
       await this.dialog.alert({
         title: 'Horario invalido',
-        message: 'La hora inicio debe ser menor que la hora fin.',
+        message: 'No se pudo determinar la duracion base del horario.',
+      });
+      return;
+    }
+
+    const overrideEndTime = this.computeEndTimeWithDuration(this.overrideForm.overrideStartTime, durationMinutes);
+    if (!overrideEndTime) {
+      await this.dialog.alert({
+        title: 'Horario invalido',
+        message: 'La nueva hora inicio no puede generar una hora fin que cruce medianoche.',
+      });
+      return;
+    }
+    if (this.overrideForm.overrideStartTime >= overrideEndTime) {
+      await this.dialog.alert({
+        title: 'Horario invalido',
+        message: 'La hora inicio debe ser menor que la hora fin calculada.',
       });
       return;
     }
@@ -696,11 +744,11 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     this.overrideSaving = true;
     const payload: VideoconferenceOverridePayload = {
       scheduleId: this.overrideTarget.schedule_id,
-      conferenceDate: this.overrideTarget.base_conference_date,
+      conferenceDate,
       action: 'RESCHEDULE',
       overrideDate: this.overrideForm.overrideDate,
       overrideStartTime: this.overrideForm.overrideStartTime,
-      overrideEndTime: this.overrideForm.overrideEndTime,
+      overrideEndTime,
       reasonCode: this.overrideForm.reasonCode,
       notes: this.overrideForm.notes,
     };
@@ -2274,6 +2322,57 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     const [startHour, startMinute] = (startTime || '00:00').split(':').map((part) => Number(part));
     const [endHour, endMinute] = (endTime || '00:00').split(':').map((part) => Number(part));
     return endHour * 60 + endMinute - (startHour * 60 + startMinute);
+  }
+
+  private getOverrideDurationMinutes(item: VideoconferencePreviewItem | null) {
+    if (!item) {
+      return 0;
+    }
+    const direct = Number(item.base_duration_minutes ?? item.duration_minutes);
+    if (Number.isFinite(direct) && direct > 0) {
+      return direct;
+    }
+    const startTime = item.base_start_time || item.start_time;
+    const endTime = item.base_end_time || item.end_time;
+    return this.calculateDurationMinutes(startTime, endTime);
+  }
+
+  private computeEndTimeWithDuration(startTime: string, durationMinutes: number): string | null {
+    const startMinutes = this.parseTimeToMinutes(startTime);
+    if (startMinutes === null || !Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+      return null;
+    }
+
+    const endMinutes = startMinutes + durationMinutes;
+    if (endMinutes >= 24 * 60) {
+      return null;
+    }
+    return this.formatMinutesAsTime(endMinutes);
+  }
+
+  private parseTimeToMinutes(value: string) {
+    const normalized = (value || '').trim();
+    if (!/^\d{2}:\d{2}$/.test(normalized)) {
+      return null;
+    }
+    const [hours, minutes] = normalized.split(':').map((part) => Number(part));
+    if (
+      !Number.isInteger(hours) ||
+      !Number.isInteger(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      return null;
+    }
+    return hours * 60 + minutes;
+  }
+
+  private formatMinutesAsTime(totalMinutes: number) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   }
 
   // ─── Split / Cursos Especiales ──────────────────────────────────────────────

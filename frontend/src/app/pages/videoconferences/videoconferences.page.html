@@ -115,7 +115,7 @@
         <div class="action-copy">
           <span class="aside-label">Consulta</span>
           <strong>Carga primero el lote base de horarios y despues define el rango operativo abajo.</strong>
-          <p>La reprogramacion solo cambia fecha y hora de una ocurrencia, sin tocar la planificacion base.</p>
+          <p>La reprogramacion cambia solo la fecha y hora de la clase, sin tocar la planificacion base.</p>
           <p class="action-status" *ngIf="filterOptionsLoading">
             Actualizando opciones segun la combinacion actual...
           </p>
@@ -245,13 +245,13 @@
     </div>
 
     <div class="actions-help" *ngIf="usesOccurrenceRows; else baseActionsHelp">
-      <span><strong>Reprogramar:</strong> cambia solo la fecha y hora de esa ocurrencia.</span>
+      <span><strong>Reprogramar:</strong> selecciona dia, nueva fecha y hora inicio; la hora fin se calcula con la duracion base.</span>
     </div>
 
     <ng-template #baseActionsHelp>
       <div class="actions-help">
         <span><strong>Ver ocurrencias:</strong> usa el rango de abajo para convertir horarios base en clases por fecha.</span>
-        <span><strong>Reprogramar:</strong> se habilita cuando ya estas viendo ocurrencias por fecha.</span>
+        <span><strong>Reprogramar:</strong> tambien funciona en horario base indicando primero el dia a reprogramar.</span>
       </div>
     </ng-template>
 
@@ -722,7 +722,7 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">Reprogramacion</p>
-          <h2>Ajustar solo fecha y hora de la ocurrencia</h2>
+          <h2>Ajustar fecha y hora sin alterar la duracion base</h2>
         </div>
         <button class="btn btn-secondary btn-sm" type="button" (click)="closeOverrideEditor()">Cerrar</button>
       </div>
@@ -733,13 +733,19 @@
 
       <div class="modal-grid">
         <label class="field">
-          <span>Fecha base</span>
-          <input type="text" [value]="current.base_conference_date" disabled />
+          <span>Dia a reprogramar</span>
+          <input
+            type="date"
+            [(ngModel)]="overrideForm.conferenceDate"
+            [disabled]="!overrideNeedsConferenceDateInput" />
+          <small class="meta-inline" *ngIf="!overrideNeedsConferenceDateInput">
+            Esta ocurrencia ya tiene dia base definido.
+          </small>
         </label>
 
         <label class="field">
           <span>Hora base</span>
-          <input type="text" [value]="current.start_time + ' - ' + current.end_time" disabled />
+          <input type="text" [value]="overrideBaseTimeRange" disabled />
         </label>
 
         <label class="field">
@@ -753,8 +759,9 @@
         </label>
 
         <label class="field">
-          <span>Nueva hora fin</span>
-          <input type="time" [(ngModel)]="overrideForm.overrideEndTime" />
+          <span>Hora fin calculada</span>
+          <input type="text" [value]="overrideComputedEndTime || '--:--'" disabled />
+          <small class="meta-inline">Duracion fija: {{ overrideDurationMinutes }} min</small>
         </label>
 
         <label class="field">
@@ -764,6 +771,14 @@
             <option value="HOLIDAY">Feriado</option>
             <option value="WEATHER">Clima</option>
           </select>
+        </label>
+
+        <label class="field modal-span-2">
+          <span>Vista previa</span>
+          <input
+            type="text"
+            [value]="(overridePreviewSourceDate || '--') + ' -> ' + (overrideForm.overrideDate || '--') + ' | ' + (overrideForm.overrideStartTime || '--:--') + ' - ' + (overrideComputedEndTime || '--:--')"
+            disabled />
         </label>
 
         <label class="field modal-span-2">

@@ -69,6 +69,9 @@ export interface VideoconferencePreviewItem {
     start_time: string;
     end_time: string;
     duration_minutes: number;
+    base_start_time?: string;
+    base_end_time?: string;
+    base_duration_minutes?: number;
     vc_period_id: string | null;
     vc_faculty_id: string | null;
     vc_faculty_name: string | null;
