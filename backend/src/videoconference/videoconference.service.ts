@@ -5401,6 +5401,24 @@ export class VideoconferenceService implements OnModuleInit {
         });
     }
 
+    private async listAulaVirtualConferencesByDateCache(
+        context: AulaVirtualRequestContext,
+        dates: string[],
+        length = 250,
+    ) {
+        const cache = new Map<string, Array<{ id: string; name: string; sectionId: string; date: string }>>();
+        for (const date of dates) {
+            if (cache.has(date)) {
+                continue;
+            }
+            cache.set(
+                date,
+                await this.listAulaVirtualConferences(context, date, date, '', length),
+            );
+        }
+        return cache;
+    }
+
     private async copyAulaVirtualConference(
         context: AulaVirtualRequestContext,
         id: string,
@@ -5679,6 +5697,23 @@ export class VideoconferenceService implements OnModuleInit {
             course_name: string | null;
         }>();
 
+        const uniqueAkademicDates = Array.from(
+            new Set(
+                parentRows
+                    .map((parent) => {
+                        const conferenceDate = toDateOnly(parent.conference_date);
+                        const [year, month, day] = conferenceDate.split('-');
+                        return year && month && day ? `${day}/${month}/${year}` : null;
+                    })
+                    .filter((item): item is string => Boolean(item)),
+            ),
+        );
+        const conferencesByAkademicDate = await this.listAulaVirtualConferencesByDateCache(
+            aulaVirtualContext,
+            uniqueAkademicDates,
+            250,
+        );
+
         const items = [];
         for (const parent of parentRows) {
             const conferenceDate = toDateOnly(parent.conference_date);
@@ -5690,35 +5725,31 @@ export class VideoconferenceService implements OnModuleInit {
                 name: string;
                 sectionId: string;
                 date: string;
-                matchType: 'exact_section_and_topic' | 'topic_only';
+                matchType: 'section_and_date' | 'topic_and_date';
             } | null = null;
 
             try {
-                const listings = await this.listAulaVirtualConferences(
-                    aulaVirtualContext,
-                    akademicDate,
-                    akademicDate,
-                    parent.topic ?? '',
-                    100,
-                );
+                const listings = conferencesByAkademicDate.get(akademicDate) ?? [];
                 const exactMatch = listings.find(
                     (row) =>
-                        row.name === parent.topic &&
+                        row.date === akademicDate &&
                         (
-                            !parent.parent_effective_vc_section_id && !parent.parent_vc_section_id && !parent.parent_source_section_id ||
                             row.sectionId === parent.parent_effective_vc_section_id ||
                             row.sectionId === parent.parent_vc_section_id ||
                             row.sectionId === parent.parent_source_section_id
                         ),
                 ) ?? null;
-                const topicOnlyMatch = exactMatch ?? listings.find((row) => row.name === parent.topic) ?? null;
+                const topicOnlyMatch =
+                    exactMatch ??
+                    listings.find((row) => row.date === akademicDate && row.name === parent.topic) ??
+                    null;
                 if (topicOnlyMatch) {
                     akademicConference = {
                         id: topicOnlyMatch.id,
                         name: topicOnlyMatch.name,
                         sectionId: topicOnlyMatch.sectionId,
                         date: topicOnlyMatch.date,
-                        matchType: exactMatch ? 'exact_section_and_topic' : 'topic_only',
+                        matchType: exactMatch ? 'section_and_date' : 'topic_and_date',
                     };
                 }
             } catch (error) {
