@@ -3122,6 +3122,37 @@ export class VideoconferenceService implements OnModuleInit {
             );
         }
 
+        // ─── Host rules from Cursos Especiales ──────────────────────────────
+        // When a schedule has a host_rule configured (Cursos Especiales), the
+        // generator MUST respect that rule regardless of the default zoomGroupId
+        // selected on the upper filter. We preload the pool of every group
+        // referenced by any active rule so generateOccurrence can use them.
+        const hostRuleMap = await this.getActiveHostRuleMap();
+        const extraZoomPools = new Map<string, { users: ZoomPoolUser[]; groupName: string }>();
+        const extraGroupIds = new Set<string>();
+        for (const rule of hostRuleMap.values()) {
+            if (!rule.skip_zoom && rule.zoom_group_id && rule.zoom_group_id !== zoomGroupId) {
+                extraGroupIds.add(rule.zoom_group_id);
+            }
+        }
+        for (const extraGroupId of extraGroupIds) {
+            try {
+                const extraPool = await this.getActiveZoomPoolUsers(
+                    extraGroupId,
+                    Boolean(payload.allowPoolWarnings),
+                );
+                extraZoomPools.set(extraGroupId, {
+                    users: extraPool.users,
+                    groupName: extraPool.group.name,
+                });
+            } catch (error) {
+                // If a rule-specific pool fails to load we surface the error on the
+                // result for every occurrence that references it, instead of hard-failing
+                // the whole batch.
+                extraZoomPools.set(extraGroupId, { users: [], groupName: extraGroupId });
+            }
+        }
+
         const resolvedOccurrences = await this.resolveOccurrences(
             Array.from(rowMap.values()),
             startDate,
@@ -3196,14 +3227,68 @@ export class VideoconferenceService implements OnModuleInit {
             ownerOccurrence.effective_end_time = maxEndTime;
             ownerOccurrence.scheduled_end = maxScheduledEnd;
 
+            // Resolve per-owner Zoom pool & preferred host, honoring the host_rule
+            // from Cursos Especiales. Rows without a rule keep the default pool.
+            const ownerHostRule = hostRuleMap.get(ownerOccurrence.row.schedule_id) ?? null;
+            let effectiveZoomUsers: ZoomPoolUser[] = zoomUsers;
+            let effectiveGroupName: string = poolValidation.group.name;
+            let effectivePreferredUserId: string | null = this.findPreferredZoomUserId(ownerOccurrence, preferredHosts);
+
+            if (ownerHostRule && ownerHostRule.skip_zoom) {
+                results.push({
+                    schedule_id: ownerOccurrence.row.schedule_id,
+                    occurrence_key: ownerOccurrence.occurrence_key,
+                    conference_date: ownerOccurrence.effective_conference_date,
+                    status: 'VALIDATION_ERROR',
+                    message: 'Este horario esta marcado como "Sin Zoom" en Cursos Especiales.',
+                    record_id: null,
+                    zoom_user_id: null,
+                    zoom_user_email: null,
+                    zoom_meeting_id: null,
+                    link_mode: 'OWNED',
+                    owner_videoconference_id: null,
+                    inheritance: ownerOccurrence.inheritance,
+                });
+                continue;
+            }
+
+            if (ownerHostRule && !ownerHostRule.skip_zoom && ownerHostRule.zoom_group_id) {
+                if (ownerHostRule.zoom_group_id !== zoomGroupId) {
+                    const extra = extraZoomPools.get(ownerHostRule.zoom_group_id);
+                    if (!extra || !extra.users.length) {
+                        results.push({
+                            schedule_id: ownerOccurrence.row.schedule_id,
+                            occurrence_key: ownerOccurrence.occurrence_key,
+                            conference_date: ownerOccurrence.effective_conference_date,
+                            status: 'ERROR',
+                            message: `No se pudo cargar el pool del grupo Zoom "${ownerHostRule.zoom_group_name ?? ownerHostRule.zoom_group_id}" configurado en Cursos Especiales.`,
+                            record_id: null,
+                            zoom_user_id: null,
+                            zoom_user_email: null,
+                            zoom_meeting_id: null,
+                            link_mode: 'OWNED',
+                            owner_videoconference_id: null,
+                            inheritance: ownerOccurrence.inheritance,
+                        });
+                        continue;
+                    }
+                    effectiveZoomUsers = extra.users;
+                    effectiveGroupName = extra.groupName;
+                }
+                // The host_rule user is authoritative for this schedule.
+                if (ownerHostRule.zoom_user_id) {
+                    effectivePreferredUserId = ownerHostRule.zoom_user_id;
+                }
+            }
+
             const ownerResult = await this.generateOccurrence(
                 ownerOccurrence,
                 aulaVirtualContext,
                 zoomConfig.maxConcurrent,
-                zoomUsers,
+                effectiveZoomUsers,
                 remoteMeetingsCache,
-                this.findPreferredZoomUserId(ownerOccurrence, preferredHosts),
-                poolValidation.group.name,
+                effectivePreferredUserId,
+                effectiveGroupName,
             );
             results.push(ownerResult);
 
