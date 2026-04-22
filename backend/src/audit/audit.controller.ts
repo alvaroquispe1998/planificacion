@@ -132,8 +132,13 @@ export class AuditController {
     @Query('academic_program_id') academicProgramId?: string,
     @Query('status') status?: string,
     @Query('audit_sync_status') auditSyncStatus?: string,
+    @Query('course_code') courseCode?: string,
+    @Query('planning_section_id') planningSectionId?: string,
+    @Query('source_section_id') sourceSectionId?: string,
+    @Query('planning_subsection_id') planningSubsectionId?: string,
     @Query('search') search?: string,
     @Query('hide_inherited') hideInherited?: string,
+    @Query('show_deleted') showDeleted?: string,
   ) {
     return this.auditService.listPlanningVideoconferenceAudits({
       page: page ? Number(page) : undefined,
@@ -144,8 +149,87 @@ export class AuditController {
       academic_program_id: academicProgramId,
       status,
       audit_sync_status: auditSyncStatus,
+      course_code: courseCode,
+      planning_section_id: planningSectionId,
+      source_section_id: sourceSectionId,
+      planning_subsection_id: planningSubsectionId,
       search,
       hide_inherited: hideInherited !== 'false',
+      show_deleted: showDeleted === 'true',
+    });
+  }
+
+  @Get('planning-videoconference-groups')
+  listPlanningVideoconferenceGroups(
+    @Query('page') page?: string,
+    @Query('page_size') pageSize?: string,
+    @Query('semester_id') semesterId?: string,
+    @Query('campus_id') campusId?: string,
+    @Query('faculty_id') facultyId?: string,
+    @Query('academic_program_id') academicProgramId?: string,
+    @Query('status') status?: string,
+    @Query('audit_sync_status') auditSyncStatus?: string,
+    @Query('course_code') courseCode?: string,
+    @Query('planning_section_id') planningSectionId?: string,
+    @Query('source_section_id') sourceSectionId?: string,
+    @Query('planning_subsection_id') planningSubsectionId?: string,
+    @Query('search') search?: string,
+    @Query('hide_inherited') hideInherited?: string,
+    @Query('show_deleted') showDeleted?: string,
+  ) {
+    return this.auditService.listPlanningVideoconferenceGroups({
+      page: page ? Number(page) : undefined,
+      page_size: pageSize ? Number(pageSize) : undefined,
+      semester_id: semesterId,
+      campus_id: campusId,
+      faculty_id: facultyId,
+      academic_program_id: academicProgramId,
+      status,
+      audit_sync_status: auditSyncStatus,
+      course_code: courseCode,
+      planning_section_id: planningSectionId,
+      source_section_id: sourceSectionId,
+      planning_subsection_id: planningSubsectionId,
+      search,
+      hide_inherited: hideInherited !== 'false',
+      show_deleted: showDeleted === 'true',
+    });
+  }
+
+  @Get('planning-videoconference-sessions')
+  listPlanningVideoconferenceSessions(
+    @Query('page') page?: string,
+    @Query('page_size') pageSize?: string,
+    @Query('semester_id') semesterId?: string,
+    @Query('campus_id') campusId?: string,
+    @Query('faculty_id') facultyId?: string,
+    @Query('academic_program_id') academicProgramId?: string,
+    @Query('status') status?: string,
+    @Query('audit_sync_status') auditSyncStatus?: string,
+    @Query('course_code') courseCode?: string,
+    @Query('planning_section_id') planningSectionId?: string,
+    @Query('source_section_id') sourceSectionId?: string,
+    @Query('planning_subsection_id') planningSubsectionId?: string,
+    @Query('search') search?: string,
+    @Query('hide_inherited') hideInherited?: string,
+    @Query('show_deleted') showDeleted?: string,
+  ) {
+    return this.auditService.listPlanningVideoconferenceSessions({
+      page: page ? Number(page) : undefined,
+      page_size: pageSize ? Number(pageSize) : undefined,
+      semester_id: semesterId,
+      campus_id: campusId,
+      faculty_id: facultyId,
+      academic_program_id: academicProgramId,
+      status,
+      audit_sync_status: auditSyncStatus,
+      course_code: courseCode,
+      planning_section_id: planningSectionId,
+      source_section_id: sourceSectionId,
+      planning_subsection_id: planningSubsectionId,
+      search,
+      hide_inherited: hideInherited !== 'false',
+      show_deleted: showDeleted === 'true',
     });
   }
 

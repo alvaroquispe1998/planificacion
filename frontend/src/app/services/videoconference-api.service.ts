@@ -779,6 +779,7 @@ export class VideoconferenceApiService {
         dateFrom: string;
         dateTo: string;
         parentVcSectionId?: string;
+        courseCode?: string;
     }) {
         return this.http.post<AkademicInheritanceCopyPreviewResponse>(
             `${this.baseUrl}/akademic-inheritance-copy/preview`,

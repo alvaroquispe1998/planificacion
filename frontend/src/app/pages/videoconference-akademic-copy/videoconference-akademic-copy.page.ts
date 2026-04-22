@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { finalize } from 'rxjs';
 import {
   AkademicInheritanceCopyPayloadPreview,
   AkademicInheritanceCopyPreviewChild,
@@ -27,10 +28,14 @@ export class VideoconferenceAkademicCopyPageComponent {
   payloadPreviewJson = '';
   cloningIds = new Set<string>();
   cloneMessages: Record<string, string> = {};
+  bulkCloning = false;
+  bulkProgress = '';
+  summaryFilter: 'all' | 'created' | 'pending' | 'review' = 'all';
 
   filters = {
     dateFrom: this.todayIso(),
     dateTo: this.todayIso(),
+    courseCode: '',
     parentVcSectionId: '',
   };
 
@@ -40,12 +45,38 @@ export class VideoconferenceAkademicCopyPageComponent {
   ) {}
 
   get totals() {
+    const children = this.rows.flatMap((row) => row.children);
+    const created = children.filter((child) => this.isAlreadyCopied(child)).length;
+    const pending = children.filter((child) => child.payload && !this.isAlreadyCopied(child)).length;
+    const review = children.filter((child) => !child.payload).length + this.rows.filter((row) => row.status !== 'READY').length;
     return {
       total: this.rows.length,
-      ready: this.rows.filter((row) => row.status === 'READY').length,
+      created,
+      pending,
       missing: this.rows.filter((row) => row.status === 'MISSING_AKADEMIC_CONFERENCE').length,
-      attention: this.rows.filter((row) => row.status !== 'READY').length,
+      attention: review,
     };
+  }
+
+  get cloneableVisibleChildren() {
+    return this.visibleRows.flatMap((row) =>
+      row.children
+        .filter((child) => child.payload && !this.isAlreadyCopied(child))
+        .map((child) => ({ row, child })),
+    );
+  }
+
+  get visibleRows() {
+    switch (this.summaryFilter) {
+      case 'created':
+        return this.rows.filter((row) => row.children.some((child) => this.isAlreadyCopied(child)));
+      case 'pending':
+        return this.rows.filter((row) => row.children.some((child) => child.payload && !this.isAlreadyCopied(child)));
+      case 'review':
+        return this.rows.filter((row) => row.status !== 'READY' || row.children.some((child) => !child.payload));
+      default:
+        return this.rows;
+    }
   }
 
   loadPreview() {
@@ -64,6 +95,7 @@ export class VideoconferenceAkademicCopyPageComponent {
     this.api.previewAkademicInheritanceCopy({
       dateFrom: this.filters.dateFrom,
       dateTo: this.filters.dateTo,
+      courseCode: this.filters.courseCode.trim() || undefined,
       parentVcSectionId: this.filters.parentVcSectionId.trim() || undefined,
     }).subscribe({
       next: (result) => {
@@ -71,6 +103,7 @@ export class VideoconferenceAkademicCopyPageComponent {
         this.expandedIds = new Set(this.rows.map((row) => row.parentLocalVideoconferenceId));
         this.cloningIds.clear();
         this.cloneMessages = {};
+        this.summaryFilter = 'all';
         this.loading = false;
         this.cdr.detectChanges();
       },
@@ -88,12 +121,22 @@ export class VideoconferenceAkademicCopyPageComponent {
     this.filters = {
       dateFrom: today,
       dateTo: today,
+      courseCode: '',
       parentVcSectionId: '',
     };
     this.rows = [];
     this.error = '';
     this.hasSearched = false;
     this.expandedIds.clear();
+    this.summaryFilter = 'all';
+  }
+
+  setSummaryFilter(filter: 'all' | 'created' | 'pending' | 'review') {
+    this.summaryFilter = filter;
+  }
+
+  summaryActive(filter: 'all' | 'created' | 'pending' | 'review') {
+    return this.summaryFilter === filter;
   }
 
   toggleExpanded(row: AkademicInheritanceCopyPreviewItem) {
@@ -122,39 +165,37 @@ export class VideoconferenceAkademicCopyPageComponent {
     if (!child.payload || this.isCloning(child)) {
       return;
     }
-    const key = this.childKey(child);
-    this.cloningIds.add(key);
-    this.cloneMessages = { ...this.cloneMessages, [key]: '' };
+    void this.cloneChildOnce(child, row).catch(() => undefined);
+  }
 
-    this.api.cloneAkademicInheritanceCopy({
-      ...child.payload,
-      inheritanceId: child.inheritanceId,
-      parentLocalVideoconferenceId: row.parentLocalVideoconferenceId,
-    }).subscribe({
-      next: (result) => {
-        const message = result.ok
-          ? 'Videoconferencia clonada'
-          : `Akademic respondio ${result.status}`;
-        if (result.ok) {
-          child.akademicCopyStatus = 'COPIED';
-          child.akademicCopiedAt = new Date().toISOString();
-          if (row.children.every((item) => item.akademicCopyStatus === 'COPIED')) {
-            row.akademicCopyStatus = 'COPIED';
-          } else if (!row.akademicCopyStatus) {
-            row.akademicCopyStatus = 'PENDING';
-          }
-        }
-        this.cloneMessages = { ...this.cloneMessages, [key]: message };
-        this.cloningIds.delete(key);
-        this.cdr.detectChanges();
-      },
-      error: (err) => {
-        const message = err?.error?.message ?? 'No se pudo clonar la videoconferencia.';
-        this.cloneMessages = { ...this.cloneMessages, [key]: message };
-        this.cloningIds.delete(key);
-        this.cdr.detectChanges();
-      },
-    });
+  async cloneVisibleVideoconferences() {
+    const targets = this.cloneableVisibleChildren;
+    if (!targets.length || this.bulkCloning) {
+      return;
+    }
+
+    this.bulkCloning = true;
+    this.bulkProgress = `Clonando 0 de ${targets.length}`;
+    this.cdr.detectChanges();
+
+    let done = 0;
+    for (const target of targets) {
+      if (!target.child.payload || this.isAlreadyCopied(target.child)) {
+        continue;
+      }
+      try {
+        await this.cloneChildOnce(target.child, target.row);
+      } catch {
+        // The row-level message already captures the error. Continue with the rest.
+      }
+      done += 1;
+      this.bulkProgress = `Clonando ${done} de ${targets.length}`;
+      this.cdr.detectChanges();
+    }
+
+    this.bulkProgress = `Clonacion finalizada: ${done} procesadas`;
+    this.bulkCloning = false;
+    this.cdr.detectChanges();
   }
 
   closePayload() {
@@ -257,6 +298,48 @@ export class VideoconferenceAkademicCopyPageComponent {
 
   private stringifyPayload(payload: AkademicInheritanceCopyPayloadPreview) {
     return JSON.stringify(payload, null, 2);
+  }
+
+  private cloneChildOnce(child: AkademicInheritanceCopyPreviewChild, row: AkademicInheritanceCopyPreviewItem) {
+    const key = this.childKey(child);
+    this.cloningIds.add(key);
+    this.cloneMessages = { ...this.cloneMessages, [key]: '' };
+    this.cdr.detectChanges();
+
+    return new Promise<void>((resolve, reject) => {
+      this.api.cloneAkademicInheritanceCopy({
+        ...child.payload!,
+        inheritanceId: child.inheritanceId,
+        parentLocalVideoconferenceId: row.parentLocalVideoconferenceId,
+      }).pipe(
+        finalize(() => {
+          this.cloningIds.delete(key);
+          this.cdr.detectChanges();
+        }),
+      ).subscribe({
+        next: (result) => {
+          const message = result.ok
+            ? 'Videoconferencia clonada'
+            : `Akademic respondio ${result.status}`;
+          if (result.ok) {
+            child.akademicCopyStatus = 'COPIED';
+            child.akademicCopiedAt = new Date().toISOString();
+            if (row.children.every((item) => item.akademicCopyStatus === 'COPIED')) {
+              row.akademicCopyStatus = 'COPIED';
+            } else if (!row.akademicCopyStatus) {
+              row.akademicCopyStatus = 'PENDING';
+            }
+          }
+          this.cloneMessages = { ...this.cloneMessages, [key]: message };
+          resolve();
+        },
+        error: (err) => {
+          const message = err?.error?.message ?? 'No se pudo clonar la videoconferencia.';
+          this.cloneMessages = { ...this.cloneMessages, [key]: message };
+          reject(err);
+        },
+      });
+    });
   }
 
   private todayIso() {

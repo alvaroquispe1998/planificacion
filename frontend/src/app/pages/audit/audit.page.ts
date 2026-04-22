@@ -11,6 +11,7 @@ type AuditFilters = {
   academic_program_id: string;
   status: string;
   audit_sync_status: string;
+  course_code: string;
   search: string;
 };
 
@@ -40,11 +41,14 @@ export class AuditPageComponent implements OnInit {
   error = '';
   rows: any[] = [];
   hideInherited = true;
+  showDeleted = false;
   totals = {
     total: 0,
+    sessions: 0,
     matched: 0,
     errors: 0,
     pending_audit: 0,
+    deleted: 0,
   };
   page = 1;
   pageSize = 20;
@@ -62,6 +66,7 @@ export class AuditPageComponent implements OnInit {
     academic_program_id: '',
     status: '',
     audit_sync_status: '',
+    course_code: '',
     search: '',
   };
 
@@ -79,14 +84,16 @@ export class AuditPageComponent implements OnInit {
   loadRows() {
     this.loading = true;
     this.error = '';
-    this.api.listPlanningVideoconferenceAudits(this.apiFilters()).subscribe({
+    this.api.listPlanningVideoconferenceGroups(this.apiFilters()).subscribe({
       next: (result) => {
         this.rows = Array.isArray(result?.items) ? result.items : [];
         this.totals = {
           total: Number(result?.totals?.total ?? 0),
+          sessions: Number(result?.totals?.sessions ?? 0),
           matched: Number(result?.totals?.matched ?? 0),
           errors: Number(result?.totals?.errors ?? 0),
           pending_audit: Number(result?.totals?.pending_audit ?? 0),
+          deleted: Number(result?.totals?.deleted ?? 0),
         };
         this.page = Number(result?.page ?? this.page);
         this.pageSize = Number(result?.page_size ?? this.pageSize);
@@ -121,16 +128,31 @@ export class AuditPageComponent implements OnInit {
       academic_program_id: '',
       status: '',
       audit_sync_status: '',
+      course_code: '',
       search: '',
     };
     this.hideInherited = true;
+    this.showDeleted = false;
     this.page = 1;
     this.loadRows();
   }
 
-  openDetail(row: any) {
+  openSessions(row: any) {
     const url = this.router.serializeUrl(
-      this.router.createUrlTree(['/videoconferences/audit', row.id]),
+      this.router.createUrlTree(['/videoconferences/audit/course-section'], {
+        queryParams: {
+          semester_id: row.semester_id || undefined,
+          campus_id: row.campus_id || undefined,
+          faculty_id: row.faculty_id || undefined,
+          academic_program_id: row.academic_program_id || undefined,
+          course_code: row.course_code || undefined,
+          planning_section_id: row.planning_section_id || undefined,
+          source_section_id: row.source_section_id || undefined,
+          planning_subsection_id: row.planning_subsection_id || undefined,
+          hide_inherited: this.hideInherited ? 'true' : 'false',
+          show_deleted: this.showDeleted ? 'true' : 'false',
+        },
+      }),
     );
     window.open(url, '_blank', 'noopener');
   }
@@ -155,9 +177,9 @@ export class AuditPageComponent implements OnInit {
       return 'Actualizando lista';
     }
     if (this.totals.total === 1) {
-      return '1 resultado';
+      return '1 curso/seccion';
     }
-    return `${this.totals.total} resultados`;
+    return `${this.totals.total} cursos/secciones`;
   }
 
   get currentPageStart() {
@@ -305,8 +327,14 @@ export class AuditPageComponent implements OnInit {
   }
 
   dateLabel(row: any) {
-    const raw = row.conference_date || row.scheduled_start;
+    const raw = row.conference_date || row.first_conference_date || row.scheduled_start;
     return this.formatDateSafe(raw);
+  }
+
+  dateRangeLabel(row: any) {
+    const start = this.formatDateSafe(row.first_conference_date);
+    const end = this.formatDateSafe(row.last_conference_date);
+    return start === end ? start : `${start} - ${end}`;
   }
 
   timeLabel(row: any) {
@@ -350,6 +378,7 @@ export class AuditPageComponent implements OnInit {
     return {
       ...this.filters,
       hide_inherited: this.hideInherited ? 'true' : 'false',
+      show_deleted: this.showDeleted ? 'true' : 'false',
       page: this.page,
       page_size: this.pageSize,
     };

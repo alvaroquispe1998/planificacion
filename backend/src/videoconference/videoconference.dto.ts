@@ -383,6 +383,10 @@ export class PreviewAkademicInheritanceCopyDto {
     @IsOptional()
     @IsString()
     parentVcSectionId?: string;
+
+    @IsOptional()
+    @IsString()
+    courseCode?: string;
 }
 
 export class CloneAkademicInheritanceCopyDto {

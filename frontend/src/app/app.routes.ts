@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { AuditDetailPageComponent } from './pages/audit-detail/audit-detail.page';
+import { AuditCourseSectionPageComponent } from './pages/audit-course-section/audit-course-section.page';
 import { loginRedirectGuard, permissionGuard, securityLandingGuard, windowGuard } from './core/auth.guard';
 import { AuditPageComponent } from './pages/audit/audit.page';
 import { ClassDetailPageComponent } from './pages/class-detail/class-detail.page';
@@ -94,6 +95,12 @@ export const routes: Routes = [
   {
     path: 'videoconferences/audit',
     component: AuditPageComponent,
+    canActivate: [windowGuard],
+    data: { requiredWindow: 'window.audit' },
+  },
+  {
+    path: 'videoconferences/audit/course-section',
+    component: AuditCourseSectionPageComponent,
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.audit' },
   },

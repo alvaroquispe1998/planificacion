@@ -4,8 +4,8 @@
       <p class="eyebrow">Auditoria operativa</p>
       <h1>Auditoria Zoom</h1>
       <p class="hero-copy">
-        Revisa las reuniones generadas desde planificacion, abre su detalle en otra pestana y sincroniza
-        participantes, instancias y grabaciones solo cuando lo necesites.
+        Revisa las reuniones generadas desde planificacion agrupadas por curso y seccion. Entra a sus sesiones
+        para abrir el detalle de auditoria cuando lo necesites.
       </p>
     </div>
     <button type="button" class="btn btn-secondary" (click)="loadRows()" [disabled]="loading">
@@ -17,22 +17,22 @@
     <article class="stat-card">
       <span class="stat-label">Total</span>
       <strong>{{ totals.total }}</strong>
-      <small>Todas las videoconferencias visibles con los filtros actuales</small>
+      <small>Cursos/secciones visibles con los filtros actuales</small>
     </article>
     <article class="stat-card">
-      <span class="stat-label">Listas en Zoom</span>
-      <strong>{{ totals.matched }}</strong>
-      <small>Ya tienen `zoom_meeting_id` conciliado</small>
+      <span class="stat-label">Sesiones</span>
+      <strong>{{ totals.sessions }}</strong>
+      <small>Reuniones creadas dentro de los grupos visibles</small>
     </article>
     <article class="stat-card">
       <span class="stat-label">Con error</span>
       <strong>{{ totals.errors }}</strong>
-      <small>Fallaron durante la creación o conciliación</small>
+      <small>Fallaron durante la creacion o conciliacion</small>
     </article>
     <article class="stat-card">
       <span class="stat-label">Sin sincronizar</span>
       <strong>{{ totals.pending_audit }}</strong>
-      <small>Aún no se bajaron instancias, participantes o grabaciones</small>
+      <small>Aun no se bajaron instancias, participantes o grabaciones</small>
     </article>
   </section>
 
@@ -41,7 +41,7 @@
       <div>
         <p class="eyebrow">Filtros</p>
         <h2>Listado operativo</h2>
-        <p class="section-copy">Filtra por contexto academico, estado de creacion y estado de auditoria.</p>
+        <p class="section-copy">Filtra por contexto academico, curso, seccion, estado de creacion y estado de auditoria.</p>
       </div>
       <button type="button" class="btn btn-ghost btn-sm" (click)="clearFilters()">Limpiar filtros</button>
     </div>
@@ -93,12 +93,21 @@
         </select>
       </label>
 
+      <label>
+        <span>Codigo curso</span>
+        <input
+          [(ngModel)]="filters.course_code"
+          type="text"
+          placeholder="P01-202011-20A35"
+          (keyup.enter)="applyFilters()" />
+      </label>
+
       <label class="search-field">
         <span>Buscar</span>
         <input
           [(ngModel)]="filters.search"
           type="text"
-          placeholder="Curso, seccion o zoom_meeting_id"
+          placeholder="Curso, seccion, grupo o contexto"
           (keyup.enter)="applyFilters()" />
       </label>
 
@@ -106,6 +115,10 @@
         <label class="toggle-label">
           <input type="checkbox" [(ngModel)]="hideInherited" (ngModelChange)="applyFilters()" />
           <span class="toggle-text">Ocultar heredadas</span>
+        </label>
+        <label class="toggle-label">
+          <input type="checkbox" [(ngModel)]="showDeleted" (ngModelChange)="applyFilters()" />
+          <span class="toggle-text">Mostrar eliminadas</span>
         </label>
         <button type="button" class="btn btn-primary" (click)="applyFilters()" [disabled]="loading">
           Buscar
@@ -117,9 +130,9 @@
   <section class="panel table-panel">
     <div class="section-head">
       <div>
-        <p class="eyebrow">Reuniones registradas</p>
-        <h2>Reuniones creadas</h2>
-        <p class="section-copy">Este listado sale de la generacion de videoconferencias y su seguimiento de auditoria.</p>
+        <p class="eyebrow">Cursos y secciones</p>
+        <h2>Grupos con reuniones creadas</h2>
+        <p class="section-copy">Cada fila agrupa las sesiones generadas de un curso, seccion y grupo.</p>
         <p class="section-copy" *ngIf="hideInherited" style="color: #8a7040; margin-top: 0.2rem; font-size: 0.8rem;">
           Solo se muestran registros Owner. Desactiva "Ocultar heredadas" para ver tambien los secundarios.
         </p>
@@ -133,11 +146,11 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th>Fecha / hora</th>
+            <th>Rango</th>
+            <th>Curso / seccion</th>
             <th>Contexto</th>
-            <th>Zoom</th>
             <th>Estados</th>
-            <th>Conteos</th>
+            <th>Sesiones</th>
             <th></th>
           </tr>
         </thead>
@@ -145,9 +158,15 @@
           <tr *ngFor="let row of rows">
             <td>
               <div class="cell-stack">
-                <strong>{{ dateLabel(row) }}</strong>
-                <span>{{ timeLabel(row) }}</span>
-                <span>Creada: {{ formatDateTime(row.created_at) }}</span>
+                <strong>{{ dateRangeLabel(row) }}</strong>
+                <span>{{ row.session_count || 0 }} sesiones</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.course_code || 'Sin codigo' }}</strong>
+                <span>{{ row.course_name || 'Sin curso' }}</span>
+                <span>{{ sectionLabel(row) }} | {{ groupLabel(row) }}</span>
               </div>
             </td>
             <td>
@@ -158,42 +177,24 @@
               </div>
             </td>
             <td>
-              <div class="cell-stack">
-                <strong>{{ row.zoom_meeting_id || 'Sin conciliacion Zoom' }}</strong>
-                <span>{{ row.topic || 'Sin nombre de reunion' }}</span>
-                <span>{{ row.zoom_user_name || row.zoom_user_email || 'Sin usuario asignado' }}</span>
-                <span>Generada: {{ statusLabel(row.status) }}</span>
-                <span *ngIf="row.link_mode === 'INHERITED'">{{ row.owner_label || 'Usa el Zoom del horario padre' }}</span>
-              </div>
-            </td>
-            <td>
               <div class="status-stack">
-                <span class="pill" [class.pill-info]="row.link_mode === 'INHERITED'">{{ linkModeLabel(row.link_mode) }}</span>
-                <span class="pill" [ngClass]="statusToneClass(row.status)">{{ statusLabel(row.status) }}</span>
-                <span
-                  class="pill"
-                  [class.pill-ok]="normalizeAuditSyncStatus(row.audit_sync_status) === 'SYNCED'"
-                  [class.pill-error]="normalizeAuditSyncStatus(row.audit_sync_status) === 'ERROR'">
-                  {{ auditStatusLabel(row.audit_sync_status) }}
-                </span>
-                <span
-                  class="pill"
-                  [class.pill-warning]="row.planning_sync_state === 'OUTDATED'"
-                  [class.pill-error]="row.planning_sync_state?.includes('REMOVED')">
-                  {{ planningSyncStatusLabel(row.planning_sync_state) }}
-                </span>
+                <span class="pill pill-ok">{{ row.current_count || 0 }} vigentes</span>
+                <span class="pill pill-warning">{{ row.outdated_count || 0 }} desfasadas</span>
+                <span class="pill pill-info">{{ row.pending_audit_count || 0 }} sin sincronizar</span>
+                <span class="pill pill-error" *ngIf="row.error_count">{{ row.error_count }} con error</span>
+                <span class="pill" *ngIf="row.deleted_count">{{ row.deleted_count }} eliminadas</span>
               </div>
             </td>
             <td>
               <div class="cell-stack">
-                <span>{{ row.instance_count || 0 }} instancias</span>
-                <span>{{ row.participant_count || 0 }} participantes</span>
-                <span>{{ row.recording_count || 0 }} grabaciones</span>
+                <strong>{{ row.session_count || 0 }} reuniones</strong>
+                <span>{{ row.matched_count || 0 }} con Zoom</span>
+                <span>{{ row.pending_audit_count || 0 }} pendientes de auditoria</span>
               </div>
             </td>
             <td class="action-col">
-              <button type="button" class="btn btn-primary btn-sm" (click)="openDetail(row)">
-                Abrir detalle
+              <button type="button" class="btn btn-primary btn-sm" (click)="openSessions(row)">
+                Ver sesiones
               </button>
             </td>
           </tr>
@@ -213,21 +214,21 @@
         </div>
 
         <div class="pagination-actions">
-          <button type="button" class="page-btn" (click)="goToFirstPage()" [disabled]="page <= 1">|<</button>
-          <button type="button" class="page-btn" (click)="goToPreviousPage()" [disabled]="page <= 1"><</button>
-          <button type="button" class="page-btn" (click)="goToNextPage()" [disabled]="page >= totalPages">></button>
-          <button type="button" class="page-btn" (click)="goToLastPage()" [disabled]="page >= totalPages">>|</button>
+          <button type="button" class="page-btn" (click)="goToFirstPage()" [disabled]="page <= 1">|&lt;</button>
+          <button type="button" class="page-btn" (click)="goToPreviousPage()" [disabled]="page <= 1">&lt;</button>
+          <button type="button" class="page-btn" (click)="goToNextPage()" [disabled]="page >= totalPages">&gt;</button>
+          <button type="button" class="page-btn" (click)="goToLastPage()" [disabled]="page >= totalPages">&gt;|</button>
         </div>
       </div>
     </div>
 
     <ng-template #emptyState>
       <div class="empty-block" [class.empty-block-loading]="loading">
-        <h3>{{ loading ? 'Cargando reuniones creadas...' : 'No hay videoconferencias para los filtros actuales.' }}</h3>
+        <h3>{{ loading ? 'Cargando cursos/secciones...' : 'No hay grupos para los filtros actuales.' }}</h3>
         <p>
           {{
             loading
-              ? 'Consultando el registro de videoconferencias generadas y su estado de auditoría.'
+              ? 'Consultando los grupos con videoconferencias generadas y su estado de auditoria.'
               : (hasActiveFilters() ? 'Prueba con otra combinacion de filtros.' : 'Todavia no hay videoconferencias generadas para mostrar.')
           }}
         </p>
