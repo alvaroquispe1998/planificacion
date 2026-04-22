@@ -732,18 +732,29 @@
                 <span class="meta-inline">Este horario ya tiene videoconferencia(s) registrada(s) para el rango seleccionado.</span>
               </ng-container>
               <ng-template #zoomPreviewCell>
-                <strong>{{ assignmentHostLabel(getAssignmentPreview(item)) }}</strong>
-                <span [class]="assignmentStatusClass(getAssignmentPreview(item))">
-                  {{ assignmentStatusLabel(getAssignmentPreview(item)) }}
-                </span>
-                <span
-                  *ngIf="getAssignmentPreview(item)?.license_label"
-                  [class]="assignmentLicenseClass(getAssignmentPreview(item))">
-                  {{ getAssignmentPreview(item)?.license_label }}
-                </span>
-                <span *ngIf="getAssignmentPreview(item)?.message" class="meta-inline">
-                  {{ getAssignmentPreview(item)?.message }}
-                </span>
+                <ng-container *ngIf="!getAssignmentPreview(item) && item.host_rule && !item.host_rule.skip_zoom && (item.host_rule.zoom_user_email || item.host_rule.zoom_user_name); else previewOrEmpty">
+                  <strong>{{ item.host_rule.zoom_user_email || item.host_rule.zoom_user_name }}</strong>
+                  <span class="assignment-pill assignment-pill-success">
+                    {{ item.host_rule.lock_host ? 'Host fijo (Cursos Especiales)' : 'Host preferido (Cursos Especiales)' }}
+                  </span>
+                  <span *ngIf="item.host_rule.zoom_group_name" class="meta-inline">
+                    {{ item.host_rule.zoom_group_name }}
+                  </span>
+                </ng-container>
+                <ng-template #previewOrEmpty>
+                  <strong>{{ assignmentHostLabel(getAssignmentPreview(item)) }}</strong>
+                  <span [class]="assignmentStatusClass(getAssignmentPreview(item))">
+                    {{ assignmentStatusLabel(getAssignmentPreview(item)) }}
+                  </span>
+                  <span
+                    *ngIf="getAssignmentPreview(item)?.license_label"
+                    [class]="assignmentLicenseClass(getAssignmentPreview(item))">
+                    {{ getAssignmentPreview(item)?.license_label }}
+                  </span>
+                  <span *ngIf="getAssignmentPreview(item)?.message" class="meta-inline">
+                    {{ getAssignmentPreview(item)?.message }}
+                  </span>
+                </ng-template>
               </ng-template>
             </ng-template>
           </div>

@@ -111,7 +111,7 @@
               class="mode-btn"
               [class.active]="assignMode === 'unified'"
               (click)="assignMode = 'unified'"
-            >Asignacion unificada</button>
+            >Unificado</button>
             <button
               type="button"
               class="mode-btn"
@@ -295,6 +295,22 @@
       <div class="summary-item" *ngFor="let group of groupedSavedRules">
         <span class="summary-item-sec">{{ group.section_code }}</span>
         <span class="summary-item-course">{{ group.course_label }}</span>
+        <span class="summary-item-mode"
+          [class.summary-item-mode--unified]="isUnifiedRuleGroup(group.rules)"
+          [class.summary-item-mode--per-schedule]="!isUnifiedRuleGroup(group.rules)">
+          {{ isUnifiedRuleGroup(group.rules) ? 'Unificado' : 'Por horario' }}
+        </span>
+        <!-- Schedule blocks: merged when unified, per-group when "Por horario" -->
+        <div class="summary-item-schedules">
+          <div class="summary-sched-block" *ngFor="let blk of scheduleBlocksForGroup(group.rules)">
+            <span class="summary-sched-groups">
+              <ng-container *ngFor="let g of blk.groups; let last = last">
+                Grupo {{ g }}<span *ngIf="!last">, </span>
+              </ng-container>
+            </span>
+            <span class="summary-sched-when">{{ blk.day_label }} {{ blk.start_time }}–{{ blk.end_time }}</span>
+          </div>
+        </div>
         <!-- Badge: summarise the rules in this section -->
         <div class="summary-item-badges">
           <ng-container *ngFor="let r of group.rules">
