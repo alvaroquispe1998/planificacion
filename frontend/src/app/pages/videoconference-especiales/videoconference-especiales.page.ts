@@ -120,6 +120,66 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
     return Array.from(map.values());
   }
 
+  private readonly dayLabels: Record<string, string> = {
+    MONDAY: 'Lunes', TUESDAY: 'Martes', WEDNESDAY: 'Miercoles', THURSDAY: 'Jueves',
+    FRIDAY: 'Viernes', SATURDAY: 'Sabado', SUNDAY: 'Domingo',
+  };
+
+  private formatHHmm(t: string | null): string {
+    if (!t) return '';
+    // "HH:MM:SS" -> "HH:MM"
+    const m = /^(\d{2}:\d{2})/.exec(t);
+    return m ? m[1] : t;
+  }
+
+  isUnifiedRuleGroup(rules: VcScheduleHostRule[]): boolean {
+    if (rules.length < 2) return false;
+    if (rules.some((r) => r.skip_zoom)) return false;
+    const sig = new Set(rules.map((r) => `${r.zoom_group_id ?? ''}|${r.zoom_user_id ?? ''}|${r.lock_host ? '1' : '0'}`));
+    return sig.size === 1;
+  }
+
+  scheduleBlocksForGroup(rules: VcScheduleHostRule[]): Array<{ groups: string[]; day_label: string; start_time: string; end_time: string }> {
+    const unified = this.isUnifiedRuleGroup(rules);
+    if (unified) {
+      // Merge consecutive same-day rules into blocks
+      const byDay = new Map<string, { day_label: string; rows: { group: string; start_time: string; end_time: string }[] }>();
+      for (const r of rules) {
+        const day = r.day_of_week ?? '';
+        const entry = byDay.get(day) ?? { day_label: this.dayLabels[day] ?? day, rows: [] };
+        entry.rows.push({
+          group: r.subsection_code ?? '',
+          start_time: this.formatHHmm(r.start_time),
+          end_time: this.formatHHmm(r.end_time),
+        });
+        byDay.set(day, entry);
+      }
+      const result: Array<{ groups: string[]; day_label: string; start_time: string; end_time: string }> = [];
+      for (const { day_label, rows } of byDay.values()) {
+        rows.sort((a, b) => a.start_time.localeCompare(b.start_time));
+        let block: { groups: string[]; start_time: string; end_time: string } | null = null;
+        for (const row of rows) {
+          if (block && row.start_time <= block.end_time) {
+            block.groups.push(row.group);
+            if (row.end_time > block.end_time) block.end_time = row.end_time;
+          } else {
+            if (block) result.push({ ...block, day_label });
+            block = { groups: [row.group], start_time: row.start_time, end_time: row.end_time };
+          }
+        }
+        if (block) result.push({ ...block, day_label });
+      }
+      return result;
+    }
+    // Por horario: one block per rule
+    return rules.map((r) => ({
+      groups: [r.subsection_code ?? ''],
+      day_label: this.dayLabels[r.day_of_week ?? ''] ?? (r.day_of_week ?? ''),
+      start_time: this.formatHHmm(r.start_time),
+      end_time: this.formatHHmm(r.end_time),
+    }));
+  }
+
   editFromGlobalSummary(group: { section_id: string; section_code: string; course_id: string | null; course_label: string | null }) {
     const scrollToConfig = () => {
       setTimeout(() => {

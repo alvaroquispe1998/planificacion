@@ -425,6 +425,10 @@ export interface VcScheduleHostRule {
     section_code: string;
     course_id: string | null;
     course_label: string | null;
+    subsection_code: string | null;
+    day_of_week: string | null;
+    start_time: string | null;
+    end_time: string | null;
 }
 
 export interface VideoconferenceInheritanceCandidateItem {

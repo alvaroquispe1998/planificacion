@@ -2418,9 +2418,13 @@ export class VideoconferenceService implements OnModuleInit {
             .addSelect('rule.updated_at', 'updated_at')
             .addSelect('sec.id', 'section_id')
             .addSelect('sec.code', 'section_code')
-            .addSelect('offer.vc_course_id', 'course_id')
+            .addSelect('offer.study_plan_course_id', 'course_id')
             .addSelect('offer.course_code', 'course_code')
             .addSelect('offer.course_name', 'course_name')
+            .addSelect('sub.code', 'subsection_code')
+            .addSelect('sched.day_of_week', 'day_of_week')
+            .addSelect('sched.start_time', 'start_time')
+            .addSelect('sched.end_time', 'end_time')
             .orderBy('offer.course_code', 'ASC')
             .addOrderBy('sec.code', 'ASC')
             .getRawMany<Record<string, unknown>>();
@@ -2442,6 +2446,10 @@ export class VideoconferenceService implements OnModuleInit {
             section_code: readString(r.section_code),
             course_id: readNullableString(r.course_id),
             course_label: [readNullableString(r.course_code), readNullableString(r.course_name)].filter(Boolean).join(' - ') || null,
+            subsection_code: readNullableString(r.subsection_code),
+            day_of_week: readNullableString(r.day_of_week),
+            start_time: readNullableString(r.start_time),
+            end_time: readNullableString(r.end_time),
         }));
     }
 
