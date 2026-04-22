@@ -5463,7 +5463,7 @@ export class VideoconferenceService implements OnModuleInit {
             if (cache.has(date)) {
                 continue;
             }
-            cache.set(date, rows.filter((row) => sameAkademicDate(row.date, date)));
+            cache.set(date, rows.filter((row) => isAkademicDateWithinDays(row.date, date, 1)));
         }
         return cache;
     }
@@ -5774,7 +5774,7 @@ export class VideoconferenceService implements OnModuleInit {
                 name: string;
                 sectionId: string;
                 date: string;
-                matchType: 'section_and_date' | 'topic_and_date';
+                matchType: 'section_and_date' | 'topic_and_date' | 'section_topic_near_date';
             } | null = null;
 
             try {
@@ -5797,13 +5797,27 @@ export class VideoconferenceService implements OnModuleInit {
                             normalizeLoose(row.name) === normalizeLoose(parent.topic),
                     ) ??
                     null;
-                if (topicOnlyMatch) {
+                const nearDateMatch =
+                    topicOnlyMatch ??
+                    listings.find(
+                        (row) =>
+                            !sameAkademicDate(row.date, akademicDate) &&
+                            isAkademicDateWithinDays(row.date, akademicDate, 1) &&
+                            parentSectionCandidates.includes(normalizeIdForCompare(row.sectionId)) &&
+                            normalizeLoose(row.name) === normalizeLoose(parent.topic),
+                    ) ??
+                    null;
+                if (nearDateMatch) {
                     akademicConference = {
-                        id: topicOnlyMatch.id,
-                        name: topicOnlyMatch.name,
-                        sectionId: topicOnlyMatch.sectionId,
-                        date: topicOnlyMatch.date,
-                        matchType: exactMatch ? 'section_and_date' : 'topic_and_date',
+                        id: nearDateMatch.id,
+                        name: nearDateMatch.name,
+                        sectionId: nearDateMatch.sectionId,
+                        date: nearDateMatch.date,
+                        matchType: exactMatch
+                            ? 'section_and_date'
+                            : topicOnlyMatch
+                                ? 'topic_and_date'
+                                : 'section_topic_near_date',
                     };
                 }
             } catch (error) {
@@ -6604,6 +6618,26 @@ function normalizeAkademicDate(value: string | null | undefined) {
 
 function sameAkademicDate(left: string | null | undefined, right: string | null | undefined) {
     return normalizeAkademicDate(left) === normalizeAkademicDate(right);
+}
+
+function parseAkademicDateUtc(value: string | null | undefined) {
+    const normalized = normalizeAkademicDate(value);
+    const match = normalized.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (!match) {
+        return null;
+    }
+    const [, day, month, year] = match;
+    return Date.UTC(Number(year), Number(month) - 1, Number(day));
+}
+
+function isAkademicDateWithinDays(left: string | null | undefined, right: string | null | undefined, maxDays: number) {
+    const leftTime = parseAkademicDateUtc(left);
+    const rightTime = parseAkademicDateUtc(right);
+    if (leftTime === null || rightTime === null) {
+        return sameAkademicDate(left, right);
+    }
+    const diffDays = Math.abs(leftTime - rightTime) / 86_400_000;
+    return diffDays <= maxDays;
 }
 
 function normalizeIdForCompare(value: string | null | undefined) {

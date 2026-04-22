@@ -160,6 +160,9 @@ export class VideoconferenceAkademicCopyPageComponent {
     if (!row.akademicConference) {
       return 'Sin ID Akademic';
     }
+    if (row.akademicConference.matchType === 'section_topic_near_date') {
+      return 'Match por fecha cercana';
+    }
     return row.akademicConference.matchType === 'exact_section_and_topic'
       || row.akademicConference.matchType === 'section_and_date'
       ? 'Match exacto'
