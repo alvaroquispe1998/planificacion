@@ -373,6 +373,18 @@ export class CopyAkademicInheritancesDto {
     planningOfferId?: string;
 }
 
+export class PreviewAkademicInheritanceCopyDto {
+    @IsDateString()
+    dateFrom!: string;
+
+    @IsDateString()
+    dateTo!: string;
+
+    @IsOptional()
+    @IsString()
+    parentVcSectionId?: string;
+}
+
 export class CreateVideoconferenceInheritanceDto {
     @IsString()
     parentScheduleId!: string;

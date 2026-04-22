@@ -1,0 +1,164 @@
+<section class="akademic-copy-page">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Revision operativa</p>
+      <h1>Copias Akademic</h1>
+      <p class="hero-copy">
+        Lista videoconferencias padre por fecha, resuelve su ID real en Aula Virtual y revisa el payload que se enviaria a cada seccion hija.
+      </p>
+    </div>
+    <div class="hero-actions">
+      <a class="btn btn-secondary" routerLink="/videoconferences/inheritances">Ver herencias</a>
+      <button type="button" class="btn btn-primary" (click)="loadPreview()" [disabled]="loading">
+        {{ loading ? 'Buscando...' : 'Buscar' }}
+      </button>
+    </div>
+  </header>
+
+  <section class="stats-grid">
+    <article class="stat-card">
+      <span>Total</span>
+      <strong>{{ totals.total }}</strong>
+      <small>Padres encontrados</small>
+    </article>
+    <article class="stat-card">
+      <span>Listos</span>
+      <strong>{{ totals.ready }}</strong>
+      <small>Con ID Akademic e hijos validos</small>
+    </article>
+    <article class="stat-card">
+      <span>Por revisar</span>
+      <strong>{{ totals.attention }}</strong>
+      <small>Sin ID, sin hijos o datos incompletos</small>
+    </article>
+  </section>
+
+  <section class="panel filters-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Filtros</p>
+        <h2>Consulta por fecha</h2>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" (click)="clearFilters()" [disabled]="loading">
+        Limpiar
+      </button>
+    </div>
+
+    <div class="filters-grid">
+      <label class="field">
+        <span>Fecha inicio</span>
+        <input type="date" [(ngModel)]="filters.dateFrom" />
+      </label>
+      <label class="field">
+        <span>Fecha fin</span>
+        <input type="date" [(ngModel)]="filters.dateTo" />
+      </label>
+      <label class="field field-wide">
+        <span>ID seccion padre</span>
+        <input
+          type="text"
+          [(ngModel)]="filters.parentVcSectionId"
+          placeholder="Opcional: vc_section_id padre" />
+      </label>
+    </div>
+
+    <p *ngIf="error" class="feedback error">{{ error }}</p>
+  </section>
+
+  <section class="panel results-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Resultado</p>
+        <h2>Padres con herencias activas</h2>
+      </div>
+      <span class="count">{{ rows.length }} registros</span>
+    </div>
+
+    <div *ngIf="loading" class="loading-state">Consultando Aula Virtual y preparando payloads...</div>
+
+    <ng-container *ngIf="!loading">
+      <div class="empty-state" *ngIf="hasSearched && rows.length === 0">
+        No se encontraron videoconferencias padre con herencias activas para el rango seleccionado.
+      </div>
+      <div class="empty-state" *ngIf="!hasSearched">
+        Define una fecha y ejecuta la busqueda para revisar payloads antes de copiar.
+      </div>
+
+      <article class="parent-card" *ngFor="let row of rows">
+        <div class="parent-main">
+          <div>
+            <span class="status-pill" [ngClass]="statusClass(row.status)">{{ statusLabel(row) }}</span>
+            <h3>{{ row.courseLabel }}</h3>
+            <p>{{ row.parentSectionExternalCode || row.parentSectionCode || 'Seccion padre' }} | Grupo {{ row.parentSubsectionCode || '-' }}</p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" (click)="toggleExpanded(row)">
+            {{ isExpanded(row) ? 'Ocultar hijos' : 'Ver hijos' }}
+          </button>
+        </div>
+
+        <div class="meta-grid">
+          <div>
+            <span>Fecha</span>
+            <strong>{{ row.conferenceDate }}</strong>
+            <small>Akademic: {{ row.akademicDate }}</small>
+          </div>
+          <div>
+            <span>ID seccion padre</span>
+            <strong>{{ row.parentVcSectionId || 'Sin ID' }}</strong>
+          </div>
+          <div>
+            <span>ID videoconferencia Akademic</span>
+            <strong>{{ row.akademicConference?.id || 'No encontrado' }}</strong>
+            <small>{{ matchLabel(row) }}</small>
+          </div>
+          <div>
+            <span>Hijos</span>
+            <strong>{{ row.children.length }}</strong>
+            <small>{{ row.akademicCopyStatus || 'Sin marca de copia' }}</small>
+          </div>
+        </div>
+
+        <div class="topic-block">
+          <span>Topic</span>
+          <code>{{ row.topic || '(sin topic)' }}</code>
+          <small *ngIf="row.lookupError">{{ row.lookupError }}</small>
+        </div>
+
+        <div class="children-list" *ngIf="isExpanded(row)">
+          <article class="child-row" *ngFor="let child of row.children">
+            <div>
+              <strong>{{ childLabel(child) }}</strong>
+              <span>ID seccion hija: {{ child.childVcSectionId || 'Sin vc_section_id' }}</span>
+              <span>Schedule: {{ child.childScheduleId }}</span>
+            </div>
+            <div class="child-actions">
+              <span class="status-pill" [ngClass]="statusClass(child.status)">
+                {{ childStatusLabel(child) }}
+              </span>
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                (click)="openPayload(child, row)"
+                [disabled]="!child.payload">
+                Ver payload
+              </button>
+            </div>
+          </article>
+        </div>
+      </article>
+    </ng-container>
+  </section>
+
+  <section class="modal-backdrop" *ngIf="payloadPreviewOpen" (click)="closePayload()">
+    <article class="modal-card" (click)="$event.stopPropagation()">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Payload</p>
+          <h2>{{ payloadPreviewTitle }}</h2>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="closePayload()">Cerrar</button>
+      </div>
+      <pre>{{ payloadPreviewJson }}</pre>
+    </article>
+  </section>
+</section>

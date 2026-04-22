@@ -20,6 +20,7 @@ export type PermissionCode =
   | 'action.videoconferences.zoom_config.view'
   | 'action.videoconferences.management.view'
   | 'action.videoconferences.inheritances.view'
+  | 'action.videoconferences.akademic_copy.view'
   | 'action.videoconferences.zoom_users.view'
   | 'action.videoconferences.cursos_especiales.view'
   | 'action.videoconferences.reprogramaciones.view'

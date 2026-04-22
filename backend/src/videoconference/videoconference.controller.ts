@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Body, Query, Delete, Param, Patch } from '@nestjs/common';
-import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
+import { ACTION_PERMISSIONS, WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { VideoconferenceService } from './videoconference.service';
 import {
@@ -10,6 +10,7 @@ import {
     CreateVideoconferenceInheritanceDto,
     FilterOptionsDto,
     GenerateVideoconferenceDto,
+    PreviewAkademicInheritanceCopyDto,
     PreviewVideoconferenceInheritanceCandidatesDto,
     PreviewVideoconferenceDto,
     UpdateHostRuleDto,
@@ -166,5 +167,11 @@ export class VideoconferenceController {
     @Post('copy-akademic-inheritances')
     async copyAkademicInheritances(@Body() payload: CopyAkademicInheritancesDto) {
         return this.service.executeAkademicInheritanceCopy(payload);
+    }
+
+    @Post('akademic-inheritance-copy/preview')
+    @RequirePermissions(ACTION_PERMISSIONS.VIDEOCONFERENCES_AKADEMIC_COPY_VIEW)
+    async previewAkademicInheritanceCopy(@Body() payload: PreviewAkademicInheritanceCopyDto) {
+        return this.service.previewAkademicInheritanceCopy(payload);
     }
 }

@@ -18,6 +18,7 @@ import { SecurityPageComponent } from './pages/security/security.page';
 import { SettingsPageComponent } from './pages/settings/settings.page';
 import { VideoconferenceZoomConfigPageComponent } from './pages/videoconference-zoom-config/videoconference-zoom-config.page';
 import { VideoconferenceInheritancesPageComponent } from './pages/videoconference-inheritances/videoconference-inheritances.page';
+import { VideoconferenceAkademicCopyPageComponent } from './pages/videoconference-akademic-copy/videoconference-akademic-copy.page';
 import { VideoconferenceZoomUsersPageComponent } from './pages/videoconference-zoom-users/videoconference-zoom-users.page';
 import { VideoconferenceReschedulesPageComponent } from './pages/videoconference-reschedules/videoconference-reschedules.page';
 
@@ -118,6 +119,15 @@ export const routes: Routes = [
     data: {
       requiredWindow: 'window.videoconferences',
       requiredPermission: 'action.videoconferences.inheritances.view',
+    },
+  },
+  {
+    path: 'videoconferences/akademic-copy',
+    component: VideoconferenceAkademicCopyPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.videoconferences',
+      requiredPermission: 'action.videoconferences.akademic_copy.view',
     },
   },
   {
