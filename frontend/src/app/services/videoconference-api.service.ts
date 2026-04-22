@@ -429,6 +429,10 @@ export interface AkademicInheritanceCopyPreviewChild {
     inheritanceId: string;
     childScheduleId: string;
     childVcSectionId: string | null;
+    childSourceSectionId: string | null;
+    childEffectiveVcSectionId: string | null;
+    childVcSectionName: string | null;
+    childDestinationSectionId: string | null;
     childSectionCode: string | null;
     childSectionExternalCode: string | null;
     childSubsectionCode: string | null;
@@ -440,6 +444,9 @@ export interface AkademicInheritanceCopyPreviewItem {
     parentLocalVideoconferenceId: string;
     parentScheduleId: string;
     parentVcSectionId: string | null;
+    parentSourceSectionId: string | null;
+    parentEffectiveVcSectionId: string | null;
+    parentVcSectionName: string | null;
     parentSectionCode: string | null;
     parentSectionExternalCode: string | null;
     parentSubsectionCode: string | null;

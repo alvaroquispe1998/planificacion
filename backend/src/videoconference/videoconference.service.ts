@@ -5619,6 +5619,11 @@ export class VideoconferenceService implements OnModuleInit {
             .innerJoin(PlanningSubsectionEntity, 'sub', 'sub.id = vc.planning_subsection_id')
             .innerJoin(PlanningSectionEntity, 'section', 'section.id = vc.planning_section_id')
             .innerJoin(PlanningOfferEntity, 'offer', 'offer.id = vc.planning_offer_id')
+            .leftJoin(
+                VcSectionEntity,
+                'parent_av_section',
+                'parent_av_section.id = COALESCE(sub.vc_section_id, section.source_section_id)',
+            )
             .innerJoin(
                 PlanningSubsectionScheduleVcInheritanceEntity,
                 'inh',
@@ -5637,6 +5642,9 @@ export class VideoconferenceService implements OnModuleInit {
             .addSelect('sub.code', 'parent_subsection_code')
             .addSelect('section.code', 'parent_section_code')
             .addSelect('section.external_code', 'parent_section_external_code')
+            .addSelect('section.source_section_id', 'parent_source_section_id')
+            .addSelect('parent_av_section.id', 'parent_effective_vc_section_id')
+            .addSelect('parent_av_section.name', 'parent_vc_section_name')
             .addSelect('offer.course_code', 'course_code')
             .addSelect('offer.course_name', 'course_name')
             .distinct(true)
@@ -5644,7 +5652,14 @@ export class VideoconferenceService implements OnModuleInit {
             .addOrderBy('vc.topic', 'ASC');
 
         if (parentVcSectionId) {
-            baseQuery.andWhere('sub.vc_section_id = :parentVcSectionId', { parentVcSectionId });
+            baseQuery.andWhere(
+                `(
+                    sub.vc_section_id = :parentVcSectionId
+                    OR section.source_section_id = :parentVcSectionId
+                    OR parent_av_section.id = :parentVcSectionId
+                )`,
+                { parentVcSectionId },
+            );
         }
 
         const parentRows = await baseQuery.getRawMany<{
@@ -5654,6 +5669,9 @@ export class VideoconferenceService implements OnModuleInit {
             conference_date: string;
             akademic_copy_status: string | null;
             parent_vc_section_id: string | null;
+            parent_source_section_id: string | null;
+            parent_effective_vc_section_id: string | null;
+            parent_vc_section_name: string | null;
             parent_subsection_code: string | null;
             parent_section_code: string | null;
             parent_section_external_code: string | null;
@@ -5686,7 +5704,12 @@ export class VideoconferenceService implements OnModuleInit {
                 const exactMatch = listings.find(
                     (row) =>
                         row.name === parent.topic &&
-                        (!parent.parent_vc_section_id || row.sectionId === parent.parent_vc_section_id),
+                        (
+                            !parent.parent_effective_vc_section_id && !parent.parent_vc_section_id && !parent.parent_source_section_id ||
+                            row.sectionId === parent.parent_effective_vc_section_id ||
+                            row.sectionId === parent.parent_vc_section_id ||
+                            row.sectionId === parent.parent_source_section_id
+                        ),
                 ) ?? null;
                 const topicOnlyMatch = exactMatch ?? listings.find((row) => row.name === parent.topic) ?? null;
                 if (topicOnlyMatch) {
@@ -5706,6 +5729,11 @@ export class VideoconferenceService implements OnModuleInit {
                 .createQueryBuilder('sched')
                 .innerJoin(PlanningSubsectionEntity, 'child_sub', 'child_sub.id = sched.planning_subsection_id')
                 .innerJoin(PlanningSectionEntity, 'child_section', 'child_section.id = child_sub.planning_section_id')
+                .leftJoin(
+                    VcSectionEntity,
+                    'child_av_section',
+                    'child_av_section.id = COALESCE(child_sub.vc_section_id, child_section.source_section_id)',
+                )
                 .innerJoin(
                     PlanningSubsectionScheduleVcInheritanceEntity,
                     'inh',
@@ -5715,6 +5743,9 @@ export class VideoconferenceService implements OnModuleInit {
                 .select('inh.id', 'inheritance_id')
                 .addSelect('sched.id', 'child_schedule_id')
                 .addSelect('child_sub.vc_section_id', 'child_vc_section_id')
+                .addSelect('child_section.source_section_id', 'child_source_section_id')
+                .addSelect('child_av_section.id', 'child_effective_vc_section_id')
+                .addSelect('child_av_section.name', 'child_vc_section_name')
                 .addSelect('child_sub.code', 'child_subsection_code')
                 .addSelect('child_section.code', 'child_section_code')
                 .addSelect('child_section.external_code', 'child_section_external_code')
@@ -5724,22 +5755,33 @@ export class VideoconferenceService implements OnModuleInit {
                     inheritance_id: string;
                     child_schedule_id: string;
                     child_vc_section_id: string | null;
+                    child_source_section_id: string | null;
+                    child_effective_vc_section_id: string | null;
+                    child_vc_section_name: string | null;
                     child_subsection_code: string | null;
                     child_section_code: string | null;
                     child_section_external_code: string | null;
                 }>();
 
             const children = childRows.map((child) => {
+                const childDestinationSectionId =
+                    child.child_effective_vc_section_id ??
+                    child.child_vc_section_id ??
+                    child.child_source_section_id;
                 const childStatus =
                     !akademicConference
                         ? 'MISSING_AKADEMIC_CONFERENCE'
-                        : !child.child_vc_section_id
+                        : !childDestinationSectionId
                             ? 'MISSING_CHILD_SECTION'
                             : 'READY';
                 return {
                     inheritanceId: child.inheritance_id,
                     childScheduleId: child.child_schedule_id,
                     childVcSectionId: child.child_vc_section_id,
+                    childSourceSectionId: child.child_source_section_id,
+                    childEffectiveVcSectionId: child.child_effective_vc_section_id,
+                    childVcSectionName: child.child_vc_section_name,
+                    childDestinationSectionId,
                     childSectionCode: child.child_section_code,
                     childSectionExternalCode: child.child_section_external_code,
                     childSubsectionCode: child.child_subsection_code,
@@ -5747,7 +5789,7 @@ export class VideoconferenceService implements OnModuleInit {
                         ? {
                             id: akademicConference?.id ?? '',
                             name: parent.topic ?? '',
-                            sectionIdTo: child.child_vc_section_id ?? '',
+                            sectionIdTo: childDestinationSectionId ?? '',
                         }
                         : null,
                     status: childStatus,
@@ -5769,6 +5811,9 @@ export class VideoconferenceService implements OnModuleInit {
                 parentLocalVideoconferenceId: parent.vc_id,
                 parentScheduleId: parent.schedule_id,
                 parentVcSectionId: parent.parent_vc_section_id,
+                parentSourceSectionId: parent.parent_source_section_id,
+                parentEffectiveVcSectionId: parent.parent_effective_vc_section_id,
+                parentVcSectionName: parent.parent_vc_section_name,
                 parentSectionCode: parent.parent_section_code,
                 parentSectionExternalCode: parent.parent_section_external_code,
                 parentSubsectionCode: parent.parent_subsection_code,

@@ -58,7 +58,7 @@
         <input
           type="text"
           [(ngModel)]="filters.parentVcSectionId"
-          placeholder="Opcional: vc_section_id padre" />
+          placeholder="Opcional: source_section_id o vc_section_id padre" />
       </label>
     </div>
 
@@ -103,8 +103,10 @@
             <small>Akademic: {{ row.akademicDate }}</small>
           </div>
           <div>
-            <span>ID seccion padre</span>
-            <strong>{{ row.parentVcSectionId || 'Sin ID' }}</strong>
+            <span>ID AV padre</span>
+            <strong>{{ row.parentEffectiveVcSectionId || row.parentVcSectionId || row.parentSourceSectionId || 'Sin ID AV' }}</strong>
+            <small>{{ row.parentVcSectionName || 'Sin nombre en vc_sections' }}</small>
+            <small>source_section_id: {{ row.parentSourceSectionId || 'Sin ID' }}</small>
           </div>
           <div>
             <span>ID videoconferencia Akademic</span>
@@ -128,7 +130,11 @@
           <article class="child-row" *ngFor="let child of row.children">
             <div>
               <strong>{{ childLabel(child) }}</strong>
+              <span>Seccion AV: {{ child.childVcSectionName || 'Sin nombre en vc_sections' }}</span>
               <span>ID seccion hija: {{ child.childVcSectionId || 'Sin vc_section_id' }}</span>
+              <span>source_section_id hija: {{ child.childSourceSectionId || 'Sin ID' }}</span>
+              <span>ID AV efectivo: {{ child.childEffectiveVcSectionId || 'Sin match vc_sections' }}</span>
+              <span>sectionIdTo payload: {{ child.childDestinationSectionId || 'Sin destino' }}</span>
               <span>Schedule: {{ child.childScheduleId }}</span>
             </div>
             <div class="child-actions">
