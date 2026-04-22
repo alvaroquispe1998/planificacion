@@ -485,6 +485,26 @@ export class ApiService {
     return this.http.get<any>(`${this.baseUrl}/audit/planning-videoconferences`, { params });
   }
 
+  listPlanningVideoconferenceGroups(filters: Record<string, string | number | boolean | undefined> = {}) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}` !== '') {
+        params = params.set(key, String(value));
+      }
+    });
+    return this.http.get<any>(`${this.baseUrl}/audit/planning-videoconference-groups`, { params });
+  }
+
+  listPlanningVideoconferenceSessions(filters: Record<string, string | number | boolean | undefined> = {}) {
+    let params = new HttpParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}` !== '') {
+        params = params.set(key, String(value));
+      }
+    });
+    return this.http.get<any>(`${this.baseUrl}/audit/planning-videoconference-sessions`, { params });
+  }
+
   getPlanningVideoconferenceAuditDetail(id: string) {
     return this.http.get<any>(`${this.baseUrl}/audit/planning-videoconferences/${id}`);
   }

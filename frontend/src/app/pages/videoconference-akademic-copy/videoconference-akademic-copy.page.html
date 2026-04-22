@@ -16,21 +16,26 @@
   </header>
 
   <section class="stats-grid">
-    <article class="stat-card">
+    <button type="button" class="stat-card stat-filter" [class.is-active]="summaryActive('all')" (click)="setSummaryFilter('all')">
       <span>Total</span>
       <strong>{{ totals.total }}</strong>
       <small>Padres encontrados</small>
-    </article>
-    <article class="stat-card">
-      <span>Listos</span>
-      <strong>{{ totals.ready }}</strong>
-      <small>Con ID Akademic e hijos validos</small>
-    </article>
-    <article class="stat-card">
+    </button>
+    <button type="button" class="stat-card stat-filter" [class.is-active]="summaryActive('created')" (click)="setSummaryFilter('created')">
+      <span>Ya creadas</span>
+      <strong>{{ totals.created }}</strong>
+      <small>Hijos clonados</small>
+    </button>
+    <button type="button" class="stat-card stat-filter" [class.is-active]="summaryActive('pending')" (click)="setSummaryFilter('pending')">
+      <span>Por crear</span>
+      <strong>{{ totals.pending }}</strong>
+      <small>Payload listo sin clonar</small>
+    </button>
+    <button type="button" class="stat-card stat-filter" [class.is-active]="summaryActive('review')" (click)="setSummaryFilter('review')">
       <span>Por revisar</span>
       <strong>{{ totals.attention }}</strong>
       <small>Sin ID, sin hijos o datos incompletos</small>
-    </article>
+    </button>
   </section>
 
   <section class="panel filters-panel">
@@ -53,6 +58,13 @@
         <span>Fecha fin</span>
         <input type="date" [(ngModel)]="filters.dateTo" />
       </label>
+      <label class="field">
+        <span>Codigo curso</span>
+        <input
+          type="text"
+          [(ngModel)]="filters.courseCode"
+          placeholder="Opcional: P01-202011-20A35" />
+      </label>
       <label class="field field-wide">
         <span>ID seccion padre</span>
         <input
@@ -71,8 +83,18 @@
         <p class="eyebrow">Resultado</p>
         <h2>Padres con herencias activas</h2>
       </div>
-      <span class="count">{{ rows.length }} registros</span>
+      <div class="results-actions">
+        <span class="count">{{ visibleRows.length }} / {{ rows.length }} registros</span>
+        <button
+          type="button"
+          class="btn btn-success btn-sm"
+          (click)="cloneVisibleVideoconferences()"
+          [disabled]="loading || bulkCloning || cloneableVisibleChildren.length === 0">
+          {{ bulkCloning ? bulkProgress : 'Clonar videoconferencias listadas' }}
+        </button>
+      </div>
     </div>
+    <p *ngIf="bulkProgress && !bulkCloning" class="bulk-message">{{ bulkProgress }}</p>
 
     <div *ngIf="loading" class="loading-state">Consultando Aula Virtual y preparando payloads...</div>
 
@@ -84,7 +106,7 @@
         Define una fecha y ejecuta la busqueda para revisar payloads antes de copiar.
       </div>
 
-      <article class="parent-card" *ngFor="let row of rows">
+      <article class="parent-card" *ngFor="let row of visibleRows">
         <div class="parent-main">
           <div>
             <span class="status-pill" [ngClass]="statusClass(row.status)">{{ statusLabel(row) }}</span>
@@ -152,7 +174,7 @@
                 type="button"
                 class="btn btn-success btn-sm"
                 (click)="cloneChild(child, row)"
-                [disabled]="!child.payload || isCloning(child) || isAlreadyCopied(child)">
+                [disabled]="!child.payload || isCloning(child) || isAlreadyCopied(child) || bulkCloning">
                 {{ isAlreadyCopied(child) ? 'Ya clonada' : isCloning(child) ? 'Clonando...' : 'Clonar videoconferencia' }}
               </button>
             </div>

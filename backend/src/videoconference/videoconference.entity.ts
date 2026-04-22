@@ -19,6 +19,13 @@ export const PlanningSubsectionVideoconferenceAkademicCopyStatusValues = [
     'ERROR',
 ] as const;
 
+export const PlanningSubsectionVideoconferenceDeleteStatusValues = [
+    'PENDING',
+    'DELETING',
+    'DELETED',
+    'ERROR',
+] as const;
+
 export const PlanningSubsectionVideoconferenceLinkModeValues = [
     'OWNED',
     'INHERITED',
@@ -446,6 +453,29 @@ export class PlanningSubsectionVideoconferenceEntity {
         default: null,
     })
     akademic_copy_status!: (typeof PlanningSubsectionVideoconferenceAkademicCopyStatusValues)[number] | null;
+
+    @Column({
+        type: 'enum',
+        enum: PlanningSubsectionVideoconferenceDeleteStatusValues,
+        nullable: true,
+        default: null,
+    })
+    delete_status!: (typeof PlanningSubsectionVideoconferenceDeleteStatusValues)[number] | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    deleted_at!: Date | null;
+
+    @Column({ type: 'varchar', length: 120, nullable: true })
+    deleted_by!: string | null;
+
+    @Column({ type: 'text', nullable: true })
+    delete_error!: string | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    zoom_deleted_at!: Date | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    akademic_deleted_at!: Date | null;
 
     @Column({ type: 'datetime' })
     created_at!: Date;

@@ -92,6 +92,12 @@ type PlanningAuditListRow = {
   audit_sync_status: string | null;
   audit_synced_at: Date | null;
   audit_sync_error: string | null;
+  delete_status: string | null;
+  deleted_at: Date | null;
+  deleted_by: string | null;
+  delete_error: string | null;
+  zoom_deleted_at: Date | null;
+  akademic_deleted_at: Date | null;
   error_message: string | null;
   semester_id: string | null;
   semester_name: string | null;
@@ -106,6 +112,7 @@ type PlanningAuditListRow = {
   course_name: string | null;
   section_code: string;
   section_external_code: string | null;
+  section_source_section_id: string | null;
   subsection_code: string;
   subsection_kind: string | null;
   subsection_denomination: string | null;
@@ -132,8 +139,13 @@ type PlanningAuditFilters = {
   academic_program_id?: string;
   status?: string;
   audit_sync_status?: string;
+  course_code?: string;
+  planning_section_id?: string;
+  source_section_id?: string;
+  planning_subsection_id?: string;
   search?: string;
   hide_inherited?: boolean;
+  show_deleted?: boolean;
 };
 
 @Injectable()
@@ -433,6 +445,12 @@ export class AuditService {
         audit_sync_status: this.normalizeAuditSyncStatus(row.audit_sync_status),
         audit_synced_at: row.audit_synced_at,
         audit_sync_error: row.audit_sync_error,
+        delete_status: row.delete_status,
+        deleted_at: row.deleted_at,
+        deleted_by: row.deleted_by,
+        delete_error: row.delete_error,
+        zoom_deleted_at: row.zoom_deleted_at,
+        akademic_deleted_at: row.akademic_deleted_at,
         error_message: row.error_message,
         semester_id: row.semester_id,
         semester_name: row.semester_name,
@@ -447,6 +465,7 @@ export class AuditService {
         course_name: row.course_name,
         section_code: row.section_code,
         section_external_code: row.section_external_code,
+        section_source_section_id: row.section_source_section_id,
         subsection_code: row.subsection_code,
         subsection_kind: row.subsection_kind,
         subsection_denomination: row.subsection_denomination,
@@ -484,6 +503,131 @@ export class AuditService {
       page,
       page_size: pageSize,
     };
+  }
+
+  async listPlanningVideoconferenceGroups(filters: PlanningAuditFilters & { page?: number; page_size?: number } = {}) {
+    const pageSize = Math.max(1, Math.min(100, Number(filters.page_size ?? 20) || 20));
+    const page = Math.max(1, Number(filters.page ?? 1) || 1);
+    const syncStateOutdatedSql = `(
+      section.id IS NULL OR
+      subsection.id IS NULL OR
+      schedule.id IS NULL OR
+      schedule.day_of_week != vc.day_of_week OR
+      LEFT(CAST(schedule.start_time AS CHAR), 5) != LEFT(CAST(vc.start_time AS CHAR), 5) OR
+      LEFT(CAST(schedule.end_time AS CHAR), 5) != LEFT(CAST(vc.end_time AS CHAR), 5)
+    )`;
+    const groupQuery = this.buildPlanningAuditBaseQuery(filters)
+      .select('offer.semester_id', 'semester_id')
+      .addSelect('semester.name', 'semester_name')
+      .addSelect('offer.campus_id', 'campus_id')
+      .addSelect('campus.name', 'campus_name')
+      .addSelect('offer.faculty_id', 'faculty_id')
+      .addSelect('faculty.name', 'faculty_name')
+      .addSelect('offer.academic_program_id', 'academic_program_id')
+      .addSelect('program.name', 'academic_program_name')
+      .addSelect('offer.cycle', 'cycle')
+      .addSelect('offer.id', 'planning_offer_id')
+      .addSelect('offer.course_code', 'course_code')
+      .addSelect('offer.course_name', 'course_name')
+      .addSelect('section.id', 'planning_section_id')
+      .addSelect('section.code', 'section_code')
+      .addSelect('section.external_code', 'section_external_code')
+      .addSelect('section.source_section_id', 'source_section_id')
+      .addSelect('subsection.id', 'planning_subsection_id')
+      .addSelect('subsection.code', 'subsection_code')
+      .addSelect('subsection.kind', 'subsection_kind')
+      .addSelect('subsection.denomination', 'subsection_denomination')
+      .addSelect('MIN(vc.conference_date)', 'first_conference_date')
+      .addSelect('MAX(vc.conference_date)', 'last_conference_date')
+      .addSelect('COUNT(*)', 'session_count')
+      .addSelect("SUM(CASE WHEN vc.status = 'MATCHED' THEN 1 ELSE 0 END)", 'matched_count')
+      .addSelect("SUM(CASE WHEN vc.status = 'ERROR' THEN 1 ELSE 0 END)", 'error_count')
+      .addSelect("SUM(CASE WHEN COALESCE(vc.audit_sync_status, 'PENDING') = 'PENDING' THEN 1 ELSE 0 END)", 'pending_audit_count')
+      .addSelect("SUM(CASE WHEN vc.deleted_at IS NOT NULL OR vc.delete_status = 'DELETED' THEN 1 ELSE 0 END)", 'deleted_count')
+      .addSelect(`SUM(CASE WHEN ${syncStateOutdatedSql} THEN 0 ELSE 1 END)`, 'current_count')
+      .addSelect(`SUM(CASE WHEN ${syncStateOutdatedSql} THEN 1 ELSE 0 END)`, 'outdated_count')
+      .groupBy('offer.semester_id')
+      .addGroupBy('semester.name')
+      .addGroupBy('offer.campus_id')
+      .addGroupBy('campus.name')
+      .addGroupBy('offer.faculty_id')
+      .addGroupBy('faculty.name')
+      .addGroupBy('offer.academic_program_id')
+      .addGroupBy('program.name')
+      .addGroupBy('offer.cycle')
+      .addGroupBy('offer.id')
+      .addGroupBy('offer.course_code')
+      .addGroupBy('offer.course_name')
+      .addGroupBy('section.id')
+      .addGroupBy('section.code')
+      .addGroupBy('section.external_code')
+      .addGroupBy('section.source_section_id')
+      .addGroupBy('subsection.id')
+      .addGroupBy('subsection.code')
+      .addGroupBy('subsection.kind')
+      .addGroupBy('subsection.denomination')
+      .orderBy('offer.course_code', 'ASC')
+      .addOrderBy('section.external_code', 'ASC')
+      .addOrderBy('section.code', 'ASC')
+      .addOrderBy('subsection.code', 'ASC');
+
+    const rawGroups = await groupQuery.getRawMany<Record<string, unknown>>();
+    const pageGroups = rawGroups.slice((page - 1) * pageSize, page * pageSize);
+    const items = pageGroups.map((row) => {
+      const planningOfferId = recordString(row, 'planning_offer_id');
+      const planningSectionId = recordString(row, 'planning_section_id');
+      const planningSubsectionId = recordString(row, 'planning_subsection_id');
+      return {
+        id: [planningOfferId, planningSectionId, planningSubsectionId].filter(Boolean).join('::'),
+        planning_offer_id: planningOfferId,
+        planning_section_id: planningSectionId,
+        planning_subsection_id: planningSubsectionId,
+        source_section_id: recordString(row, 'source_section_id'),
+        semester_id: recordString(row, 'semester_id'),
+        semester_name: recordString(row, 'semester_name'),
+        campus_id: recordString(row, 'campus_id'),
+        campus_name: recordString(row, 'campus_name'),
+        faculty_id: recordString(row, 'faculty_id'),
+        faculty_name: recordString(row, 'faculty_name'),
+        academic_program_id: recordString(row, 'academic_program_id'),
+        academic_program_name: recordString(row, 'academic_program_name'),
+        cycle: recordNumber(row, 'cycle'),
+        course_code: recordString(row, 'course_code'),
+        course_name: recordString(row, 'course_name'),
+        section_code: recordString(row, 'section_code'),
+        section_external_code: recordString(row, 'section_external_code'),
+        subsection_code: recordString(row, 'subsection_code'),
+        subsection_kind: recordString(row, 'subsection_kind'),
+        subsection_denomination: recordString(row, 'subsection_denomination'),
+        first_conference_date: toDateOnly(recordString(row, 'first_conference_date')),
+        last_conference_date: toDateOnly(recordString(row, 'last_conference_date')),
+        session_count: recordNumber(row, 'session_count'),
+        matched_count: recordNumber(row, 'matched_count'),
+        error_count: recordNumber(row, 'error_count'),
+        pending_audit_count: recordNumber(row, 'pending_audit_count'),
+        deleted_count: recordNumber(row, 'deleted_count'),
+        current_count: recordNumber(row, 'current_count'),
+        outdated_count: recordNumber(row, 'outdated_count'),
+      };
+    });
+
+    return {
+      items,
+      totals: {
+        total: rawGroups.length,
+        sessions: rawGroups.reduce((sum, row) => sum + recordNumber(row, 'session_count'), 0),
+        matched: rawGroups.reduce((sum, row) => sum + recordNumber(row, 'matched_count'), 0),
+        errors: rawGroups.reduce((sum, row) => sum + recordNumber(row, 'error_count'), 0),
+        pending_audit: rawGroups.reduce((sum, row) => sum + recordNumber(row, 'pending_audit_count'), 0),
+        deleted: rawGroups.reduce((sum, row) => sum + recordNumber(row, 'deleted_count'), 0),
+      },
+      page,
+      page_size: pageSize,
+    };
+  }
+
+  listPlanningVideoconferenceSessions(filters: PlanningAuditFilters & { page?: number; page_size?: number } = {}) {
+    return this.listPlanningVideoconferenceAudits(filters);
   }
 
   async getPlanningVideoconferenceAuditDetail(id: string) {
@@ -544,6 +688,12 @@ export class AuditService {
         audit_sync_status: this.normalizeAuditSyncStatus(row.audit_sync_status),
         audit_synced_at: row.audit_synced_at,
         audit_sync_error: row.audit_sync_error,
+        delete_status: row.delete_status,
+        deleted_at: row.deleted_at,
+        deleted_by: row.deleted_by,
+        delete_error: row.delete_error,
+        zoom_deleted_at: row.zoom_deleted_at,
+        akademic_deleted_at: row.akademic_deleted_at,
         error_message: row.error_message,
         semester_id: row.semester_id,
         semester_name: row.semester_name,
@@ -558,6 +708,7 @@ export class AuditService {
         course_name: row.course_name,
         section_code: row.section_code,
         section_external_code: row.section_external_code,
+        section_source_section_id: row.section_source_section_id,
         subsection_code: row.subsection_code,
         subsection_kind: row.subsection_kind,
         subsection_denomination: row.subsection_denomination,
@@ -714,6 +865,12 @@ export class AuditService {
       .addSelect('vc.audit_sync_status', 'audit_sync_status')
       .addSelect('vc.audit_synced_at', 'audit_synced_at')
       .addSelect('vc.audit_sync_error', 'audit_sync_error')
+      .addSelect('vc.delete_status', 'delete_status')
+      .addSelect('vc.deleted_at', 'deleted_at')
+      .addSelect('vc.deleted_by', 'deleted_by')
+      .addSelect('vc.delete_error', 'delete_error')
+      .addSelect('vc.zoom_deleted_at', 'zoom_deleted_at')
+      .addSelect('vc.akademic_deleted_at', 'akademic_deleted_at')
       .addSelect('vc.error_message', 'error_message')
       .addSelect('offer.semester_id', 'semester_id')
       .addSelect('semester.name', 'semester_name')
@@ -728,6 +885,7 @@ export class AuditService {
       .addSelect('offer.course_name', 'course_name')
       .addSelect('section.code', 'section_code')
       .addSelect('section.external_code', 'section_external_code')
+      .addSelect('section.source_section_id', 'section_source_section_id')
       .addSelect('subsection.code', 'subsection_code')
       .addSelect('subsection.kind', 'subsection_kind')
       .addSelect('subsection.denomination', 'subsection_denomination')
@@ -816,8 +974,31 @@ export class AuditService {
         auditStatus: filters.audit_sync_status,
       });
     }
+    if (filters.course_code) {
+      query.andWhere('LOWER(COALESCE(offer.course_code, \'\')) LIKE :courseCode', {
+        courseCode: `%${filters.course_code.toLowerCase()}%`,
+      });
+    }
+    if (filters.planning_section_id) {
+      query.andWhere('vc.planning_section_id = :planningSectionId', {
+        planningSectionId: filters.planning_section_id,
+      });
+    }
+    if (filters.source_section_id) {
+      query.andWhere('section.source_section_id = :sourceSectionId', {
+        sourceSectionId: filters.source_section_id,
+      });
+    }
+    if (filters.planning_subsection_id) {
+      query.andWhere('vc.planning_subsection_id = :planningSubsectionId', {
+        planningSubsectionId: filters.planning_subsection_id,
+      });
+    }
     if (filters.hide_inherited) {
       query.andWhere("vc.link_mode != 'INHERITED'");
+    }
+    if (!filters.show_deleted) {
+      query.andWhere('vc.deleted_at IS NULL');
     }
     const search = `${filters.search ?? ''}`.trim();
     if (search) {

@@ -5737,6 +5737,7 @@ export class VideoconferenceService implements OnModuleInit {
         dateFrom: string;
         dateTo: string;
         parentVcSectionId?: string;
+        courseCode?: string;
     }) {
         const dateFrom = normalizeIsoDate(params.dateFrom);
         const dateTo = normalizeIsoDate(params.dateTo);
@@ -5745,6 +5746,7 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         const parentVcSectionId = emptyTextToNull(params.parentVcSectionId);
+        const courseCode = emptyTextToNull(params.courseCode);
         const aulaVirtualContext = await this.getAulaVirtualRequestContext();
 
         const baseQuery = this.planningVideoconferencesRepo
@@ -5793,6 +5795,11 @@ export class VideoconferenceService implements OnModuleInit {
                 )`,
                 { parentVcSectionId },
             );
+        }
+        if (courseCode) {
+            baseQuery.andWhere('offer.course_code LIKE :courseCode', {
+                courseCode: `%${courseCode}%`,
+            });
         }
 
         const parentRows = await baseQuery.getRawMany<{

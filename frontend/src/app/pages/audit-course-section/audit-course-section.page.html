@@ -1,0 +1,138 @@
+<section class="audit-page">
+  <header class="hero">
+    <div class="hero-copy-block">
+      <p class="eyebrow">Sesiones del curso/seccion</p>
+      <h1>{{ title }}</h1>
+      <p class="hero-copy">{{ subtitle }}</p>
+    </div>
+    <div class="header-actions">
+      <a class="btn btn-secondary" routerLink="/videoconferences/audit">Volver a cursos</a>
+      <button type="button" class="btn btn-primary" (click)="loadRows()" [disabled]="loading">
+        {{ loading ? 'Actualizando...' : 'Recargar sesiones' }}
+      </button>
+    </div>
+  </header>
+
+  <section class="stats-grid">
+    <article class="stat-card">
+      <span class="stat-label">Sesiones</span>
+      <strong>{{ totals.total }}</strong>
+      <small>Reuniones visibles de este curso/seccion</small>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Listas en Zoom</span>
+      <strong>{{ totals.matched }}</strong>
+      <small>Ya tienen zoom_meeting_id conciliado</small>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Con error</span>
+      <strong>{{ totals.errors }}</strong>
+      <small>Fallaron durante la creacion o conciliacion</small>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Sin sincronizar</span>
+      <strong>{{ totals.pending_audit }}</strong>
+      <small>Pendientes de auditoria Zoom</small>
+    </article>
+  </section>
+
+  <section class="panel table-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Reuniones registradas</p>
+        <h2>Sesiones creadas</h2>
+        <p class="section-copy">Abre una sesion para revisar instancias, participantes, grabaciones y sincronizacion.</p>
+      </div>
+      <span class="count">{{ currentPageStart }} - {{ currentPageEnd }} de {{ totals.total }}</span>
+    </div>
+
+    <p *ngIf="error" class="feedback error">{{ error }}</p>
+
+    <div class="table-wrap" *ngIf="rows.length > 0; else emptyState">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Fecha / hora</th>
+            <th>Zoom</th>
+            <th>Estados</th>
+            <th>Conteos</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of rows">
+            <td>
+              <div class="cell-stack">
+                <strong>{{ dateLabel(row) }}</strong>
+                <span>{{ timeLabel(row) }}</span>
+                <span>Creada: {{ formatDateTime(row.created_at) }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <strong>{{ row.zoom_meeting_id || 'Sin conciliacion Zoom' }}</strong>
+                <span>{{ row.topic || 'Sin nombre de reunion' }}</span>
+                <span>{{ row.zoom_user_name || row.zoom_user_email || 'Sin usuario asignado' }}</span>
+                <span *ngIf="row.link_mode === 'INHERITED'">{{ row.owner_label || 'Usa el Zoom del horario padre' }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="status-stack">
+                <span class="pill" [class.pill-info]="row.link_mode === 'INHERITED'">{{ linkModeLabel(row.link_mode) }}</span>
+                <span class="pill" [ngClass]="statusToneClass(row.status)">{{ statusLabel(row.status) }}</span>
+                <span
+                  class="pill"
+                  [class.pill-ok]="row.audit_sync_status === 'SYNCED'"
+                  [class.pill-error]="row.audit_sync_status === 'ERROR'">
+                  {{ auditStatusLabel(row.audit_sync_status) }}
+                </span>
+                <span
+                  class="pill"
+                  [class.pill-warning]="row.planning_sync_state === 'OUTDATED'"
+                  [class.pill-error]="row.planning_sync_state?.includes('REMOVED')">
+                  {{ planningSyncStatusLabel(row.planning_sync_state) }}
+                </span>
+                <span class="pill pill-error" *ngIf="row.deleted_at">Eliminada localmente</span>
+              </div>
+            </td>
+            <td>
+              <div class="cell-stack">
+                <span>{{ row.instance_count || 0 }} instancias</span>
+                <span>{{ row.participant_count || 0 }} participantes</span>
+                <span>{{ row.recording_count || 0 }} grabaciones</span>
+              </div>
+            </td>
+            <td class="action-col">
+              <button type="button" class="btn btn-primary btn-sm" (click)="openDetail(row)">
+                Abrir detalle
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="pagination-bar" *ngIf="totals.total > 0">
+        <div class="pagination-size">
+          <span>Items por pagina:</span>
+          <select [ngModel]="pageSize" (ngModelChange)="onPageSizeChange($event)">
+            <option *ngFor="let size of pageSizeOptions" [ngValue]="size">{{ size }}</option>
+          </select>
+        </div>
+
+        <div class="pagination-actions">
+          <button type="button" class="page-btn" (click)="goToFirstPage()" [disabled]="page <= 1">|&lt;</button>
+          <button type="button" class="page-btn" (click)="goToPreviousPage()" [disabled]="page <= 1">&lt;</button>
+          <button type="button" class="page-btn" (click)="goToNextPage()" [disabled]="page >= totalPages">&gt;</button>
+          <button type="button" class="page-btn" (click)="goToLastPage()" [disabled]="page >= totalPages">&gt;|</button>
+        </div>
+      </div>
+    </div>
+
+    <ng-template #emptyState>
+      <div class="empty-block" [class.empty-block-loading]="loading">
+        <h3>{{ loading ? 'Cargando sesiones...' : 'No hay sesiones para este curso/seccion.' }}</h3>
+        <p>{{ loading ? 'Consultando reuniones creadas.' : 'Vuelve a cursos y prueba otra agrupacion.' }}</p>
+      </div>
+    </ng-template>
+  </section>
+</section>
