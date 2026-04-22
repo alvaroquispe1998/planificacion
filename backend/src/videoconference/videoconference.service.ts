@@ -6,7 +6,6 @@ import { ZoomUserEntity } from '../entities/audit.entities';
 import {
     AcademicProgramEntity,
     CampusEntity,
-    ClassroomSectionScheduleEntity,
     ExternalSourceEntity,
     FacultyEntity,
     SemesterEntity,
@@ -4042,28 +4041,7 @@ export class VideoconferenceService implements OnModuleInit {
                 'section_modality',
                 'section_modality.id = section.course_modality_id',
             )
-            .leftJoin(VcSectionEntity, 'vc_section', 'vc_section.id = subsection.vc_section_id')
-            .leftJoin(
-                ClassroomSectionScheduleEntity,
-                'source_schedule',
-                'source_schedule.id = schedule.source_schedule_id',
-            )
-            .andWhere(
-                `(
-                    offer.source_system != 'AKADEMIC'
-                    OR (
-                        (schedule.source_schedule_id IS NULL OR source_schedule.id IS NOT NULL)
-                        AND (
-                            section.source_section_id IS NULL
-                            OR EXISTS (
-                                SELECT 1
-                                FROM classroom_section_schedules current_source_schedule
-                                WHERE current_source_schedule.source_section_id = section.source_section_id
-                            )
-                        )
-                    )
-                )`,
-            );
+            .leftJoin(VcSectionEntity, 'vc_section', 'vc_section.id = subsection.vc_section_id');
     }
 
     private applyScheduleFilters(
