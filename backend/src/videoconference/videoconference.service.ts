@@ -4584,7 +4584,13 @@ export class VideoconferenceService implements OnModuleInit {
             childrenByParent.set(parentId, [...mappings]);
         }
 
-        const continuousMappings = this.buildContinuousBlockMappings(rows, baseIndex);
+        // Schedules with an active host rule must NOT be auto-merged into a
+        // continuous block. They belong to Cursos Especiales and each group
+        // must be treated as an independent Zoom session.
+        const hostRuleMap = await this.getActiveHostRuleMap();
+        const hostRuleScheduleIds = new Set(hostRuleMap.keys());
+
+        const continuousMappings = this.buildContinuousBlockMappings(rows, baseIndex, hostRuleScheduleIds);
         for (const mapping of continuousMappings) {
             byChild.set(mapping.child_schedule_id, mapping);
             const siblings = childrenByParent.get(mapping.parent_schedule_id) ?? [];
@@ -4595,7 +4601,11 @@ export class VideoconferenceService implements OnModuleInit {
         return { byChild, childrenByParent };
     }
 
-    private buildContinuousBlockMappings(rows: ScheduleContextRow[], inheritanceIndex: InheritanceIndex) {
+    private buildContinuousBlockMappings(
+        rows: ScheduleContextRow[],
+        inheritanceIndex: InheritanceIndex,
+        hostRuleScheduleIds: Set<string> = new Set(),
+    ) {
         const explicitChildIds = new Set(inheritanceIndex.byChild.keys());
         const groups = new Map<string, ScheduleContextRow[]>();
 
@@ -4627,6 +4637,12 @@ export class VideoconferenceService implements OnModuleInit {
         const mappings: ScheduleInheritanceMapping[] = [];
         for (const groupRows of groups.values()) {
             if (groupRows.length < 2) {
+                continue;
+            }
+
+            // If any schedule in this group has an explicit host rule (Cursos Especiales),
+            // skip auto-merging — every schedule must stay as its own independent session.
+            if (groupRows.some((r) => hostRuleScheduleIds.has(r.schedule_id))) {
                 continue;
             }
 
@@ -5149,6 +5165,254 @@ export class VideoconferenceService implements OnModuleInit {
             content_type: contentType,
             body: payloadBody,
         };
+    }
+
+    private async listAulaVirtualConferences(
+        context: AulaVirtualRequestContext,
+        dateStart: string,
+        dateEnd: string,
+        searchValue: string,
+        length = 50,
+    ): Promise<Array<{ id: string; name: string; sectionId: string; date: string }>> {
+        const params = new URLSearchParams({
+            draw: '1',
+            start: '0',
+            length: String(length),
+            'columns[0][data]': 'name',
+            'columns[0][name]': '',
+            'columns[1][data]': 'date',
+            'columns[1][name]': '',
+            'search[value]': searchValue,
+            'search[regex]': 'false',
+            dateStart,
+            dateEnd,
+        });
+
+        const url = new URL(`/gestion-conferencias/list?${params.toString()}`, context.baseUrl);
+        const response = await fetch(url.toString(), {
+            method: 'GET',
+            headers: {
+                accept: 'application/json, text/javascript, */*; q=0.01',
+                cookie: context.cookie,
+                referer: `${context.baseUrl}/gestion-conferencias`,
+                'user-agent': 'Mozilla/5.0 (UAI Videoconferencias)',
+                'x-requested-with': 'XMLHttpRequest',
+            },
+        });
+
+        const bodyText = await response.text();
+        const body = parseMaybeJson(bodyText) as Record<string, unknown> | null;
+        if (!body || !Array.isArray(body['data'])) {
+            return [];
+        }
+        return (body['data'] as unknown[]).map((item) => {
+            const r = item as Record<string, unknown>;
+            return {
+                id: String(r['id'] ?? ''),
+                name: String(r['name'] ?? ''),
+                sectionId: String(r['sectionId'] ?? ''),
+                date: String(r['date'] ?? ''),
+            };
+        });
+    }
+
+    private async copyAulaVirtualConference(
+        context: AulaVirtualRequestContext,
+        id: string,
+        name: string,
+        sectionIdTo: string,
+    ): Promise<{ status: number; body: object }> {
+        await new Promise((resolve) => setTimeout(resolve, AULA_VIRTUAL_THROTTLE_MS));
+
+        const form = new FormData();
+        form.append('id', id);
+        form.append('name', name);
+        form.append('sectionIdTo', sectionIdTo);
+
+        const url = new URL('/gestion-conferencias/copiar', context.baseUrl);
+        const response = await fetch(url.toString(), {
+            method: 'POST',
+            headers: {
+                accept: 'application/json, text/plain, */*',
+                cookie: context.cookie,
+                referer: `${context.baseUrl}/gestion-conferencias`,
+                'user-agent': 'Mozilla/5.0 (UAI Videoconferencias)',
+                'x-requested-with': 'XMLHttpRequest',
+            },
+            body: form,
+            redirect: 'follow',
+        });
+
+        const bodyText = await response.text();
+        const payloadBody = parseMaybeJson(bodyText) ?? { raw_text: bodyText.slice(0, 2000) };
+        return { status: response.status, body: payloadBody };
+    }
+
+    async executeAkademicInheritanceCopy(params: {
+        dateFrom: string;
+        dateTo: string;
+        planningOfferId?: string;
+    }): Promise<{
+        processed: number;
+        copied: number;
+        skipped: number;
+        errors: Array<{ topic: string | null; date: string; child_schedule_id?: string; reason: string }>;
+    }> {
+        const aulaVirtualContext = await this.getAulaVirtualRequestContext();
+
+        // Build base query: OWNED records in date range that have not been copied yet
+        // and have at least one active inheritance.
+        const baseQuery = this.planningVideoconferencesRepo
+            .createQueryBuilder('vc')
+            .innerJoin(PlanningSubsectionEntity, 'sub', 'sub.id = vc.planning_subsection_id')
+            .innerJoin(
+                PlanningSubsectionScheduleVcInheritanceEntity,
+                'inh',
+                "inh.parent_schedule_id = vc.planning_subsection_schedule_id AND inh.is_active = true",
+            )
+            .where("vc.link_mode = 'OWNED'")
+            .andWhere('vc.status IN (:...statuses)', { statuses: ['CREATED_UNMATCHED', 'MATCHED'] })
+            .andWhere('vc.conference_date >= :dateFrom', { dateFrom: params.dateFrom })
+            .andWhere('vc.conference_date <= :dateTo', { dateTo: params.dateTo })
+            .andWhere('(vc.akademic_copy_status IS NULL OR vc.akademic_copy_status = :pending)', { pending: 'PENDING' })
+            .select('vc.id', 'vc_id')
+            .addSelect('vc.planning_subsection_schedule_id', 'schedule_id')
+            .addSelect('vc.topic', 'topic')
+            .addSelect('vc.conference_date', 'conference_date')
+            .addSelect('sub.vc_section_id', 'parent_vc_section_id')
+            .distinct(true);
+
+        if (params.planningOfferId) {
+            baseQuery.andWhere('vc.planning_offer_id = :offerId', { offerId: params.planningOfferId });
+        }
+
+        const parentRows = await baseQuery.getRawMany<{
+            vc_id: string;
+            schedule_id: string;
+            topic: string | null;
+            conference_date: string;
+            parent_vc_section_id: string | null;
+        }>();
+
+        const result = {
+            processed: parentRows.length,
+            copied: 0,
+            skipped: 0,
+            errors: [] as Array<{ topic: string | null; date: string; child_schedule_id?: string; reason: string }>,
+        };
+
+        for (const parent of parentRows) {
+            // Format date as DD/MM/YYYY for Akademic API (it stores/returns in this format)
+            const [year, month, day] = (parent.conference_date as string).split('-');
+            const akademicDate = `${day}/${month}/${year}`;
+
+            // --- Step 1: find the Akademic conference ID via /list ---
+            let akademicId: string | null = null;
+            try {
+                const listings = await this.listAulaVirtualConferences(
+                    aulaVirtualContext,
+                    akademicDate,
+                    akademicDate,
+                    parent.topic ?? '',
+                    100,
+                );
+                const match = listings.find(
+                    (r) => r.name === parent.topic && (
+                        !parent.parent_vc_section_id || r.sectionId === parent.parent_vc_section_id
+                    ),
+                );
+                if (!match) {
+                    const looseMatch = listings.find((r) => r.name === parent.topic);
+                    akademicId = looseMatch?.id ?? null;
+                } else {
+                    akademicId = match.id;
+                }
+            } catch (err) {
+                console.warn(
+                    `[AkademicCopy] Error listing conferences for topic="${parent.topic}" date=${akademicDate}:`,
+                    err,
+                );
+            }
+
+            if (!akademicId) {
+                console.warn(
+                    `[AkademicCopy] Conference not found in Akademic list: topic="${parent.topic}" date=${akademicDate}`,
+                );
+                result.skipped++;
+                result.errors.push({
+                    topic: parent.topic,
+                    date: parent.conference_date,
+                    reason: 'Conferencia no encontrada en Akademic',
+                });
+                await this.planningVideoconferencesRepo.update(parent.vc_id, {
+                    akademic_copy_status: 'ERROR',
+                });
+                continue;
+            }
+
+            // --- Step 2: resolve active children for this parent schedule ---
+            const childRows = await this.schedulesRepo
+                .createQueryBuilder('sched')
+                .innerJoin(PlanningSubsectionEntity, 'child_sub', 'child_sub.id = sched.planning_subsection_id')
+                .innerJoin(
+                    PlanningSubsectionScheduleVcInheritanceEntity,
+                    'inh',
+                    'inh.child_schedule_id = sched.id AND inh.is_active = true AND inh.parent_schedule_id = :parentScheduleId',
+                    { parentScheduleId: parent.schedule_id },
+                )
+                .select('sched.id', 'child_schedule_id')
+                .addSelect('child_sub.vc_section_id', 'child_vc_section_id')
+                .getRawMany<{ child_schedule_id: string; child_vc_section_id: string | null }>();
+
+            let allOk = true;
+
+            for (const child of childRows) {
+                if (!child.child_vc_section_id) {
+                    console.warn(
+                        `[AkademicCopy] Child schedule ${child.child_schedule_id} has no vc_section_id — skipping`,
+                    );
+                    result.skipped++;
+                    result.errors.push({
+                        topic: parent.topic,
+                        date: parent.conference_date,
+                        child_schedule_id: child.child_schedule_id,
+                        reason: 'Sección hija sin vc_section_id',
+                    });
+                    allOk = false;
+                    continue;
+                }
+
+                try {
+                    await this.copyAulaVirtualConference(
+                        aulaVirtualContext,
+                        akademicId,
+                        parent.topic ?? '',
+                        child.child_vc_section_id,
+                    );
+                    result.copied++;
+                } catch (err) {
+                    const reason = err instanceof Error ? err.message : String(err);
+                    console.warn(
+                        `[AkademicCopy] Error copying to child ${child.child_schedule_id}:`,
+                        reason,
+                    );
+                    result.skipped++;
+                    result.errors.push({
+                        topic: parent.topic,
+                        date: parent.conference_date,
+                        child_schedule_id: child.child_schedule_id,
+                        reason,
+                    });
+                    allOk = false;
+                }
+            }
+
+            await this.planningVideoconferencesRepo.update(parent.vc_id, {
+                akademic_copy_status: allOk ? 'COPIED' : 'ERROR',
+            });
+        }
+
+        return result;
     }
 
     private async findAvailableZoomUser<T extends ZoomPoolUser>(

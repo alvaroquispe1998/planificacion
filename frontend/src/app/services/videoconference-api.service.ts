@@ -395,6 +395,18 @@ export interface VideoconferenceInheritanceItem {
     } | null;
 }
 
+export interface AkademicInheritanceCopyResult {
+    processed: number;
+    copied: number;
+    skipped: number;
+    errors: Array<{
+        topic: string | null;
+        date: string;
+        child_schedule_id?: string;
+        reason: string;
+    }>;
+}
+
 export interface VcScheduleHostRule {
     id: string;
     schedule_id: string;
@@ -667,5 +679,9 @@ export class VideoconferenceApiService {
 
     deleteHostRule(id: string) {
         return this.http.delete<{ success: boolean; id: string }>(`${this.baseUrl}/host-rules/${encodeURIComponent(id)}`);
+    }
+
+    copyAkademicInheritances(payload: { dateFrom: string; dateTo: string; planningOfferId?: string }) {
+        return this.http.post<AkademicInheritanceCopyResult>(`${this.baseUrl}/copy-akademic-inheritances`, payload);
     }
 }

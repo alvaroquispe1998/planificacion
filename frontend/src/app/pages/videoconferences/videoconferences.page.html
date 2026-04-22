@@ -286,6 +286,65 @@
       </div>
     </div>
 
+    <!-- ─── Copiar herencias a Akademic ───────────────────────────────────── -->
+    <div class="akademic-copy-panel">
+      <div class="akademic-copy-header">
+        <div>
+          <span class="eyebrow eyebrow-soft">Herencias Zoom</span>
+          <h3>Copiar videoconferencias a secciones heredadas</h3>
+          <p>Busca en Akademic las VCs del padre y las copia a cada sección hija (herencias activas). Solo procesa registros con estado <em>Sin match</em> o <em>Conciliada</em> que aún no fueron copiados.</p>
+        </div>
+      </div>
+      <div class="akademic-copy-form">
+        <label class="field">
+          <span>Fecha inicio</span>
+          <input type="date" [(ngModel)]="copyAkademicDateFrom" />
+        </label>
+        <label class="field">
+          <span>Fecha fin</span>
+          <input type="date" [(ngModel)]="copyAkademicDateTo" />
+        </label>
+        <button
+          class="btn btn-primary"
+          (click)="runAkademicCopy()"
+          [disabled]="isCopyingAkademic || !copyAkademicDateFrom || !copyAkademicDateTo">
+          {{ isCopyingAkademic ? 'Copiando...' : 'Copiar herencias a Akademic' }}
+        </button>
+      </div>
+
+      <div class="akademic-copy-result" *ngIf="copyAkademicResult as result">
+        <div class="summary-metric">
+          <strong>{{ result.processed }}</strong>
+          <span>Procesadas</span>
+        </div>
+        <div class="summary-metric summary-metric-success">
+          <strong>{{ result.copied }}</strong>
+          <span>Copiadas</span>
+        </div>
+        <div class="summary-metric summary-metric-warn">
+          <strong>{{ result.skipped }}</strong>
+          <span>Omitidas</span>
+        </div>
+        <div class="summary-metric summary-metric-error">
+          <strong>{{ result.errors.length }}</strong>
+          <span>Con error</span>
+        </div>
+      </div>
+
+      <div class="akademic-copy-errors" *ngIf="copyAkademicResult?.errors?.length">
+        <p class="errors-title">Detalle de errores / omisiones:</p>
+        <ul>
+          <li *ngFor="let e of copyAkademicResult!.errors">
+            <span class="error-topic">{{ e.topic || '(sin topic)' }}</span>
+            &mdash; {{ e.date }}
+            <span *ngIf="e.child_schedule_id" class="error-child">(hijo {{ e.child_schedule_id.slice(0, 8) }}...)</span>
+            &mdash; <em>{{ e.reason }}</em>
+          </li>
+        </ul>
+      </div>
+    </div>
+    <!-- ──────────────────────────────────────────────────────────────────── -->
+
     <ng-container *ngIf="!isHybridGroup && assignmentSummary; let summary">
     <section class="assignment-summary-card">
       <div class="assignment-summary-head">

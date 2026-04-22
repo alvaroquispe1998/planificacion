@@ -6,6 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { MultiSelectComponent, MultiSelectOption } from '../../components/multi-select/multi-select.component';
 import { DialogService } from '../../core/dialog.service';
 import {
+  AkademicInheritanceCopyResult,
   VideoconferenceAssignmentPreviewDaySummary,
   VideoconferenceAssignmentPreviewItem,
   VideoconferenceAssignmentPreviewResponse,
@@ -98,6 +99,12 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   overrideSaving = false;
   overrideHostPreviewing = false;
   checkingExisting = false;
+
+  // Akademic inheritance copy
+  copyAkademicDateFrom = '';
+  copyAkademicDateTo = '';
+  isCopyingAkademic = false;
+  copyAkademicResult: AkademicInheritanceCopyResult | null = null;
 
   /** occurrence_key -> existing record summary for already-created conferences */
   existingByOccurrenceKey = new Map<string, {
@@ -2605,5 +2612,28 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       },
       error: (err) => console.error('[Split] loadSplitRulesCount error', err),
     });
+  }
+
+  async runAkademicCopy() {
+    if (!this.copyAkademicDateFrom || !this.copyAkademicDateTo) {
+      alert('Ingresa las fechas de inicio y fin para copiar herencias.');
+      return;
+    }
+    if (this.isCopyingAkademic) return;
+    this.isCopyingAkademic = true;
+    this.copyAkademicResult = null;
+    try {
+      this.copyAkademicResult = await firstValueFrom(
+        this.api.copyAkademicInheritances({
+          dateFrom: this.copyAkademicDateFrom,
+          dateTo: this.copyAkademicDateTo,
+        }),
+      );
+    } catch (err: any) {
+      const msg = err?.error?.message || err?.message || 'Error al copiar herencias en Akademic.';
+      alert(msg);
+    } finally {
+      this.isCopyingAkademic = false;
+    }
   }
 }
