@@ -17,6 +17,7 @@ type CourseOption = { id: string; label: string };
 type SectionSummary = {
   section_id: string;
   section_code: string;
+  section_external_code: string | null;
   section_label: string;
   course_label: string;
   teacher_name: string | null;
@@ -107,13 +108,27 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
   }
 
   get groupedSavedRules(): Array<{
-    section_id: string; section_code: string; course_id: string | null; course_label: string | null;
+    section_id: string; section_code: string; section_external_code: string | null; course_id: string | null; course_label: string | null;
     rules: VcScheduleHostRule[];
   }> {
-    const map = new Map<string, { section_id: string; section_code: string; course_id: string | null; course_label: string | null; rules: VcScheduleHostRule[] }>();
+    const map = new Map<string, {
+      section_id: string;
+      section_code: string;
+      section_external_code: string | null;
+      course_id: string | null;
+      course_label: string | null;
+      rules: VcScheduleHostRule[];
+    }>();
     for (const r of this.allSavedRules) {
       if (!map.has(r.section_id)) {
-        map.set(r.section_id, { section_id: r.section_id, section_code: r.section_code, course_id: r.course_id, course_label: r.course_label, rules: [] });
+        map.set(r.section_id, {
+          section_id: r.section_id,
+          section_code: r.section_code,
+          section_external_code: r.section_external_code ?? null,
+          course_id: r.course_id,
+          course_label: r.course_label,
+          rules: [],
+        });
       }
       map.get(r.section_id)!.rules.push(r);
     }
@@ -180,7 +195,13 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
     }));
   }
 
-  editFromGlobalSummary(group: { section_id: string; section_code: string; course_id: string | null; course_label: string | null }) {
+  editFromGlobalSummary(group: {
+    section_id: string;
+    section_code: string;
+    section_external_code?: string | null;
+    course_id: string | null;
+    course_label: string | null;
+  }) {
     const scrollToConfig = () => {
       setTimeout(() => {
         const el = document.querySelector('.workspace-config');
@@ -209,8 +230,13 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
     scrollToConfig();
   }
 
-  async deleteAllForSection(group: { section_id: string; section_code: string; rules: VcScheduleHostRule[] }) {
-    const ok = await this.dialog.confirm(`¿Eliminar ${group.rules.length} regla(s) de la sección ${group.section_code}?`);
+  async deleteAllForSection(group: {
+    section_id: string;
+    section_code: string;
+    section_external_code?: string | null;
+    rules: VcScheduleHostRule[];
+  }) {
+    const ok = await this.dialog.confirm(`¿Eliminar ${group.rules.length} regla(s) de la sección ${this.formatSectionDisplay(group)}?`);
     if (!ok) return;
     const ops = group.rules.map((r) => new Promise<void>((res, rej) => {
       this.api.deleteHostRule(r.id).subscribe({ next: () => res(), error: rej });
@@ -301,6 +327,7 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
         map.set(item.section_id, {
           section_id: item.section_id,
           section_code: item.section_code,
+          section_external_code: item.section_external_code ?? null,
           section_label: item.section_label,
           course_label: item.course_label,
           teacher_name: item.teacher_name,
@@ -558,6 +585,15 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
 
   rulesCount(section: SectionSummary): number {
     return section.schedules.filter((s) => s.host_rule).length;
+  }
+
+  formatSectionDisplay(section: { section_code?: string | null; section_external_code?: string | null }): string {
+    const code = String(section.section_code ?? '').trim();
+    const external = String(section.section_external_code ?? '').trim();
+    if (code && external && external.toLowerCase() !== code.toLowerCase()) {
+      return `${code} - ${external}`;
+    }
+    return code || external || 'Sin seccion';
   }
 
   get savedRules(): Array<{ section: SectionSummary; row: ScheduleRow }> {

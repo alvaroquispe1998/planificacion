@@ -6,6 +6,7 @@ import { ZoomUserEntity } from '../entities/audit.entities';
 import {
     AcademicProgramEntity,
     CampusEntity,
+    ClassroomSectionScheduleEntity,
     ExternalSourceEntity,
     FacultyEntity,
     SemesterEntity,
@@ -2418,6 +2419,7 @@ export class VideoconferenceService implements OnModuleInit {
             .addSelect('rule.updated_at', 'updated_at')
             .addSelect('sec.id', 'section_id')
             .addSelect('sec.code', 'section_code')
+            .addSelect('sec.external_code', 'section_external_code')
             .addSelect('offer.study_plan_course_id', 'course_id')
             .addSelect('offer.course_code', 'course_code')
             .addSelect('offer.course_name', 'course_name')
@@ -2444,6 +2446,7 @@ export class VideoconferenceService implements OnModuleInit {
             updated_at: r.updated_at as Date,
             section_id: readString(r.section_id),
             section_code: readString(r.section_code),
+            section_external_code: readNullableString(r.section_external_code),
             course_id: readNullableString(r.course_id),
             course_label: [readNullableString(r.course_code), readNullableString(r.course_name)].filter(Boolean).join(' - ') || null,
             subsection_code: readNullableString(r.subsection_code),
@@ -4039,7 +4042,28 @@ export class VideoconferenceService implements OnModuleInit {
                 'section_modality',
                 'section_modality.id = section.course_modality_id',
             )
-            .leftJoin(VcSectionEntity, 'vc_section', 'vc_section.id = subsection.vc_section_id');
+            .leftJoin(VcSectionEntity, 'vc_section', 'vc_section.id = subsection.vc_section_id')
+            .leftJoin(
+                ClassroomSectionScheduleEntity,
+                'source_schedule',
+                'source_schedule.id = schedule.source_schedule_id',
+            )
+            .andWhere(
+                `(
+                    offer.source_system != 'AKADEMIC'
+                    OR (
+                        (schedule.source_schedule_id IS NULL OR source_schedule.id IS NOT NULL)
+                        AND (
+                            section.source_section_id IS NULL
+                            OR EXISTS (
+                                SELECT 1
+                                FROM classroom_section_schedules current_source_schedule
+                                WHERE current_source_schedule.source_section_id = section.source_section_id
+                            )
+                        )
+                    )
+                )`,
+            );
     }
 
     private applyScheduleFilters(
@@ -6224,11 +6248,20 @@ function buildGenerationMessage(summary: {
 
 function buildSectionLabel(row: ScheduleContextRow) {
     const course = buildCourseLabel(row.course_code, row.course_name);
-    return `${course} | Seccion ${row.section_code}`;
+    return `${course} | Seccion ${buildSectionDisplayCode(row.section_code, row.section_external_code)}`;
 }
 
 function buildGroupLabel(row: ScheduleContextRow) {
     return row.subsection_code?.trim() ? `Grupo ${row.subsection_code.trim()}` : 'Grupo sin codigo';
+}
+
+function buildSectionDisplayCode(sectionCode: string | null | undefined, sectionExternalCode: string | null | undefined) {
+    const code = String(sectionCode ?? '').trim();
+    const externalCode = String(sectionExternalCode ?? '').trim();
+    if (code && externalCode && code.toLowerCase() !== externalCode.toLowerCase()) {
+        return `${code} - ${externalCode}`;
+    }
+    return code || externalCode || 'sin codigo';
 }
 
 function buildScheduleLabel(row: Pick<ScheduleContextRow, 'day_of_week' | 'start_time' | 'end_time'>) {
