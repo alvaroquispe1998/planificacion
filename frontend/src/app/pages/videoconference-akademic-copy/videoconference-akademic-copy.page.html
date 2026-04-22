@@ -89,7 +89,7 @@
           <div>
             <span class="status-pill" [ngClass]="statusClass(row.status)">{{ statusLabel(row) }}</span>
             <h3>{{ row.courseLabel }}</h3>
-            <p>{{ row.parentSectionExternalCode || row.parentSectionCode || 'Seccion padre' }} | Grupo {{ row.parentSubsectionCode || '-' }}</p>
+            <p>{{ parentSectionLabel(row) }}</p>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" (click)="toggleExpanded(row)">
             {{ isExpanded(row) ? 'Ocultar hijos' : 'Ver hijos' }}
@@ -105,8 +105,8 @@
           <div>
             <span>ID AV padre</span>
             <strong>{{ row.parentEffectiveVcSectionId || row.parentVcSectionId || row.parentSourceSectionId || 'Sin ID AV' }}</strong>
+            <small>{{ parentSectionLabel(row) }}</small>
             <small>{{ row.parentVcSectionName || 'Sin nombre en vc_sections' }}</small>
-            <small>source_section_id: {{ row.parentSourceSectionId || 'Sin ID' }}</small>
           </div>
           <div>
             <span>ID videoconferencia Akademic</span>
@@ -129,13 +129,12 @@
         <div class="children-list" *ngIf="isExpanded(row)">
           <article class="child-row" *ngFor="let child of row.children">
             <div>
-              <strong>{{ childLabel(child) }}</strong>
+              <strong>{{ child.childCourseLabel || childLabel(child) }}</strong>
+              <span>{{ childSectionLabel(child) }}</span>
+              <span>ID seccion hija: {{ child.childDestinationSectionId || 'Sin ID seccion hija' }}</span>
               <span>Seccion AV: {{ child.childVcSectionName || 'Sin nombre en vc_sections' }}</span>
-              <span>ID seccion hija: {{ child.childVcSectionId || 'Sin vc_section_id' }}</span>
-              <span>source_section_id hija: {{ child.childSourceSectionId || 'Sin ID' }}</span>
-              <span>ID AV efectivo: {{ child.childEffectiveVcSectionId || 'Sin match vc_sections' }}</span>
-              <span>sectionIdTo payload: {{ child.childDestinationSectionId || 'Sin destino' }}</span>
               <span>Schedule: {{ child.childScheduleId }}</span>
+              <span *ngIf="cloneMessage(child)" class="clone-message">{{ cloneMessage(child) }}</span>
             </div>
             <div class="child-actions">
               <span class="status-pill" [ngClass]="statusClass(child.status)">
@@ -147,6 +146,13 @@
                 (click)="openPayload(child, row)"
                 [disabled]="!child.payload">
                 Ver payload
+              </button>
+              <button
+                type="button"
+                class="btn btn-success btn-sm"
+                (click)="cloneChild(child)"
+                [disabled]="!child.payload || isCloning(child)">
+                {{ isCloning(child) ? 'Clonando...' : 'Clonar videoconferencia' }}
               </button>
             </div>
           </article>

@@ -25,6 +25,8 @@ export class VideoconferenceAkademicCopyPageComponent {
   payloadPreviewOpen = false;
   payloadPreviewTitle = '';
   payloadPreviewJson = '';
+  cloningIds = new Set<string>();
+  cloneMessages: Record<string, string> = {};
 
   filters = {
     dateFrom: this.todayIso(),
@@ -67,6 +69,8 @@ export class VideoconferenceAkademicCopyPageComponent {
       next: (result) => {
         this.rows = Array.isArray(result.items) ? result.items : [];
         this.expandedIds = new Set(this.rows.map((row) => row.parentLocalVideoconferenceId));
+        this.cloningIds.clear();
+        this.cloneMessages = {};
         this.loading = false;
         this.cdr.detectChanges();
       },
@@ -109,9 +113,35 @@ export class VideoconferenceAkademicCopyPageComponent {
     if (!child.payload) {
       return;
     }
-    this.payloadPreviewTitle = `${row.courseLabel} | ${child.childVcSectionId}`;
+    this.payloadPreviewTitle = `${row.courseLabel} | ${child.childDestinationSectionId || child.childVcSectionId || 'Sin destino'}`;
     this.payloadPreviewJson = this.stringifyPayload(child.payload);
     this.payloadPreviewOpen = true;
+  }
+
+  cloneChild(child: AkademicInheritanceCopyPreviewChild) {
+    if (!child.payload || this.isCloning(child)) {
+      return;
+    }
+    const key = this.childKey(child);
+    this.cloningIds.add(key);
+    this.cloneMessages = { ...this.cloneMessages, [key]: '' };
+
+    this.api.cloneAkademicInheritanceCopy(child.payload).subscribe({
+      next: (result) => {
+        const message = result.ok
+          ? 'Videoconferencia clonada'
+          : `Akademic respondio ${result.status}`;
+        this.cloneMessages = { ...this.cloneMessages, [key]: message };
+        this.cloningIds.delete(key);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        const message = err?.error?.message ?? 'No se pudo clonar la videoconferencia.';
+        this.cloneMessages = { ...this.cloneMessages, [key]: message };
+        this.cloningIds.delete(key);
+        this.cdr.detectChanges();
+      },
+    });
   }
 
   closePayload() {
@@ -173,6 +203,26 @@ export class VideoconferenceAkademicCopyPageComponent {
     const section = child.childSectionExternalCode || child.childSectionCode || 'Seccion hija';
     const group = child.childSubsectionCode ? `Grupo ${child.childSubsectionCode}` : 'Grupo sin codigo';
     return `${section} | ${group}`;
+  }
+
+  parentSectionLabel(row: AkademicInheritanceCopyPreviewItem) {
+    return `${row.parentSectionExternalCode || row.parentSectionCode || 'Seccion padre'} | Grupo ${row.parentSubsectionCode || '-'}`;
+  }
+
+  childSectionLabel(child: AkademicInheritanceCopyPreviewChild) {
+    return `${child.childSectionExternalCode || child.childSectionCode || 'Seccion hija'} | Grupo ${child.childSubsectionCode || '-'}`;
+  }
+
+  childKey(child: AkademicInheritanceCopyPreviewChild) {
+    return child.inheritanceId || child.childScheduleId;
+  }
+
+  isCloning(child: AkademicInheritanceCopyPreviewChild) {
+    return this.cloningIds.has(this.childKey(child));
+  }
+
+  cloneMessage(child: AkademicInheritanceCopyPreviewChild) {
+    return this.cloneMessages[this.childKey(child)] || '';
   }
 
   private stringifyPayload(payload: AkademicInheritanceCopyPayloadPreview) {

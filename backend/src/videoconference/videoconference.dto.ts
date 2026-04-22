@@ -385,6 +385,20 @@ export class PreviewAkademicInheritanceCopyDto {
     parentVcSectionId?: string;
 }
 
+export class CloneAkademicInheritanceCopyDto {
+    @IsString()
+    @IsNotEmpty()
+    id!: string;
+
+    @IsString()
+    @IsNotEmpty()
+    name!: string;
+
+    @IsString()
+    @IsNotEmpty()
+    sectionIdTo!: string;
+}
+
 export class CreateVideoconferenceInheritanceDto {
     @IsString()
     parentScheduleId!: string;

@@ -5500,6 +5500,28 @@ export class VideoconferenceService implements OnModuleInit {
         return { status: response.status, body: payloadBody };
     }
 
+    async cloneAkademicInheritanceCopy(params: {
+        id: string;
+        name: string;
+        sectionIdTo: string;
+    }) {
+        const id = String(params.id ?? '').trim();
+        const name = String(params.name ?? '').trim();
+        const sectionIdTo = String(params.sectionIdTo ?? '').trim();
+        if (!id || !name || !sectionIdTo) {
+            throw new BadRequestException('id, name y sectionIdTo son requeridos.');
+        }
+
+        const aulaVirtualContext = await this.getAulaVirtualRequestContext();
+        const result = await this.copyAulaVirtualConference(aulaVirtualContext, id, name, sectionIdTo);
+        return {
+            ok: result.status >= 200 && result.status < 300,
+            status: result.status,
+            body: result.body,
+            payload: { id, name, sectionIdTo },
+        };
+    }
+
     async executeAkademicInheritanceCopy(params: {
         dateFrom: string;
         dateTo: string;
@@ -5828,6 +5850,7 @@ export class VideoconferenceService implements OnModuleInit {
                 .createQueryBuilder('sched')
                 .innerJoin(PlanningSubsectionEntity, 'child_sub', 'child_sub.id = sched.planning_subsection_id')
                 .innerJoin(PlanningSectionEntity, 'child_section', 'child_section.id = child_sub.planning_section_id')
+                .innerJoin(PlanningOfferEntity, 'child_offer', 'child_offer.id = child_section.planning_offer_id')
                 .leftJoin(
                     VcSectionEntity,
                     'child_av_section',
@@ -5848,6 +5871,8 @@ export class VideoconferenceService implements OnModuleInit {
                 .addSelect('child_sub.code', 'child_subsection_code')
                 .addSelect('child_section.code', 'child_section_code')
                 .addSelect('child_section.external_code', 'child_section_external_code')
+                .addSelect('child_offer.course_code', 'child_course_code')
+                .addSelect('child_offer.course_name', 'child_course_name')
                 .orderBy('child_section.code', 'ASC')
                 .addOrderBy('child_sub.code', 'ASC')
                 .getRawMany<{
@@ -5860,6 +5885,8 @@ export class VideoconferenceService implements OnModuleInit {
                     child_subsection_code: string | null;
                     child_section_code: string | null;
                     child_section_external_code: string | null;
+                    child_course_code: string | null;
+                    child_course_name: string | null;
                 }>();
 
             const children = childRows.map((child) => {
@@ -5884,6 +5911,9 @@ export class VideoconferenceService implements OnModuleInit {
                     childSectionCode: child.child_section_code,
                     childSectionExternalCode: child.child_section_external_code,
                     childSubsectionCode: child.child_subsection_code,
+                    childCourseCode: child.child_course_code,
+                    childCourseName: child.child_course_name,
+                    childCourseLabel: buildCourseLabel(child.child_course_code, child.child_course_name),
                     payload: childStatus === 'READY'
                         ? {
                             id: akademicConference?.id ?? '',
