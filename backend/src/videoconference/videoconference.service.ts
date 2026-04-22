@@ -5501,6 +5501,8 @@ export class VideoconferenceService implements OnModuleInit {
     }
 
     async cloneAkademicInheritanceCopy(params: {
+        inheritanceId?: string;
+        parentLocalVideoconferenceId?: string;
         id: string;
         name: string;
         sectionIdTo: string;
@@ -5508,18 +5510,59 @@ export class VideoconferenceService implements OnModuleInit {
         const id = String(params.id ?? '').trim();
         const name = String(params.name ?? '').trim();
         const sectionIdTo = String(params.sectionIdTo ?? '').trim();
+        const inheritanceId = emptyTextToNull(params.inheritanceId);
+        const parentLocalVideoconferenceId = emptyTextToNull(params.parentLocalVideoconferenceId);
         if (!id || !name || !sectionIdTo) {
             throw new BadRequestException('id, name y sectionIdTo son requeridos.');
         }
 
         const aulaVirtualContext = await this.getAulaVirtualRequestContext();
+        const payload = { id, name, sectionIdTo };
         const result = await this.copyAulaVirtualConference(aulaVirtualContext, id, name, sectionIdTo);
+        const ok = result.status >= 200 && result.status < 300;
+        if (inheritanceId) {
+            await this.inheritanceRepo.update(inheritanceId, {
+                akademic_copy_status: ok ? 'COPIED' : 'ERROR',
+                akademic_copied_at: ok ? new Date() : null,
+                akademic_copy_payload_json: payload,
+                akademic_copy_response_json: result.body,
+                akademic_copy_error: ok ? null : `Akademic respondio ${result.status}`,
+            });
+        }
+        if (parentLocalVideoconferenceId && ok) {
+            await this.refreshParentAkademicCopyStatus(parentLocalVideoconferenceId);
+        }
         return {
-            ok: result.status >= 200 && result.status < 300,
+            ok,
             status: result.status,
             body: result.body,
-            payload: { id, name, sectionIdTo },
+            payload,
+            inheritanceId,
+            parentLocalVideoconferenceId,
         };
+    }
+
+    private async refreshParentAkademicCopyStatus(parentLocalVideoconferenceId: string) {
+        const parent = await this.planningVideoconferencesRepo.findOne({
+            where: { id: parentLocalVideoconferenceId },
+        });
+        if (!parent) {
+            return;
+        }
+        const activeChildren = await this.inheritanceRepo.find({
+            where: {
+                parent_schedule_id: parent.planning_subsection_schedule_id,
+                is_active: true,
+            },
+        });
+        if (!activeChildren.length) {
+            return;
+        }
+        const allCopied = activeChildren.every((item) => item.akademic_copy_status === 'COPIED');
+        const anyError = activeChildren.some((item) => item.akademic_copy_status === 'ERROR');
+        await this.planningVideoconferencesRepo.update(parentLocalVideoconferenceId, {
+            akademic_copy_status: allCopied ? 'COPIED' : anyError ? 'ERROR' : 'PENDING',
+        });
     }
 
     async executeAkademicInheritanceCopy(params: {
@@ -5863,6 +5906,8 @@ export class VideoconferenceService implements OnModuleInit {
                     { parentScheduleId: parent.schedule_id },
                 )
                 .select('inh.id', 'inheritance_id')
+                .addSelect('inh.akademic_copy_status', 'child_akademic_copy_status')
+                .addSelect('inh.akademic_copied_at', 'child_akademic_copied_at')
                 .addSelect('sched.id', 'child_schedule_id')
                 .addSelect('child_sub.vc_section_id', 'child_vc_section_id')
                 .addSelect('child_section.source_section_id', 'child_source_section_id')
@@ -5877,6 +5922,8 @@ export class VideoconferenceService implements OnModuleInit {
                 .addOrderBy('child_sub.code', 'ASC')
                 .getRawMany<{
                     inheritance_id: string;
+                    child_akademic_copy_status: string | null;
+                    child_akademic_copied_at: Date | string | null;
                     child_schedule_id: string;
                     child_vc_section_id: string | null;
                     child_source_section_id: string | null;
@@ -5902,6 +5949,8 @@ export class VideoconferenceService implements OnModuleInit {
                             : 'READY';
                 return {
                     inheritanceId: child.inheritance_id,
+                    akademicCopyStatus: child.child_akademic_copy_status,
+                    akademicCopiedAt: child.child_akademic_copied_at,
                     childScheduleId: child.child_schedule_id,
                     childVcSectionId: child.child_vc_section_id,
                     childSourceSectionId: child.child_source_section_id,

@@ -118,7 +118,7 @@ export class VideoconferenceAkademicCopyPageComponent {
     this.payloadPreviewOpen = true;
   }
 
-  cloneChild(child: AkademicInheritanceCopyPreviewChild) {
+  cloneChild(child: AkademicInheritanceCopyPreviewChild, row: AkademicInheritanceCopyPreviewItem) {
     if (!child.payload || this.isCloning(child)) {
       return;
     }
@@ -126,11 +126,24 @@ export class VideoconferenceAkademicCopyPageComponent {
     this.cloningIds.add(key);
     this.cloneMessages = { ...this.cloneMessages, [key]: '' };
 
-    this.api.cloneAkademicInheritanceCopy(child.payload).subscribe({
+    this.api.cloneAkademicInheritanceCopy({
+      ...child.payload,
+      inheritanceId: child.inheritanceId,
+      parentLocalVideoconferenceId: row.parentLocalVideoconferenceId,
+    }).subscribe({
       next: (result) => {
         const message = result.ok
           ? 'Videoconferencia clonada'
           : `Akademic respondio ${result.status}`;
+        if (result.ok) {
+          child.akademicCopyStatus = 'COPIED';
+          child.akademicCopiedAt = new Date().toISOString();
+          if (row.children.every((item) => item.akademicCopyStatus === 'COPIED')) {
+            row.akademicCopyStatus = 'COPIED';
+          } else if (!row.akademicCopyStatus) {
+            row.akademicCopyStatus = 'PENDING';
+          }
+        }
         this.cloneMessages = { ...this.cloneMessages, [key]: message };
         this.cloningIds.delete(key);
         this.cdr.detectChanges();
@@ -170,7 +183,7 @@ export class VideoconferenceAkademicCopyPageComponent {
   childStatusLabel(child: AkademicInheritanceCopyPreviewChild) {
     switch (child.status) {
       case 'READY':
-        return 'Payload listo';
+        return child.akademicCopyStatus === 'COPIED' ? 'Ya clonada' : 'Payload listo';
       case 'MISSING_AKADEMIC_CONFERENCE':
         return 'Falta ID Akademic';
       case 'MISSING_CHILD_SECTION':
@@ -184,6 +197,19 @@ export class VideoconferenceAkademicCopyPageComponent {
     if (status === 'READY') return 'status-ready';
     if (status === 'MISSING_AKADEMIC_CONFERENCE' || status === 'LOOKUP_ERROR') return 'status-error';
     return 'status-warning';
+  }
+
+  copyStatusLabel(value: string | null | undefined) {
+    switch ((value || '').toUpperCase()) {
+      case 'COPIED':
+        return 'Copiada';
+      case 'ERROR':
+        return 'Error de copia';
+      case 'PENDING':
+        return 'Copia pendiente';
+      default:
+        return 'Sin marca de copia';
+    }
   }
 
   matchLabel(row: AkademicInheritanceCopyPreviewItem) {
@@ -219,6 +245,10 @@ export class VideoconferenceAkademicCopyPageComponent {
 
   isCloning(child: AkademicInheritanceCopyPreviewChild) {
     return this.cloningIds.has(this.childKey(child));
+  }
+
+  isAlreadyCopied(child: AkademicInheritanceCopyPreviewChild) {
+    return child.akademicCopyStatus === 'COPIED';
   }
 
   cloneMessage(child: AkademicInheritanceCopyPreviewChild) {

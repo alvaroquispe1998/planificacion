@@ -297,6 +297,26 @@ export class PlanningSubsectionScheduleVcInheritanceEntity {
     @Column({ type: 'boolean', default: true })
     is_active!: boolean;
 
+    @Column({
+        type: 'enum',
+        enum: PlanningSubsectionVideoconferenceAkademicCopyStatusValues,
+        nullable: true,
+        default: null,
+    })
+    akademic_copy_status!: (typeof PlanningSubsectionVideoconferenceAkademicCopyStatusValues)[number] | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    akademic_copied_at!: Date | null;
+
+    @Column({ type: 'json', nullable: true })
+    akademic_copy_payload_json!: Record<string, unknown> | null;
+
+    @Column({ type: 'json', nullable: true })
+    akademic_copy_response_json!: Record<string, unknown> | null;
+
+    @Column({ type: 'text', nullable: true })
+    akademic_copy_error!: string | null;
+
     @Column({ type: 'datetime' })
     created_at!: Date;
 

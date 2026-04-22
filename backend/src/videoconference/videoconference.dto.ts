@@ -386,6 +386,14 @@ export class PreviewAkademicInheritanceCopyDto {
 }
 
 export class CloneAkademicInheritanceCopyDto {
+    @IsOptional()
+    @IsString()
+    inheritanceId?: string;
+
+    @IsOptional()
+    @IsString()
+    parentLocalVideoconferenceId?: string;
+
     @IsString()
     @IsNotEmpty()
     id!: string;
