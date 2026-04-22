@@ -509,6 +509,7 @@ export interface VcScheduleHostRule {
     updated_at: string;
     section_id: string;
     section_code: string;
+    section_external_code: string | null;
     course_id: string | null;
     course_label: string | null;
     subsection_code: string | null;

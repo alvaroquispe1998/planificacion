@@ -6897,12 +6897,15 @@ export class PlanningImportService {
       throw new BadRequestException('No se encontro el curso origen en Akademic para esta seccion.');
     }
 
-    const sourceSections = await this.fetchAkademicSections(sourceCourse.id, sourceTermId).catch(() => []);
-    const sourceSection =
-      sourceSections.find((item: AkademicSectionRow) => item.id === section.source_section_id) ??
-      this.buildFallbackAkademicSectionForSectionSync(section, sourceCourse.id, detail);
+    let sourceSections: AkademicSectionRow[] | null = null;
+    try {
+      sourceSections = await this.fetchAkademicSections(sourceCourse.id, sourceTermId);
+    } catch {
+      sourceSections = null;
+    }
 
-    if (!sourceSection) {
+    const listedSourceSection = sourceSections?.find((item: AkademicSectionRow) => item.id === section.source_section_id) ?? null;
+    if (sourceSections && !listedSourceSection) {
       const deleted = await this.offersRepo.manager.transaction(async (manager) => {
         return this.deleteAkademicSectionTree(manager, section.id, offer, actor, true);
       });
@@ -6929,6 +6932,14 @@ export class PlanningImportService {
           schedules_deleted: deleted.schedules_deleted,
         },
       };
+    }
+
+    const sourceSection =
+      listedSourceSection ??
+      this.buildFallbackAkademicSectionForSectionSync(section, sourceCourse.id, detail);
+
+    if (!sourceSection) {
+      throw new BadRequestException('No se pudo resolver la seccion origen en Akademic para sincronizar.');
     }
 
     const schedules = await this.fetchAkademicSectionSchedules(sourceSection.id);

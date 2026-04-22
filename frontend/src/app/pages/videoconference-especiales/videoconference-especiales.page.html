@@ -61,7 +61,7 @@
             (click)="selectSection(sec)"
           >
             <div class="sec-row-top">
-              <span class="sec-code">{{ sec.section_code }}</span>
+              <span class="sec-code">{{ formatSectionDisplay(sec) }}</span>
               <span class="chip chip-sm" [class.chip-ok]="rulesCount(sec) > 0" [class.chip-neutral]="rulesCount(sec) === 0">
                 {{ rulesCount(sec) }} regla{{ rulesCount(sec) !== 1 ? 's' : '' }}
               </span>
@@ -95,7 +95,7 @@
 
         <div class="config-head">
           <div class="config-head-copy">
-            <h2>{{ selectedSection.section_code }}</h2>
+            <h2>{{ formatSectionDisplay(selectedSection) }}</h2>
             <p class="subtle">{{ selectedSection.section_label }}</p>
           </div>
           <div class="teacher-badge" *ngIf="selectedSection.teacher_name">
@@ -293,7 +293,7 @@
     <p class="summary-empty" *ngIf="allSavedRulesLoading">Cargando...</p>
     <div class="summary-list" *ngIf="groupedSavedRules.length > 0">
       <div class="summary-item" *ngFor="let group of groupedSavedRules">
-        <span class="summary-item-sec">{{ group.section_code }}</span>
+        <span class="summary-item-sec">{{ formatSectionDisplay(group) }}</span>
         <span class="summary-item-course">{{ group.course_label }}</span>
         <span class="summary-item-mode"
           [class.summary-item-mode--unified]="isUnifiedRuleGroup(group.rules)"
