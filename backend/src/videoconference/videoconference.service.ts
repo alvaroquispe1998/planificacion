@@ -1374,6 +1374,7 @@ export class VideoconferenceService implements OnModuleInit {
         const expanded = useCurrentFilters
             ? await this.buildExpandedScheduleContextFromFilters(selectedFilters)
             : await this.buildExpandedScheduleContext(requestedScheduleIds);
+        const hostRuleMap = await this.getActiveHostRuleMap();
 
         if (!hasStartDate || !hasEndDate) {
             const result = await this.simulateBaseAssignmentPreview(
@@ -1385,6 +1386,7 @@ export class VideoconferenceService implements OnModuleInit {
                 zoomUsers,
                 zoomConfig.maxConcurrent,
                 licenseSnapshot,
+                hostRuleMap,
             );
             return {
                 mode: 'BASE' as const,
@@ -1426,6 +1428,7 @@ export class VideoconferenceService implements OnModuleInit {
             zoomUsers,
             maxConcurrent: zoomConfig.maxConcurrent,
             licenseSnapshot,
+            hostRuleMap,
         });
         return {
             mode: 'OCCURRENCE' as const,
@@ -1612,6 +1615,7 @@ export class VideoconferenceService implements OnModuleInit {
         zoomUsers: PreviewZoomPoolUser[],
         maxConcurrent: number,
         licenseSnapshot: ZoomPoolLicenseSnapshot,
+        hostRuleMap: Map<string, { rule_id: string; zoom_user_id: string | null; zoom_user_email: string | null; zoom_user_name: string | null; zoom_group_id: string | null; zoom_group_name: string | null; lock_host: boolean; skip_zoom: boolean }> = new Map(),
     ) {
         const inheritanceByScheduleId = new Map(
             rows.map((row) => [row.schedule_id, this.resolveScheduleInheritance(row.schedule_id, inheritanceIndex, rows)] as const),
@@ -1749,25 +1753,50 @@ export class VideoconferenceService implements OnModuleInit {
             } else {
                 const slotStart = buildWeeklyScheduleDateTime(ownerRow.day_of_week, ownerRow.start_time);
                 const slotEnd = buildWeeklyScheduleDateTime(ownerRow.day_of_week, maxEndTime);
-                host = this.findAvailableZoomUserForBaseSlot(
-                    slotStart,
-                    slotEnd,
-                    zoomUsers,
-                    maxConcurrent,
-                    simulatedReservations,
-                );
-                if (host) {
-                    ownerStatus = host.is_licensed === true ? 'ASSIGNED_LICENSED' : 'ASSIGNED_RISK';
-                    ownerMessage =
-                        host.is_licensed === true
-                            ? 'Host Zoom sugerido. Puede repetirse en varias filas si los horarios no se traslapan; el sistema prioriza reutilizar hosts antes de consumir otro.'
-                            : 'Host Zoom sugerido, pero depende de licencia basica o no verificada. Puede repetirse en varias filas si los horarios no se traslapan.';
-                    const currentReservations = simulatedReservations.get(host.zoom_user_id) ?? [];
-                    currentReservations.push({
-                        scheduled_start: slotStart,
-                        scheduled_end: slotEnd,
-                    });
-                    simulatedReservations.set(host.zoom_user_id, currentReservations);
+                const ownerHostRule = hostRuleMap.get(ownerRow.schedule_id) ?? null;
+                const preAssignedUserId = ownerHostRule && !ownerHostRule.skip_zoom ? ownerHostRule.zoom_user_id : null;
+                if (preAssignedUserId) {
+                    host = this.resolvePreviewZoomUser(
+                        preAssignedUserId,
+                        ownerHostRule?.zoom_user_email ?? null,
+                        ownerHostRule?.zoom_user_name ?? null,
+                        zoomUsers,
+                        licenseSnapshot,
+                    );
+                    if (host) {
+                        ownerStatus = host.is_licensed === true ? 'ASSIGNED_LICENSED' : 'ASSIGNED_RISK';
+                        ownerMessage = ownerHostRule?.lock_host
+                            ? 'Host fijo configurado desde Cursos Especiales (obligatorio). No se ejecuta simulacion.'
+                            : 'Host preferido configurado desde Cursos Especiales. No se ejecuta simulacion.';
+                        const currentReservations = simulatedReservations.get(host.zoom_user_id) ?? [];
+                        currentReservations.push({
+                            scheduled_start: slotStart,
+                            scheduled_end: slotEnd,
+                        });
+                        simulatedReservations.set(host.zoom_user_id, currentReservations);
+                    }
+                }
+                if (!host) {
+                    host = this.findAvailableZoomUserForBaseSlot(
+                        slotStart,
+                        slotEnd,
+                        zoomUsers,
+                        maxConcurrent,
+                        simulatedReservations,
+                    );
+                    if (host) {
+                        ownerStatus = host.is_licensed === true ? 'ASSIGNED_LICENSED' : 'ASSIGNED_RISK';
+                        ownerMessage =
+                            host.is_licensed === true
+                                ? 'Host Zoom sugerido. Puede repetirse en varias filas si los horarios no se traslapan; el sistema prioriza reutilizar hosts antes de consumir otro.'
+                                : 'Host Zoom sugerido, pero depende de licencia basica o no verificada. Puede repetirse en varias filas si los horarios no se traslapan.';
+                        const currentReservations = simulatedReservations.get(host.zoom_user_id) ?? [];
+                        currentReservations.push({
+                            scheduled_start: slotStart,
+                            scheduled_end: slotEnd,
+                        });
+                        simulatedReservations.set(host.zoom_user_id, currentReservations);
+                    }
                 }
             }
 
@@ -1820,6 +1849,7 @@ export class VideoconferenceService implements OnModuleInit {
         zoomUsers: PreviewZoomPoolUser[];
         maxConcurrent: number;
         licenseSnapshot: ZoomPoolLicenseSnapshot;
+        hostRuleMap?: Map<string, { rule_id: string; zoom_user_id: string | null; zoom_user_email: string | null; zoom_user_name: string | null; zoom_group_id: string | null; zoom_group_name: string | null; lock_host: boolean; skip_zoom: boolean }>;
     }) {
         const selectedOccurrences = input.selectedOccurrenceKeys.size
             ? input.occurrences.filter((item) => input.selectedOccurrenceKeys.has(item.occurrence_key))
@@ -1879,6 +1909,7 @@ export class VideoconferenceService implements OnModuleInit {
                 remoteMeetingsCache,
                 simulatedReservations,
                 input.licenseSnapshot,
+                input.hostRuleMap?.get(ownerOccurrence.row.schedule_id) ?? null,
             );
 
             if (ownerResult.preview_status === 'NO_AVAILABLE_ZOOM_USER') {
@@ -1923,6 +1954,7 @@ export class VideoconferenceService implements OnModuleInit {
         remoteMeetingsCache: Map<string, ZoomMeetingSummary[] | null>,
         simulatedReservations: Map<string, SimulatedReservation[]>,
         licenseSnapshot: ZoomPoolLicenseSnapshot,
+        hostRule: { rule_id: string; zoom_user_id: string | null; zoom_user_email: string | null; zoom_user_name: string | null; zoom_group_id: string | null; zoom_group_name: string | null; lock_host: boolean; skip_zoom: boolean } | null = null,
     ) {
         const validationError = this.validateScheduleForGeneration(occurrence.row);
         if (validationError) {
@@ -1972,6 +2004,44 @@ export class VideoconferenceService implements OnModuleInit {
                 inheritance: occurrence.inheritance,
                 ownerOccurrenceKey: null,
             });
+        }
+
+        const preAssignedUserId = hostRule && !hostRule.skip_zoom ? hostRule.zoom_user_id : null;
+        if (preAssignedUserId) {
+            const forcedHost = this.resolvePreviewZoomUser(
+                preAssignedUserId,
+                hostRule?.zoom_user_email ?? null,
+                hostRule?.zoom_user_name ?? null,
+                zoomUsers,
+                licenseSnapshot,
+            );
+            if (forcedHost) {
+                const currentReservations = simulatedReservations.get(forcedHost.zoom_user_id) ?? [];
+                currentReservations.push({
+                    scheduled_start: occurrence.scheduled_start,
+                    scheduled_end: occurrence.scheduled_end,
+                });
+                simulatedReservations.set(forcedHost.zoom_user_id, currentReservations);
+                return this.buildAssignmentPreviewItem({
+                    id: occurrence.occurrence_key,
+                    mode: 'OCCURRENCE',
+                    occurrenceKey: occurrence.occurrence_key,
+                    scheduleId: occurrence.row.schedule_id,
+                    conferenceDate: occurrence.effective_conference_date,
+                    row: occurrence.row,
+                    dayOfWeek: dayCodeForDate(occurrence.effective_conference_date),
+                    startTime: occurrence.effective_start_time,
+                    endTime: occurrence.effective_end_time,
+                    previewStatus: forcedHost.is_licensed === true ? 'ASSIGNED_LICENSED' : 'ASSIGNED_RISK',
+                    message: hostRule?.lock_host
+                        ? 'Host fijo configurado desde Cursos Especiales (obligatorio). No se ejecuta simulacion.'
+                        : 'Host preferido configurado desde Cursos Especiales. No se ejecuta simulacion.',
+                    host: forcedHost,
+                    consumesCapacity: true,
+                    inheritance: occurrence.inheritance,
+                    ownerOccurrenceKey: null,
+                });
+            }
         }
 
         const findResult = await this.findAvailableZoomUser(
