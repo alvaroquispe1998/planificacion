@@ -121,19 +121,32 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
   }
 
   editFromGlobalSummary(group: { section_id: string; section_code: string; course_id: string | null; course_label: string | null }) {
+    const scrollToConfig = () => {
+      setTimeout(() => {
+        const el = document.querySelector('.workspace-config');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+    };
+
     // If the course is already loaded, just select the section
     const existingSection = this.sections.find((s) => s.section_id === group.section_id);
     if (existingSection) {
       this.selectSection(existingSection);
+      scrollToConfig();
       return;
     }
     // Otherwise load the course first
     const courseId = group.course_id;
-    if (!courseId) return;
+    if (!courseId) {
+      this.configError = 'No se pudo abrir la configuración: falta el curso asociado.';
+      this.cdr.markForCheck();
+      return;
+    }
     // Set the search field so user sees the context
     this.selectedCourse = { id: courseId, label: group.course_label ?? courseId };
     this.courseSearch = this.selectedCourse.label;
     this.loadSections(courseId, group.section_id);
+    scrollToConfig();
   }
 
   async deleteAllForSection(group: { section_id: string; section_code: string; rules: VcScheduleHostRule[] }) {

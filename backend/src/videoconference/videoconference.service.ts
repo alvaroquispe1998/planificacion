@@ -4654,13 +4654,13 @@ export class VideoconferenceService implements OnModuleInit {
             childrenByParent.set(parentId, [...mappings]);
         }
 
-        // Schedules with an active host rule must NOT be auto-merged into a
-        // continuous block. They belong to Cursos Especiales and each group
-        // must be treated as an independent Zoom session.
+        // Schedules with an active host rule from Cursos Especiales in "Por horario"
+        // mode must NOT be auto-merged. But when the rule is uniform across the
+        // whole block (Asignación unificada) or when only some rows have rules,
+        // the remaining rows should still be merged together.
         const hostRuleMap = await this.getActiveHostRuleMap();
-        const hostRuleScheduleIds = new Set(hostRuleMap.keys());
 
-        const continuousMappings = this.buildContinuousBlockMappings(rows, baseIndex, hostRuleScheduleIds);
+        const continuousMappings = this.buildContinuousBlockMappings(rows, baseIndex, hostRuleMap);
         for (const mapping of continuousMappings) {
             byChild.set(mapping.child_schedule_id, mapping);
             const siblings = childrenByParent.get(mapping.parent_schedule_id) ?? [];
@@ -4674,7 +4674,7 @@ export class VideoconferenceService implements OnModuleInit {
     private buildContinuousBlockMappings(
         rows: ScheduleContextRow[],
         inheritanceIndex: InheritanceIndex,
-        hostRuleScheduleIds: Set<string> = new Set(),
+        hostRuleMap: Map<string, { zoom_user_id: string | null; zoom_group_id: string | null; skip_zoom: boolean }> = new Map(),
     ) {
         const explicitChildIds = new Set(inheritanceIndex.byChild.keys());
         const groups = new Map<string, ScheduleContextRow[]>();
@@ -4710,13 +4710,35 @@ export class VideoconferenceService implements OnModuleInit {
                 continue;
             }
 
-            // If any schedule in this group has an explicit host rule (Cursos Especiales),
-            // skip auto-merging — every schedule must stay as its own independent session.
-            if (groupRows.some((r) => hostRuleScheduleIds.has(r.schedule_id))) {
+            // Decide, per group, which rows are mergeable.
+            // - If ALL rows have a host_rule AND all rule configs are identical
+            //   → "Asignación unificada" → merge all rows normally.
+            // - Otherwise → "Por horario" → rows WITH a host_rule are treated as
+            //   independent sessions; only rows WITHOUT a rule keep auto-merging
+            //   among themselves.
+            const rowsWithRule = groupRows.filter((r) => hostRuleMap.has(r.schedule_id));
+            let mergeableRows: ScheduleContextRow[] = groupRows;
+            if (rowsWithRule.length > 0) {
+                let isUnified = false;
+                if (rowsWithRule.length === groupRows.length) {
+                    const signatures = new Set(
+                        groupRows.map((r) => {
+                            const rule = hostRuleMap.get(r.schedule_id)!;
+                            return `${rule.skip_zoom ? '1' : '0'}|${rule.zoom_group_id ?? ''}|${rule.zoom_user_id ?? ''}`;
+                        }),
+                    );
+                    isUnified = signatures.size === 1;
+                }
+                if (!isUnified) {
+                    mergeableRows = groupRows.filter((r) => !hostRuleMap.has(r.schedule_id));
+                }
+            }
+
+            if (mergeableRows.length < 2) {
                 continue;
             }
 
-            const ordered = [...groupRows].sort((left, right) => {
+            const ordered = [...mergeableRows].sort((left, right) => {
                 const startCmp = compactTime(left.start_time).localeCompare(compactTime(right.start_time));
                 if (startCmp !== 0) return startCmp;
                 return compactTime(right.end_time).localeCompare(compactTime(left.end_time)); // Mas largo primero si empiezan igual
