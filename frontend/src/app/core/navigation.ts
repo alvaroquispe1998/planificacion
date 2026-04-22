@@ -108,8 +108,8 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             label: 'Configuracion Zoom',
             path: '/videoconferences/zoom-config',
             icon: 'key',
-            window: 'window.settings',
-            permission: 'action.settings.manage',
+            window: 'window.videoconferences',
+            permission: 'action.videoconferences.zoom_config.view',
             match: {
               exact: ['/videoconferences/zoom-config'],
             },
@@ -119,6 +119,7 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             path: '/videoconferences',
             icon: 'spark',
             window: 'window.videoconferences',
+            permission: 'action.videoconferences.management.view',
             match: {
               exact: ['/videoconferences'],
             },
@@ -127,8 +128,8 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             label: 'Herencias Zoom',
             path: '/videoconferences/inheritances',
             icon: 'link',
-            window: 'window.settings',
-            permission: 'action.settings.manage',
+            window: 'window.videoconferences',
+            permission: 'action.videoconferences.inheritances.view',
             match: {
               exact: ['/videoconferences/inheritances'],
             },
@@ -137,8 +138,8 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             label: 'Usuarios Zoom',
             path: '/videoconferences/zoom-users',
             icon: 'users',
-            window: 'window.settings',
-            permission: 'action.settings.manage',
+            window: 'window.videoconferences',
+            permission: 'action.videoconferences.zoom_users.view',
             match: {
               exact: ['/videoconferences/zoom-users'],
             },
@@ -147,8 +148,8 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             label: 'Cursos Especiales',
             path: '/videoconferences/especiales',
             icon: 'zap',
-            window: 'window.settings',
-            permission: 'action.settings.manage',
+            window: 'window.videoconferences',
+            permission: 'action.videoconferences.cursos_especiales.view',
             match: {
               exact: ['/videoconferences/especiales'],
             },
@@ -158,6 +159,7 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             path: '/videoconferences/reprogramaciones',
             icon: 'history',
             window: 'window.videoconferences',
+            permission: 'action.videoconferences.reprogramaciones.view',
             match: {
               exact: ['/videoconferences/reprogramaciones'],
             },

@@ -107,8 +107,8 @@ export const routes: Routes = [
     component: VideoconferenceZoomConfigPageComponent,
     canActivate: [windowGuard, permissionGuard],
     data: {
-      requiredWindow: 'window.settings',
-      requiredPermission: 'action.settings.manage',
+      requiredWindow: 'window.videoconferences',
+      requiredPermission: 'action.videoconferences.zoom_config.view',
     },
   },
   {
@@ -116,8 +116,8 @@ export const routes: Routes = [
     component: VideoconferenceInheritancesPageComponent,
     canActivate: [windowGuard, permissionGuard],
     data: {
-      requiredWindow: 'window.settings',
-      requiredPermission: 'action.settings.manage',
+      requiredWindow: 'window.videoconferences',
+      requiredPermission: 'action.videoconferences.inheritances.view',
     },
   },
   {
@@ -125,8 +125,8 @@ export const routes: Routes = [
     component: VideoconferenceZoomUsersPageComponent,
     canActivate: [windowGuard, permissionGuard],
     data: {
-      requiredWindow: 'window.settings',
-      requiredPermission: 'action.settings.manage',
+      requiredWindow: 'window.videoconferences',
+      requiredPermission: 'action.videoconferences.zoom_users.view',
     },
   },
   {
@@ -134,15 +134,18 @@ export const routes: Routes = [
     component: VideoconferenceEspecialesPageComponent,
     canActivate: [windowGuard, permissionGuard],
     data: {
-      requiredWindow: 'window.settings',
-      requiredPermission: 'action.settings.manage',
+      requiredWindow: 'window.videoconferences',
+      requiredPermission: 'action.videoconferences.cursos_especiales.view',
     },
   },
   {
     path: 'videoconferences/reprogramaciones',
     component: VideoconferenceReschedulesPageComponent,
-    canActivate: [windowGuard],
-    data: { requiredWindow: 'window.videoconferences' },
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.videoconferences',
+      requiredPermission: 'action.videoconferences.reprogramaciones.view',
+    },
   },
   {
     path: 'integrations/sync',
@@ -179,8 +182,11 @@ export const routes: Routes = [
   {
     path: 'videoconferences',
     component: VideoconferencesPageComponent,
-    canActivate: [windowGuard],
-    data: { requiredWindow: 'window.videoconferences' },
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.videoconferences',
+      requiredPermission: 'action.videoconferences.management.view',
+    },
   },
   { path: 'conflicts', pathMatch: 'full', redirectTo: 'planning/conflicts' },
   { path: 'audit', pathMatch: 'full', redirectTo: 'videoconferences/audit' },

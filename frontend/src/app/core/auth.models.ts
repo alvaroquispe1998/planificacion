@@ -17,6 +17,12 @@ export type PermissionCode =
   | 'action.planning.plan.review_decide'
   | 'action.videoconferences.generate'
   | 'action.videoconferences.retry'
+  | 'action.videoconferences.zoom_config.view'
+  | 'action.videoconferences.management.view'
+  | 'action.videoconferences.inheritances.view'
+  | 'action.videoconferences.zoom_users.view'
+  | 'action.videoconferences.cursos_especiales.view'
+  | 'action.videoconferences.reprogramaciones.view'
   | 'action.audit.export'
   | 'action.settings.sync_execute';
 
