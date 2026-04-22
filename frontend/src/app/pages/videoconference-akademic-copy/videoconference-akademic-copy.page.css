@@ -236,6 +236,11 @@
   color: #6e829a;
 }
 
+.child-row .clone-message {
+  color: #176b45;
+  font-weight: 800;
+}
+
 .topic-block {
   display: grid;
   gap: 0.35rem;
@@ -281,10 +286,19 @@ pre {
 }
 
 .modal-card {
-  width: min(760px, 100%);
+  width: min(1120px, calc(100vw - 2rem));
   max-height: 86vh;
   overflow: auto;
   padding: 1.25rem;
+}
+
+.modal-card .section-head > div {
+  min-width: 0;
+}
+
+.modal-card h2 {
+  max-width: 900px;
+  overflow-wrap: anywhere;
 }
 
 pre {
@@ -293,7 +307,8 @@ pre {
   border-radius: 8px;
   background: #102033;
   color: #e9f2ff;
-  white-space: pre-wrap;
+  white-space: pre;
+  overflow-x: auto;
   word-break: break-word;
 }
 
@@ -325,6 +340,11 @@ pre {
   background: #eef5fc;
   border-color: #d2e3f4;
   color: #24476e;
+}
+
+.btn-success {
+  background: #218b61;
+  color: #fff;
 }
 
 .btn:disabled {

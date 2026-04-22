@@ -5,6 +5,7 @@ import { VideoconferenceService } from './videoconference.service';
 import {
     AssignmentPreviewVideoconferenceDto,
     CheckExistingVideoconferencesDto,
+    CloneAkademicInheritanceCopyDto,
     CopyAkademicInheritancesDto,
     CreateHostRuleDto,
     CreateVideoconferenceInheritanceDto,
@@ -173,5 +174,11 @@ export class VideoconferenceController {
     @RequirePermissions(ACTION_PERMISSIONS.VIDEOCONFERENCES_AKADEMIC_COPY_VIEW)
     async previewAkademicInheritanceCopy(@Body() payload: PreviewAkademicInheritanceCopyDto) {
         return this.service.previewAkademicInheritanceCopy(payload);
+    }
+
+    @Post('akademic-inheritance-copy/clone')
+    @RequirePermissions(ACTION_PERMISSIONS.VIDEOCONFERENCES_AKADEMIC_COPY_VIEW)
+    async cloneAkademicInheritanceCopy(@Body() payload: CloneAkademicInheritanceCopyDto) {
+        return this.service.cloneAkademicInheritanceCopy(payload);
     }
 }
