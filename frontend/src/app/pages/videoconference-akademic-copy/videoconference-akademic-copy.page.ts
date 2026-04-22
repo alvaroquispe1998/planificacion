@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component } from '@angular/core';
+import { ChangeDetectorRef, Component } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import {
@@ -32,7 +32,10 @@ export class VideoconferenceAkademicCopyPageComponent {
     parentVcSectionId: '',
   };
 
-  constructor(private readonly api: VideoconferenceApiService) {}
+  constructor(
+    private readonly api: VideoconferenceApiService,
+    private readonly cdr: ChangeDetectorRef,
+  ) {}
 
   get totals() {
     return {
@@ -65,11 +68,13 @@ export class VideoconferenceAkademicCopyPageComponent {
         this.rows = Array.isArray(result.items) ? result.items : [];
         this.expandedIds = new Set(this.rows.map((row) => row.parentLocalVideoconferenceId));
         this.loading = false;
+        this.cdr.detectChanges();
       },
       error: (err) => {
         this.error = err?.error?.message ?? 'No se pudo preparar la previsualizacion.';
         this.rows = [];
         this.loading = false;
+        this.cdr.detectChanges();
       },
     });
   }
@@ -156,8 +161,9 @@ export class VideoconferenceAkademicCopyPageComponent {
       return 'Sin ID Akademic';
     }
     return row.akademicConference.matchType === 'exact_section_and_topic'
+      || row.akademicConference.matchType === 'section_and_date'
       ? 'Match exacto'
-      : 'Match solo por topic';
+      : 'Match por topic y fecha';
   }
 
   childLabel(child: AkademicInheritanceCopyPreviewChild) {

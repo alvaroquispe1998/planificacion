@@ -462,7 +462,7 @@ export interface AkademicInheritanceCopyPreviewItem {
         name: string;
         sectionId: string;
         date: string;
-        matchType: 'exact_section_and_topic' | 'topic_only';
+        matchType: 'section_and_date' | 'topic_and_date' | 'exact_section_and_topic' | 'topic_only';
     } | null;
     children: AkademicInheritanceCopyPreviewChild[];
     status: AkademicInheritanceCopyPreviewStatus;
