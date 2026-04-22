@@ -3,7 +3,6 @@ import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   VideoconferenceApiService,
-  VideoconferenceGenerationResponse,
   VideoconferencePreviewItem,
   VcScheduleHostRule,
   ZoomGroupItem,
@@ -48,13 +47,6 @@ type ScheduleRow = Omit<VideoconferencePreviewItem, 'host_rule'> & {
   };
 };
 
-type GenRow = {
-  row: ScheduleRow;
-  overrideZoomUserId: string;
-  poolUsers: ZoomPoolLicenseAwareUser[];
-  poolLoading: boolean;
-};
-
 @Component({
   selector: 'app-videoconference-especiales-page',
   standalone: true,
@@ -89,13 +81,6 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
   configSaving = false;
   configMessage = '';
   configError = '';
-
-  // ─── Stage 4: Generation ──────────────────────────────────────────────────
-  genStartDate = '';
-  genEndDate = '';
-  genRows: GenRow[] = [];
-  genLoading = false;
-  generationResult: VideoconferenceGenerationResponse | null = null;
 
   // ─── Global saved rules ───────────────────────────────────────────────────
   allSavedRules: import('../../services/videoconference-api.service').VcScheduleHostRule[] = [];
@@ -276,8 +261,6 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
     this.selectedSection = section;
     this.configMessage = '';
     this.configError = '';
-    this.generationResult = null;
-    this.genRows = [];
 
     // Detect unified mode: ALL schedules have rules, none are skip_zoom, and same group/user config
     const allHaveRules = section.schedules.every((r) => r.host_rule !== null);
@@ -489,65 +472,6 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
     });
   }
 
-  // ─── Stage 4: Generation ─────────────────────────────────────────────────
-
-  get rowsWithRule(): ScheduleRow[] {
-    return this.selectedSection?.schedules.filter((r) => r.host_rule && !r.host_rule.skip_zoom) ?? [];
-  }
-
-  prepareGenRows() {
-    this.genRows = this.rowsWithRule.map((row) => ({
-      row,
-      overrideZoomUserId: row.host_rule!.zoom_user_id ?? '',
-      poolUsers: [],
-      poolLoading: false,
-    }));
-    for (const gr of this.genRows) {
-      if (!gr.row.host_rule?.lock_host && gr.row.host_rule?.zoom_group_id) {
-        gr.poolLoading = true;
-        this.api.getZoomGroupPool(gr.row.host_rule.zoom_group_id).subscribe({
-          next: (res) => {
-            gr.poolUsers = res.items ?? [];
-            gr.poolLoading = false;
-            this.cdr.markForCheck();
-          },
-          error: () => { gr.poolLoading = false; this.cdr.markForCheck(); },
-        });
-      }
-    }
-  }
-
-  async generate() {
-    if (!this.genStartDate || !this.genEndDate) {
-      await this.dialog.alert({ title: 'Rango requerido', message: 'Define fecha inicio y fecha fin.' });
-      return;
-    }
-    if (!this.genRows.length) {
-      await this.dialog.alert({ title: 'Sin reglas', message: 'No hay horarios con host asignado.' });
-      return;
-    }
-    const ok = await this.dialog.confirm(`Generar para ${this.genRows.length} horario(s)?`);
-    if (!ok) return;
-
-    const preferredHosts = this.genRows.map((gr) => ({
-      scheduleId: gr.row.schedule_id,
-      zoomUserId: gr.row.host_rule!.lock_host ? (gr.row.host_rule!.zoom_user_id ?? '') : gr.overrideZoomUserId,
-    }));
-
-    this.genLoading = true;
-    this.generationResult = null;
-    this.api.generate({
-      zoomGroupId: '',
-      scheduleIds: this.genRows.map((gr) => gr.row.schedule_id),
-      startDate: this.genStartDate,
-      endDate: this.genEndDate,
-      preferredHosts,
-    } as any).subscribe({
-      next: (res) => { this.generationResult = res; this.genLoading = false; this.cdr.markForCheck(); },
-      error: () => { this.genLoading = false; this.cdr.markForCheck(); },
-    });
-  }
-
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
   private resetFromStage2() {
@@ -557,8 +481,6 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
     this.unifiedDraft = { zoomGroupId: '', zoomUserId: '', lockHost: false, notes: '', poolUsers: [], poolLoading: false };
     this.configMessage = '';
     this.configError = '';
-    this.genRows = [];
-    this.generationResult = null;
   }
 
   rulesCount(section: SectionSummary): number {

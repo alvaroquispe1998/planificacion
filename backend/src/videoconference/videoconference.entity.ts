@@ -13,6 +13,12 @@ export const PlanningSubsectionVideoconferenceAuditStatusValues = [
     'ERROR',
 ] as const;
 
+export const PlanningSubsectionVideoconferenceAkademicCopyStatusValues = [
+    'PENDING',
+    'COPIED',
+    'ERROR',
+] as const;
+
 export const PlanningSubsectionVideoconferenceLinkModeValues = [
     'OWNED',
     'INHERITED',
@@ -412,6 +418,14 @@ export class PlanningSubsectionVideoconferenceEntity {
 
     @Column({ type: 'text', nullable: true })
     audit_sync_error!: string | null;
+
+    @Column({
+        type: 'enum',
+        enum: PlanningSubsectionVideoconferenceAkademicCopyStatusValues,
+        nullable: true,
+        default: null,
+    })
+    akademic_copy_status!: (typeof PlanningSubsectionVideoconferenceAkademicCopyStatusValues)[number] | null;
 
     @Column({ type: 'datetime' })
     created_at!: Date;

@@ -361,6 +361,18 @@ export class PreviewVideoconferenceInheritanceCandidatesDto {
     facultyId!: string;
 }
 
+export class CopyAkademicInheritancesDto {
+    @IsDateString()
+    dateFrom!: string;
+
+    @IsDateString()
+    dateTo!: string;
+
+    @IsOptional()
+    @IsString()
+    planningOfferId?: string;
+}
+
 export class CreateVideoconferenceInheritanceDto {
     @IsString()
     parentScheduleId!: string;

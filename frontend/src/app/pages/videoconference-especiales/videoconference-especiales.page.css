@@ -1385,3 +1385,260 @@
   background: var(--chip-neutral-bg, #f3f4f6);
   color: var(--text-muted, #9ca3af);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Visual polish layer — overrides previous rules to achieve a cleaner,
+   more modern look. Kept in a single block at the bottom for clarity.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.especiales-shell {
+  gap: 1.75rem;
+  padding: 1.75rem 2rem 3rem;
+}
+
+/* Hero with soft gradient accent */
+.hero {
+  position: relative;
+  background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+  border: 1px solid #dbeafe;
+  border-radius: 1rem;
+  padding: 1.5rem 1.75rem;
+  overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 180px;
+  height: 180px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero .eyebrow {
+  color: #2563eb;
+  font-weight: 700;
+}
+.hero .hero-copy h1 {
+  font-size: 1.9rem;
+  letter-spacing: -0.015em;
+}
+.hero .subtle {
+  max-width: 68ch;
+  line-height: 1.55;
+}
+
+/* Nav card polish */
+.workspace-nav {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 14px rgba(15, 23, 42, 0.04);
+  border-radius: 0.9rem;
+}
+
+/* Section items — stronger active cue with left accent */
+.section-item {
+  position: relative;
+  padding: 0.7rem 0.85rem 0.7rem 1rem;
+  border-radius: 0.6rem;
+}
+.section-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 3px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.section-item.is-active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.12);
+}
+.section-item.is-active::before {
+  background: #2563eb;
+}
+
+/* Config panel — softer shadow and rounder */
+.config-panel {
+  border-radius: 0.9rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 20px rgba(15, 23, 42, 0.05);
+  padding: 1.75rem;
+  gap: 1.5rem;
+}
+.config-head {
+  padding-bottom: 1.1rem;
+}
+.config-head-copy h2 {
+  font-size: 1.4rem;
+  letter-spacing: -0.01em;
+}
+.teacher-badge {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+  font-weight: 600;
+}
+
+/* Mode toggle — pill style, elevated */
+.mode-toggle {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.7rem;
+  padding: 3px;
+  gap: 2px;
+}
+.mode-toggle .mode-btn {
+  border: none !important;
+  border-radius: 0.55rem;
+  padding: 0.5rem 1.1rem;
+  font-weight: 600;
+  color: #64748b;
+}
+.mode-toggle .mode-btn.active {
+  background: #fff;
+  color: #1e40af;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+/* Schedule cards — individual mode */
+.schedule-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.7rem;
+  padding: 0.9rem 1.1rem;
+  gap: 1.1rem;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.schedule-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+}
+.schedule-card.has-rule {
+  background: #ffffff;
+  border-color: #86efac;
+  border-left: 4px solid #22c55e;
+  padding-left: calc(1.1rem - 3px);
+}
+.schedule-card.is-skip {
+  background: #fafafa;
+  border-color: #e5e7eb;
+  border-left: 4px solid #9ca3af;
+  padding-left: calc(1.1rem - 3px);
+  opacity: 0.88;
+}
+.schedule-card.is-zoom {
+  border-color: #bfdbfe;
+  border-left: 4px solid #3b82f6;
+  padding-left: calc(1.1rem - 3px);
+}
+.sc-group {
+  font-size: 0.95rem;
+}
+.sc-slot {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* Mode pills inside schedule cards */
+.mode-pills {
+  background: #f1f5f9;
+  border-radius: 0.55rem;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid #e2e8f0;
+}
+.mode-pill {
+  border: none !important;
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  background: transparent;
+}
+.mode-pill.active {
+  background: #fff;
+  color: #1e40af;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+.mode-pill--zoom.active {
+  background: #3b82f6;
+  color: #fff;
+}
+.mode-pill--skip.active {
+  background: #6b7280;
+  color: #fff;
+}
+
+/* Unified schedule summary — cleaner look */
+.unified-schedules {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  border-radius: 0.7rem;
+  padding: 1rem 1.2rem;
+}
+.unified-block {
+  border-radius: 0.55rem;
+  padding: 0.65rem 0.95rem;
+  transition: background 0.15s;
+}
+.unified-block.is-merged {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+/* Buttons — sharper */
+.btn-primary {
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
+}
+
+/* Flash messages */
+.flash {
+  border-radius: 0.6rem;
+  padding: 0.85rem 1.1rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+.flash.success {
+  background: #ecfdf5;
+  color: #065f46;
+  border-color: #a7f3d0;
+}
+.flash.error {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+}
+
+/* Saved rules summary — cleaner card list */
+.summary-panel {
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 0.9rem;
+  padding: 1.5rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 6px 20px rgba(15, 23, 42, 0.04);
+}
+.summary-title {
+  font-size: 1.05rem;
+  letter-spacing: -0.005em;
+}
+.summary-item {
+  border-radius: 0.55rem;
+  transition: background 0.15s, border-color 0.15s;
+}
+.summary-item:hover {
+  background: #f8fafc;
+}
+
+/* Placeholder */
+.config-placeholder {
+  border-radius: 0.9rem;
+  padding: 3.5rem 2rem;
+  background: #fafafa;
+  border-color: #e5e7eb;
+}
+.placeholder-icon {
+  font-size: 2.5rem;
+}

@@ -5,6 +5,7 @@ import { VideoconferenceService } from './videoconference.service';
 import {
     AssignmentPreviewVideoconferenceDto,
     CheckExistingVideoconferencesDto,
+    CopyAkademicInheritancesDto,
     CreateHostRuleDto,
     CreateVideoconferenceInheritanceDto,
     FilterOptionsDto,
@@ -160,5 +161,10 @@ export class VideoconferenceController {
     @Delete('host-rules/:id')
     async deleteHostRule(@Param('id') id: string) {
         return this.service.deleteHostRule(id);
+    }
+
+    @Post('copy-akademic-inheritances')
+    async copyAkademicInheritances(@Body() payload: CopyAkademicInheritancesDto) {
+        return this.service.executeAkademicInheritanceCopy(payload);
     }
 }
