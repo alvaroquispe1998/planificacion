@@ -5354,14 +5354,19 @@ export class VideoconferenceService implements OnModuleInit {
 
     private async listAulaVirtualConferences(
         context: AulaVirtualRequestContext,
-        dateStart: string,
-        dateEnd: string,
+        dateStart: string | null,
+        dateEnd: string | null,
         searchValue: string,
         length = 50,
-    ): Promise<Array<{ id: string; name: string; sectionId: string; date: string }>> {
+        start = 0,
+    ): Promise<{
+        rows: Array<{ id: string; name: string; sectionId: string; date: string }>;
+        recordsTotal: number | null;
+        recordsFiltered: number | null;
+    }> {
         const params = new URLSearchParams({
             draw: '1',
-            start: '0',
+            start: String(start),
             length: String(length),
             'columns[0][data]': 'name',
             'columns[0][name]': '',
@@ -5369,9 +5374,13 @@ export class VideoconferenceService implements OnModuleInit {
             'columns[1][name]': '',
             'search[value]': searchValue,
             'search[regex]': 'false',
-            dateStart,
-            dateEnd,
         });
+        if (dateStart) {
+            params.set('dateStart', dateStart);
+        }
+        if (dateEnd) {
+            params.set('dateEnd', dateEnd);
+        }
 
         const url = new URL(`/gestion-conferencias/list?${params.toString()}`, context.baseUrl);
         const response = await fetch(url.toString(), {
@@ -5388,9 +5397,9 @@ export class VideoconferenceService implements OnModuleInit {
         const bodyText = await response.text();
         const body = parseMaybeJson(bodyText) as Record<string, unknown> | null;
         if (!body || !Array.isArray(body['data'])) {
-            return [];
+            return { rows: [], recordsTotal: null, recordsFiltered: null };
         }
-        return (body['data'] as unknown[]).map((item) => {
+        const rows = (body['data'] as unknown[]).map((item) => {
             const r = item as Record<string, unknown>;
             return {
                 id: String(r['id'] ?? ''),
@@ -5399,22 +5408,62 @@ export class VideoconferenceService implements OnModuleInit {
                 date: String(r['date'] ?? ''),
             };
         });
+        return {
+            rows,
+            recordsTotal: numberOrNull(body['recordsTotal']),
+            recordsFiltered: numberOrNull(body['recordsFiltered']),
+        };
+    }
+
+    private async listAllAulaVirtualConferences(
+        context: AulaVirtualRequestContext,
+        dateStart: string | null,
+        dateEnd: string | null,
+        searchValue: string,
+    ) {
+        const pageSize = 500;
+        const rows: Array<{ id: string; name: string; sectionId: string; date: string }> = [];
+        let start = 0;
+        let expectedTotal: number | null = null;
+
+        while (true) {
+            const page = await this.listAulaVirtualConferences(
+                context,
+                dateStart,
+                dateEnd,
+                searchValue,
+                pageSize,
+                start,
+            );
+            rows.push(...page.rows);
+            expectedTotal = page.recordsFiltered ?? page.recordsTotal ?? expectedTotal;
+
+            if (!page.rows.length || page.rows.length < pageSize) {
+                break;
+            }
+            start += page.rows.length;
+            if (expectedTotal !== null && rows.length >= expectedTotal) {
+                break;
+            }
+            if (start >= 10_000) {
+                break;
+            }
+        }
+
+        return rows;
     }
 
     private async listAulaVirtualConferencesByDateCache(
         context: AulaVirtualRequestContext,
         dates: string[],
-        length = 250,
     ) {
         const cache = new Map<string, Array<{ id: string; name: string; sectionId: string; date: string }>>();
+        const rows = await this.listAllAulaVirtualConferences(context, null, null, '');
         for (const date of dates) {
             if (cache.has(date)) {
                 continue;
             }
-            cache.set(
-                date,
-                await this.listAulaVirtualConferences(context, date, date, '', length),
-            );
+            cache.set(date, rows.filter((row) => sameAkademicDate(row.date, date)));
         }
         return cache;
     }
@@ -5519,13 +5568,14 @@ export class VideoconferenceService implements OnModuleInit {
                     parent.topic ?? '',
                     100,
                 );
-                const match = listings.find(
+                const listingRows = listings.rows;
+                const match = listingRows.find(
                     (r) => r.name === parent.topic && (
                         !parent.parent_vc_section_id || r.sectionId === parent.parent_vc_section_id
                     ),
                 );
                 if (!match) {
-                    const looseMatch = listings.find((r) => r.name === parent.topic);
+                    const looseMatch = listingRows.find((r) => r.name === parent.topic);
                     akademicId = looseMatch?.id ?? null;
                 } else {
                     akademicId = match.id;
@@ -5711,7 +5761,6 @@ export class VideoconferenceService implements OnModuleInit {
         const conferencesByAkademicDate = await this.listAulaVirtualConferencesByDateCache(
             aulaVirtualContext,
             uniqueAkademicDates,
-            250,
         );
 
         const items = [];
@@ -5730,18 +5779,23 @@ export class VideoconferenceService implements OnModuleInit {
 
             try {
                 const listings = conferencesByAkademicDate.get(akademicDate) ?? [];
+                const parentSectionCandidates = [
+                    parent.parent_effective_vc_section_id,
+                    parent.parent_vc_section_id,
+                    parent.parent_source_section_id,
+                ].map(normalizeIdForCompare).filter(Boolean);
                 const exactMatch = listings.find(
                     (row) =>
-                        row.date === akademicDate &&
-                        (
-                            row.sectionId === parent.parent_effective_vc_section_id ||
-                            row.sectionId === parent.parent_vc_section_id ||
-                            row.sectionId === parent.parent_source_section_id
-                        ),
+                        sameAkademicDate(row.date, akademicDate) &&
+                        parentSectionCandidates.includes(normalizeIdForCompare(row.sectionId)),
                 ) ?? null;
                 const topicOnlyMatch =
                     exactMatch ??
-                    listings.find((row) => row.date === akademicDate && row.name === parent.topic) ??
+                    listings.find(
+                        (row) =>
+                            sameAkademicDate(row.date, akademicDate) &&
+                            normalizeLoose(row.name) === normalizeLoose(parent.topic),
+                    ) ??
                     null;
                 if (topicOnlyMatch) {
                     akademicConference = {
@@ -6536,6 +6590,29 @@ function normalizeIsoDate(value: string) {
         throw new BadRequestException(`Fecha invalida: ${value}`);
     }
     return normalized;
+}
+
+function normalizeAkademicDate(value: string | null | undefined) {
+    const normalized = String(value ?? '').trim();
+    const match = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!match) {
+        return normalized;
+    }
+    const [, day, month, year] = match;
+    return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${year}`;
+}
+
+function sameAkademicDate(left: string | null | undefined, right: string | null | undefined) {
+    return normalizeAkademicDate(left) === normalizeAkademicDate(right);
+}
+
+function normalizeIdForCompare(value: string | null | undefined) {
+    return String(value ?? '').trim().toLowerCase();
+}
+
+function numberOrNull(value: unknown) {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue : null;
 }
 
 function enumerateConferenceDates(dayOfWeek: string, startDate: string, endDate: string) {
