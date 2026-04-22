@@ -5600,6 +5600,198 @@ export class VideoconferenceService implements OnModuleInit {
         return result;
     }
 
+    async previewAkademicInheritanceCopy(params: {
+        dateFrom: string;
+        dateTo: string;
+        parentVcSectionId?: string;
+    }) {
+        const dateFrom = normalizeIsoDate(params.dateFrom);
+        const dateTo = normalizeIsoDate(params.dateTo);
+        if (dateFrom > dateTo) {
+            throw new BadRequestException('dateFrom no puede ser mayor que dateTo.');
+        }
+
+        const parentVcSectionId = emptyTextToNull(params.parentVcSectionId);
+        const aulaVirtualContext = await this.getAulaVirtualRequestContext();
+
+        const baseQuery = this.planningVideoconferencesRepo
+            .createQueryBuilder('vc')
+            .innerJoin(PlanningSubsectionEntity, 'sub', 'sub.id = vc.planning_subsection_id')
+            .innerJoin(PlanningSectionEntity, 'section', 'section.id = vc.planning_section_id')
+            .innerJoin(PlanningOfferEntity, 'offer', 'offer.id = vc.planning_offer_id')
+            .innerJoin(
+                PlanningSubsectionScheduleVcInheritanceEntity,
+                'inh',
+                'inh.parent_schedule_id = vc.planning_subsection_schedule_id AND inh.is_active = true',
+            )
+            .where("vc.link_mode = 'OWNED'")
+            .andWhere('vc.status IN (:...statuses)', { statuses: ['CREATED_UNMATCHED', 'MATCHED'] })
+            .andWhere('vc.conference_date >= :dateFrom', { dateFrom })
+            .andWhere('vc.conference_date <= :dateTo', { dateTo })
+            .select('vc.id', 'vc_id')
+            .addSelect('vc.planning_subsection_schedule_id', 'schedule_id')
+            .addSelect('vc.topic', 'topic')
+            .addSelect('vc.conference_date', 'conference_date')
+            .addSelect('vc.akademic_copy_status', 'akademic_copy_status')
+            .addSelect('sub.vc_section_id', 'parent_vc_section_id')
+            .addSelect('sub.code', 'parent_subsection_code')
+            .addSelect('section.code', 'parent_section_code')
+            .addSelect('section.external_code', 'parent_section_external_code')
+            .addSelect('offer.course_code', 'course_code')
+            .addSelect('offer.course_name', 'course_name')
+            .distinct(true)
+            .orderBy('vc.conference_date', 'ASC')
+            .addOrderBy('vc.topic', 'ASC');
+
+        if (parentVcSectionId) {
+            baseQuery.andWhere('sub.vc_section_id = :parentVcSectionId', { parentVcSectionId });
+        }
+
+        const parentRows = await baseQuery.getRawMany<{
+            vc_id: string;
+            schedule_id: string;
+            topic: string | null;
+            conference_date: string;
+            akademic_copy_status: string | null;
+            parent_vc_section_id: string | null;
+            parent_subsection_code: string | null;
+            parent_section_code: string | null;
+            parent_section_external_code: string | null;
+            course_code: string | null;
+            course_name: string | null;
+        }>();
+
+        const items = [];
+        for (const parent of parentRows) {
+            const conferenceDate = toDateOnly(parent.conference_date);
+            const [year, month, day] = conferenceDate.split('-');
+            const akademicDate = `${day}/${month}/${year}`;
+            let lookupError: string | null = null;
+            let akademicConference: {
+                id: string;
+                name: string;
+                sectionId: string;
+                date: string;
+                matchType: 'exact_section_and_topic' | 'topic_only';
+            } | null = null;
+
+            try {
+                const listings = await this.listAulaVirtualConferences(
+                    aulaVirtualContext,
+                    akademicDate,
+                    akademicDate,
+                    parent.topic ?? '',
+                    100,
+                );
+                const exactMatch = listings.find(
+                    (row) =>
+                        row.name === parent.topic &&
+                        (!parent.parent_vc_section_id || row.sectionId === parent.parent_vc_section_id),
+                ) ?? null;
+                const topicOnlyMatch = exactMatch ?? listings.find((row) => row.name === parent.topic) ?? null;
+                if (topicOnlyMatch) {
+                    akademicConference = {
+                        id: topicOnlyMatch.id,
+                        name: topicOnlyMatch.name,
+                        sectionId: topicOnlyMatch.sectionId,
+                        date: topicOnlyMatch.date,
+                        matchType: exactMatch ? 'exact_section_and_topic' : 'topic_only',
+                    };
+                }
+            } catch (error) {
+                lookupError = error instanceof Error ? error.message : String(error);
+            }
+
+            const childRows = await this.schedulesRepo
+                .createQueryBuilder('sched')
+                .innerJoin(PlanningSubsectionEntity, 'child_sub', 'child_sub.id = sched.planning_subsection_id')
+                .innerJoin(PlanningSectionEntity, 'child_section', 'child_section.id = child_sub.planning_section_id')
+                .innerJoin(
+                    PlanningSubsectionScheduleVcInheritanceEntity,
+                    'inh',
+                    'inh.child_schedule_id = sched.id AND inh.is_active = true AND inh.parent_schedule_id = :parentScheduleId',
+                    { parentScheduleId: parent.schedule_id },
+                )
+                .select('inh.id', 'inheritance_id')
+                .addSelect('sched.id', 'child_schedule_id')
+                .addSelect('child_sub.vc_section_id', 'child_vc_section_id')
+                .addSelect('child_sub.code', 'child_subsection_code')
+                .addSelect('child_section.code', 'child_section_code')
+                .addSelect('child_section.external_code', 'child_section_external_code')
+                .orderBy('child_section.code', 'ASC')
+                .addOrderBy('child_sub.code', 'ASC')
+                .getRawMany<{
+                    inheritance_id: string;
+                    child_schedule_id: string;
+                    child_vc_section_id: string | null;
+                    child_subsection_code: string | null;
+                    child_section_code: string | null;
+                    child_section_external_code: string | null;
+                }>();
+
+            const children = childRows.map((child) => {
+                const childStatus =
+                    !akademicConference
+                        ? 'MISSING_AKADEMIC_CONFERENCE'
+                        : !child.child_vc_section_id
+                            ? 'MISSING_CHILD_SECTION'
+                            : 'READY';
+                return {
+                    inheritanceId: child.inheritance_id,
+                    childScheduleId: child.child_schedule_id,
+                    childVcSectionId: child.child_vc_section_id,
+                    childSectionCode: child.child_section_code,
+                    childSectionExternalCode: child.child_section_external_code,
+                    childSubsectionCode: child.child_subsection_code,
+                    payload: childStatus === 'READY'
+                        ? {
+                            id: akademicConference?.id ?? '',
+                            name: parent.topic ?? '',
+                            sectionIdTo: child.child_vc_section_id ?? '',
+                        }
+                        : null,
+                    status: childStatus,
+                };
+            });
+
+            const status =
+                lookupError
+                    ? 'LOOKUP_ERROR'
+                    : !akademicConference
+                        ? 'MISSING_AKADEMIC_CONFERENCE'
+                        : !children.length
+                            ? 'NO_CHILDREN'
+                            : children.some((child) => child.status !== 'READY')
+                                ? 'CHILDREN_INCOMPLETE'
+                                : 'READY';
+
+            items.push({
+                parentLocalVideoconferenceId: parent.vc_id,
+                parentScheduleId: parent.schedule_id,
+                parentVcSectionId: parent.parent_vc_section_id,
+                parentSectionCode: parent.parent_section_code,
+                parentSectionExternalCode: parent.parent_section_external_code,
+                parentSubsectionCode: parent.parent_subsection_code,
+                courseCode: parent.course_code,
+                courseName: parent.course_name,
+                courseLabel: buildCourseLabel(parent.course_code, parent.course_name),
+                conferenceDate,
+                akademicDate,
+                topic: parent.topic,
+                akademicCopyStatus: parent.akademic_copy_status,
+                akademicConference,
+                children,
+                status,
+                lookupError,
+            });
+        }
+
+        return {
+            count: items.length,
+            items,
+        };
+    }
+
     private async findAvailableZoomUser<T extends ZoomPoolUser>(
         scheduledStart: Date,
         scheduledEnd: Date,
@@ -5789,7 +5981,7 @@ function buildGenerationMessage(summary: {
     const parts = [
         `${summary.matched} conciliadas`,
         `${summary.createdUnmatched} creadas sin match`,
-        `${summary.blockedExisting} bloqueadas por existente`,
+        `${summary.blockedExisting} omitidas para evitar duplicados`,
         `${summary.noAvailableZoomUser} sin usuario Zoom`,
         `${summary.validationErrors} con validacion pendiente`,
         `${summary.errors} con error`,

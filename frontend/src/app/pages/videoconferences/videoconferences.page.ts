@@ -1001,7 +1001,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     const payload = this.usesOccurrenceRows
       ? {
           zoomGroupId: this.selectedZoomGroupId,
-          occurrenceKeys: selected.map((item) => item.occurrence_key),
+          occurrenceKeys: this.buildOwnerOccurrenceKeysForGeneration(selected),
           startDate: this.startDate,
           endDate: this.endDate,
           preferredHosts,
@@ -1934,6 +1934,76 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     };
   }
 
+  private buildOwnerOccurrenceKeysForGeneration(selectedRows: PreviewSelectionItem[]) {
+    const keys = new Set<string>();
+    for (const row of selectedRows) {
+      const baseDate = row.base_conference_date || this.readOccurrenceDate(row.occurrence_key);
+      if (!baseDate) {
+        continue;
+      }
+      const ownerScheduleId = row.inheritance?.family_owner_schedule_id || row.schedule_id;
+      keys.add(`${ownerScheduleId}::${baseDate}`);
+    }
+    return Array.from(keys);
+  }
+
+  private normalizeOccurrenceKeysForGeneration(occurrenceKeys: string[] | undefined) {
+    if (!occurrenceKeys?.length) {
+      return occurrenceKeys;
+    }
+    const previewByKey = new Map(this.previewData.map((item) => [item.occurrence_key, item] as const));
+    const normalized = new Set<string>();
+    for (const key of occurrenceKeys) {
+      const preview = previewByKey.get(key);
+      if (preview) {
+        const [ownerKey] = this.buildOwnerOccurrenceKeysForGeneration([preview]);
+        normalized.add(ownerKey || key);
+        continue;
+      }
+      normalized.add(key);
+    }
+    return Array.from(normalized);
+  }
+
+  private readOccurrenceDate(occurrenceKey: string | null | undefined) {
+    const raw = String(occurrenceKey ?? '');
+    const sep = raw.lastIndexOf('::');
+    return sep >= 0 ? raw.slice(sep + 2).trim() : '';
+  }
+
+  private buildGenerationCompletionMessage(results: VideoconferenceGenerationResultItem[]) {
+    const created = results.filter((item) =>
+      item.link_mode !== 'INHERITED' && (item.status === 'MATCHED' || item.status === 'CREATED_UNMATCHED')
+    ).length;
+    const inherited = results.filter((item) =>
+      item.link_mode === 'INHERITED' && (item.status === 'MATCHED' || item.status === 'CREATED_UNMATCHED')
+    ).length;
+    const blocked = results.filter((item) => item.status === 'BLOCKED_EXISTING').length;
+    const pending = results.filter((item) =>
+      item.status === 'NO_AVAILABLE_ZOOM_USER' || item.status === 'VALIDATION_ERROR'
+    ).length;
+    const errors = results.filter((item) => item.status === 'ERROR').length;
+
+    const parts: string[] = [];
+    if (created > 0) {
+      parts.push(`${created} creada(s) en Aula Virtual`);
+    }
+    if (inherited > 0) {
+      parts.push(`${inherited} heredada(s)`);
+    }
+    if (blocked > 0) {
+      parts.push(`${blocked} omitida(s) para evitar duplicados`);
+    }
+    if (pending > 0) {
+      parts.push(`${pending} pendiente(s) de revisar`);
+    }
+    if (errors > 0) {
+      parts.push(`${errors} con error`);
+    }
+
+    return `${parts.length ? parts.join(', ') + '. ' : 'El lote fue procesado. '}Sincroniza el ID Zoom desde Auditoria.`;
+  }
+
   // Max schedules/occurrences per single HTTP request to avoid proxy timeouts.
   // Each item: 500ms throttle + 1-8s Aula Virtual POST = up to ~8.5s worst case.
   // 6 items × 8.5s = ~51s, safely under a standard 60s Apache proxy timeout.
@@ -1955,6 +2025,12 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     },
     hasConfirmedWarnings: boolean,
   ) {
+    if (payload.occurrenceKeys?.length) {
+      payload = {
+        ...payload,
+        occurrenceKeys: this.normalizeOccurrenceKeysForGeneration(payload.occurrenceKeys),
+      };
+    }
     const ids = payload.occurrenceKeys?.length ? payload.occurrenceKeys : (payload.scheduleIds ?? []);
     if (ids.length > this.GENERATION_CHUNK_SIZE) {
       this.executeGenerationChunked(payload, hasConfirmedWarnings);
@@ -1975,7 +2051,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         this.loading = false;
         await this.dialog.alert({
           title: 'Proceso finalizado',
-          message: (res.message || 'Las videoconferencias fueron procesadas.') + ' Sincroniza el ID Zoom desde Auditoría.',
+          message: this.buildGenerationCompletionMessage(res.results ?? []),
           tone: 'success',
         });
       },
@@ -2164,16 +2240,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     const errors = allResults.filter((r) =>
       ['ERROR', 'NO_AVAILABLE_ZOOM_USER', 'VALIDATION_ERROR'].includes(r.status),
     ).length;
-    const blocked = allResults.filter((r) => r.status === 'BLOCKED_EXISTING').length;
-
-    const parts: string[] = [];
-    if (created > 0) parts.push(`${created} creadas`);
-    if (blocked > 0) parts.push(`${blocked} ya existían`);
-    if (errors > 0) parts.push(`${errors} con error`);
-
     await this.dialog.alert({
       title: 'Proceso finalizado',
-      message: (parts.length ? parts.join(', ') + '. ' : '') + 'Sincroniza el ID Zoom desde Auditoría.',
+      message: this.buildGenerationCompletionMessage(allResults),
       tone: errors > 0 && created === 0 ? 'danger' : 'success',
     });
   }

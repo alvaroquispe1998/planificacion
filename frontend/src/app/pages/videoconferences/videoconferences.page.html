@@ -256,34 +256,38 @@
     </ng-template>
 
     <div class="summary-card" *ngIf="generationResult?.summary as summary">
+      <div class="summary-overview">
+        <span>Resultado del lote</span>
+        <strong>{{ summary.matched + summary.createdUnmatched }}</strong>
+        <small>creadas o registradas</small>
+      </div>
       <div class="summary-metric">
         <strong>{{ summary.requestedOccurrences }}</strong>
-        <span>Ocurrencias</span>
+        <span>Procesadas</span>
       </div>
-      <div class="summary-metric">
+      <div class="summary-metric summary-metric-success">
         <strong>{{ summary.matched }}</strong>
-        <span>Conciliadas</span>
+        <span>Con ID Zoom</span>
       </div>
-      <div class="summary-metric">
+      <div class="summary-metric summary-metric-warn">
         <strong>{{ summary.createdUnmatched }}</strong>
-        <span>Sin match</span>
+        <span>Por sincronizar</span>
       </div>
-      <div class="summary-metric">
+      <div class="summary-metric summary-metric-muted">
         <strong>{{ summary.blockedExisting }}</strong>
-        <span>Bloqueadas</span>
+        <span>Omitidas</span>
       </div>
-      <div class="summary-metric">
-        <strong>{{ summary.noAvailableZoomUser }}</strong>
-        <span>Sin host</span>
+      <div class="summary-metric summary-metric-warn">
+        <strong>{{ summary.noAvailableZoomUser + summary.validationErrors }}</strong>
+        <span>Por revisar</span>
       </div>
-      <div class="summary-metric">
-        <strong>{{ summary.validationErrors }}</strong>
-        <span>Con validacion pendiente</span>
-      </div>
-      <div class="summary-metric">
+      <div class="summary-metric summary-metric-error">
         <strong>{{ summary.errors }}</strong>
-        <span>Errores reales</span>
+        <span>Errores</span>
       </div>
+      <p class="summary-footnote" *ngIf="summary.blockedExisting > 0">
+        Omitidas significa que el sistema encontro un registro local para esa ocurrencia y no creo duplicados.
+      </p>
     </div>
 
     <!-- ─── Copiar herencias a Akademic (oculto temporalmente) ────────────── -->

@@ -135,6 +135,16 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             },
           },
           {
+            label: 'Copias Akademic',
+            path: '/videoconferences/akademic-copy',
+            icon: 'copy',
+            window: 'window.videoconferences',
+            permission: 'action.videoconferences.akademic_copy.view',
+            match: {
+              exact: ['/videoconferences/akademic-copy'],
+            },
+          },
+          {
             label: 'Usuarios Zoom',
             path: '/videoconferences/zoom-users',
             icon: 'users',

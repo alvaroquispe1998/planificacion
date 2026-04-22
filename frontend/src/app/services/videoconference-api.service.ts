@@ -407,6 +407,66 @@ export interface AkademicInheritanceCopyResult {
     }>;
 }
 
+export type AkademicInheritanceCopyPreviewStatus =
+    | 'READY'
+    | 'MISSING_AKADEMIC_CONFERENCE'
+    | 'NO_CHILDREN'
+    | 'CHILDREN_INCOMPLETE'
+    | 'LOOKUP_ERROR';
+
+export type AkademicInheritanceCopyPreviewChildStatus =
+    | 'READY'
+    | 'MISSING_AKADEMIC_CONFERENCE'
+    | 'MISSING_CHILD_SECTION';
+
+export interface AkademicInheritanceCopyPayloadPreview {
+    id: string;
+    name: string;
+    sectionIdTo: string;
+}
+
+export interface AkademicInheritanceCopyPreviewChild {
+    inheritanceId: string;
+    childScheduleId: string;
+    childVcSectionId: string | null;
+    childSectionCode: string | null;
+    childSectionExternalCode: string | null;
+    childSubsectionCode: string | null;
+    payload: AkademicInheritanceCopyPayloadPreview | null;
+    status: AkademicInheritanceCopyPreviewChildStatus;
+}
+
+export interface AkademicInheritanceCopyPreviewItem {
+    parentLocalVideoconferenceId: string;
+    parentScheduleId: string;
+    parentVcSectionId: string | null;
+    parentSectionCode: string | null;
+    parentSectionExternalCode: string | null;
+    parentSubsectionCode: string | null;
+    courseCode: string | null;
+    courseName: string | null;
+    courseLabel: string;
+    conferenceDate: string;
+    akademicDate: string;
+    topic: string | null;
+    akademicCopyStatus: string | null;
+    akademicConference: {
+        id: string;
+        name: string;
+        sectionId: string;
+        date: string;
+        matchType: 'exact_section_and_topic' | 'topic_only';
+    } | null;
+    children: AkademicInheritanceCopyPreviewChild[];
+    status: AkademicInheritanceCopyPreviewStatus;
+    lookupError: string | null;
+}
+
+export interface AkademicInheritanceCopyPreviewResponse {
+    count: number;
+    items: AkademicInheritanceCopyPreviewItem[];
+}
+
 export interface VcScheduleHostRule {
     id: string;
     schedule_id: string;
@@ -687,5 +747,16 @@ export class VideoconferenceApiService {
 
     copyAkademicInheritances(payload: { dateFrom: string; dateTo: string; planningOfferId?: string }) {
         return this.http.post<AkademicInheritanceCopyResult>(`${this.baseUrl}/copy-akademic-inheritances`, payload);
+    }
+
+    previewAkademicInheritanceCopy(payload: {
+        dateFrom: string;
+        dateTo: string;
+        parentVcSectionId?: string;
+    }) {
+        return this.http.post<AkademicInheritanceCopyPreviewResponse>(
+            `${this.baseUrl}/akademic-inheritance-copy/preview`,
+            payload,
+        );
     }
 }
