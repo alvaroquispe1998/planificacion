@@ -116,7 +116,7 @@
           <div>
             <span>Hijos</span>
             <strong>{{ row.children.length }}</strong>
-            <small>{{ row.akademicCopyStatus || 'Sin marca de copia' }}</small>
+            <small>{{ copyStatusLabel(row.akademicCopyStatus) }}</small>
           </div>
         </div>
 
@@ -134,6 +134,7 @@
               <span>ID seccion hija: {{ child.childDestinationSectionId || 'Sin ID seccion hija' }}</span>
               <span>Seccion AV: {{ child.childVcSectionName || 'Sin nombre en vc_sections' }}</span>
               <span>Schedule: {{ child.childScheduleId }}</span>
+              <span *ngIf="isAlreadyCopied(child)" class="clone-message">Videoconferencia ya clonada</span>
               <span *ngIf="cloneMessage(child)" class="clone-message">{{ cloneMessage(child) }}</span>
             </div>
             <div class="child-actions">
@@ -150,9 +151,9 @@
               <button
                 type="button"
                 class="btn btn-success btn-sm"
-                (click)="cloneChild(child)"
-                [disabled]="!child.payload || isCloning(child)">
-                {{ isCloning(child) ? 'Clonando...' : 'Clonar videoconferencia' }}
+                (click)="cloneChild(child, row)"
+                [disabled]="!child.payload || isCloning(child) || isAlreadyCopied(child)">
+                {{ isAlreadyCopied(child) ? 'Ya clonada' : isCloning(child) ? 'Clonando...' : 'Clonar videoconferencia' }}
               </button>
             </div>
           </article>

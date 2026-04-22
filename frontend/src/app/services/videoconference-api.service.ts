@@ -425,15 +425,24 @@ export interface AkademicInheritanceCopyPayloadPreview {
     sectionIdTo: string;
 }
 
+export interface CloneAkademicInheritanceCopyPayload extends AkademicInheritanceCopyPayloadPreview {
+    inheritanceId?: string;
+    parentLocalVideoconferenceId?: string;
+}
+
 export interface AkademicInheritanceCloneResult {
     ok: boolean;
     status: number;
     body: unknown;
     payload: AkademicInheritanceCopyPayloadPreview;
+    inheritanceId: string | null;
+    parentLocalVideoconferenceId: string | null;
 }
 
 export interface AkademicInheritanceCopyPreviewChild {
     inheritanceId: string;
+    akademicCopyStatus: string | null;
+    akademicCopiedAt: string | null;
     childScheduleId: string;
     childVcSectionId: string | null;
     childSourceSectionId: string | null;
@@ -777,7 +786,7 @@ export class VideoconferenceApiService {
         );
     }
 
-    cloneAkademicInheritanceCopy(payload: AkademicInheritanceCopyPayloadPreview) {
+    cloneAkademicInheritanceCopy(payload: CloneAkademicInheritanceCopyPayload) {
         return this.http.post<AkademicInheritanceCloneResult>(
             `${this.baseUrl}/akademic-inheritance-copy/clone`,
             payload,
