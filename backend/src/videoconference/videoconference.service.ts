@@ -3380,13 +3380,13 @@ export class VideoconferenceService implements OnModuleInit {
         // First try to get the AV conference ID from the stored response_json.
         // If not found, search via the /gestion-conferencias/list endpoint
         // (same approach used by Copias Akademic) matching by topic and date.
-        let akademicDeleted = false;
         try {
             const aulaVirtualContext = await this.getAulaVirtualRequestContext();
             let avId = this.extractAulaVirtualId(record.response_json);
 
             if (!avId && record.topic && record.conference_date) {
-                const conferenceDate = toDateOnly(record.conference_date instanceof Date ? record.conference_date.toISOString() : String(record.conference_date));
+                const rawDate = record.conference_date;
+                const conferenceDate = toDateOnly(typeof rawDate === 'string' ? rawDate : (rawDate as Date).toISOString());
                 const [year, month, day] = conferenceDate.split('-');
                 const akademicDate = year && month && day ? `${day}/${month}/${year}` : null;
                 if (akademicDate) {
