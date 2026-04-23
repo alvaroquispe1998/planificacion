@@ -293,6 +293,32 @@ export class ZoomAccountService {
         return this.mapMeetingSummary(response);
     }
 
+    async deleteZoomMeeting(meetingId: string): Promise<{ deleted: boolean; reason?: string }> {
+        try {
+            const token = await this.getAccessToken();
+            const url = `${ZOOM_API_BASE_URL}/meetings/${this.encodeZoomIdPathSegment(meetingId)}`;
+            const response = await this.fetchWithDiagnostics(
+                url,
+                {
+                    method: 'DELETE',
+                    headers: {
+                        authorization: `Bearer ${token}`,
+                        accept: 'application/json',
+                    },
+                },
+                'Zoom API',
+            );
+            // 204 = deleted successfully, 404 = already gone — both are acceptable
+            if (response.status === 204 || response.status === 404) {
+                return { deleted: true };
+            }
+            const bodyText = await response.text();
+            return { deleted: false, reason: `Zoom API devolvio ${response.status}: ${bodyText.slice(0, 300)}` };
+        } catch (error) {
+            return { deleted: false, reason: this.toErrorMessage(error) };
+        }
+    }
+
     async getPastMeetingDetail(meetingUuid: string) {
         const response = await this.fetchZoomJsonOrNull<Record<string, unknown>>(
             `/past_meetings/${this.encodeZoomIdPathSegment(meetingUuid)}`,

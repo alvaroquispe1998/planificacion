@@ -132,6 +132,11 @@ export class VideoconferenceController {
         return this.service.reconcile(id);
     }
 
+    @Delete(':id')
+    async deleteVideoconference(@Param('id') id: string) {
+        return this.service.deleteVideoconference(id);
+    }
+
     @Post('overrides')
     async upsertOverride(@Body() payload: UpsertVideoconferenceOverrideDto) {
         return this.service.upsertOverride(payload);

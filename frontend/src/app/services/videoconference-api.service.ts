@@ -745,6 +745,12 @@ export class VideoconferenceApiService {
         return this.http.post<VideoconferenceReconcileResponse>(`${this.baseUrl}/reconcile/${encodeURIComponent(id)}`, {});
     }
 
+    deleteVideoconference(id: string) {
+        return this.http.delete<{ success: boolean; message: string; zoom_deleted: boolean; akademic_deleted: boolean }>(
+            `${this.baseUrl}/${encodeURIComponent(id)}`,
+        );
+    }
+
     upsertOverride(payload: VideoconferenceOverridePayload) {
         return this.http.post<any>(`${this.baseUrl}/overrides`, payload);
     }

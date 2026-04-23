@@ -120,6 +120,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   expandedAssignmentHostKey = '';
   hasSearched = false;
   retryingRecordId = '';
+  deletingRecordId = '';
   appliedFilterSnapshot: AppliedFilterSnapshot | null = null;
 
   overrideEditorOpen = false;
@@ -1304,6 +1305,51 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         await this.dialog.alert({
           title: 'No se pudo reintentar la conciliacion',
           message: error?.error?.message ?? 'Intenta nuevamente en unos segundos.',
+          tone: 'danger',
+        });
+      },
+    });
+  }
+
+  isDeletingVc(item: VideoconferenceGenerationResultItem) {
+    return Boolean(item.record_id) && this.deletingRecordId === item.record_id;
+  }
+
+  async deleteConference(item: VideoconferenceGenerationResultItem) {
+    if (!item.record_id || this.deletingRecordId) {
+      return;
+    }
+    const confirmed = await this.dialog.confirm({
+      title: 'Eliminar videoconferencia',
+      message: 'Se eliminara esta videoconferencia de Aula Virtual, Zoom y la base de datos. Esta accion no se puede deshacer.',
+      confirmLabel: 'Eliminar',
+      cancelLabel: 'Cancelar',
+    });
+    if (!confirmed) {
+      return;
+    }
+    this.deletingRecordId = item.record_id;
+    this.api.deleteVideoconference(item.record_id).subscribe({
+      next: async (response) => {
+        this.deletingRecordId = '';
+        // Remove the deleted item from results
+        if (this.generationResult) {
+          this.generationResult = {
+            ...this.generationResult,
+            results: this.generationResult.results.filter((r) => r.record_id !== item.record_id),
+          };
+        }
+        await this.dialog.alert({
+          title: 'Videoconferencia eliminada',
+          message: response.message,
+          tone: 'success',
+        });
+      },
+      error: async (error) => {
+        this.deletingRecordId = '';
+        await this.dialog.alert({
+          title: 'Error al eliminar',
+          message: error?.error?.message ?? 'No se pudo eliminar la videoconferencia.',
           tone: 'danger',
         });
       },
