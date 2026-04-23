@@ -555,12 +555,14 @@ h1 {
 .generation-results-board {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  align-items: start;
   gap: 0.8rem;
   margin: 0 0 0.9rem;
 }
 
 .result-column {
   display: grid;
+  align-content: start;
   gap: 0.7rem;
   padding: 0.8rem;
   border-radius: 16px;

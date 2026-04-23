@@ -522,6 +522,14 @@
                 (click)="openAuditDetail(item.record_id)">
                 Abrir auditoria
               </button>
+              <button
+                *ngIf="item.record_id"
+                class="btn btn-danger btn-sm"
+                type="button"
+                (click)="deleteConference(item)"
+                [disabled]="isDeletingVc(item)">
+                {{ isDeletingVc(item) ? 'Eliminando...' : 'Eliminar' }}
+              </button>
             </div>
           </article>
         </div>
@@ -554,6 +562,13 @@
               </button>
               <button class="btn btn-secondary btn-sm" type="button" (click)="openAuditDetail(item.record_id)">
                 Abrir auditoria
+              </button>
+              <button
+                class="btn btn-danger btn-sm"
+                type="button"
+                (click)="deleteConference(item)"
+                [disabled]="isDeletingVc(item)">
+                {{ isDeletingVc(item) ? 'Eliminando...' : 'Eliminar' }}
               </button>
             </div>
           </article>

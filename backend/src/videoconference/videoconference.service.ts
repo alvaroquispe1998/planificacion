@@ -3343,6 +3343,101 @@ export class VideoconferenceService implements OnModuleInit {
         };
     }
 
+    async deleteVideoconference(id: string): Promise<{
+        success: boolean;
+        message: string;
+        zoom_deleted: boolean;
+        akademic_deleted: boolean;
+    }> {
+        const recordId = String(id ?? '').trim();
+        if (!recordId) {
+            throw new BadRequestException('id es requerido.');
+        }
+
+        const record = await this.planningVideoconferencesRepo.findOne({ where: { id: recordId } });
+        if (!record) {
+            throw new BadRequestException('No se encontro la videoconferencia.');
+        }
+
+        const now = new Date();
+        let zoomDeleted = false;
+        let akademicDeleted = false;
+        const errors: string[] = [];
+
+        // 1. Delete from Zoom
+        if (record.zoom_meeting_id) {
+            const zoomResult = await this.zoomAccountService.deleteZoomMeeting(record.zoom_meeting_id);
+            zoomDeleted = zoomResult.deleted;
+            if (!zoomResult.deleted && zoomResult.reason) {
+                errors.push(`Zoom: ${zoomResult.reason}`);
+            }
+        } else {
+            zoomDeleted = true; // nothing to delete
+        }
+
+        // 2. Delete from Aula Virtual
+        const avId = this.extractAulaVirtualId(record.response_json);
+        if (avId) {
+            try {
+                const aulaVirtualContext = await this.getAulaVirtualRequestContext();
+                akademicDeleted = await this.deleteAulaVirtualConference(aulaVirtualContext, avId);
+            } catch (error) {
+                errors.push(`Aula Virtual: ${toErrorMessage(error)}`);
+            }
+        } else {
+            akademicDeleted = true; // no AV record to delete
+        }
+
+        // 3. Mark as deleted in DB
+        record.delete_status = 'DELETED';
+        record.deleted_at = now;
+        if (zoomDeleted) record.zoom_deleted_at = now;
+        if (akademicDeleted) record.akademic_deleted_at = now;
+        if (errors.length) {
+            record.delete_error = errors.join(' | ');
+        }
+        record.updated_at = now;
+        await this.planningVideoconferencesRepo.save(record);
+
+        const message = errors.length
+            ? `Eliminada con advertencias: ${errors.join(' | ')}`
+            : 'Videoconferencia eliminada correctamente de Zoom, Aula Virtual y base de datos.';
+
+        return { success: true, message, zoom_deleted: zoomDeleted, akademic_deleted: akademicDeleted };
+    }
+
+    private extractAulaVirtualId(responseJson: Record<string, unknown> | null): string | null {
+        if (!responseJson) return null;
+        const body = responseJson['body'];
+        if (body && typeof body === 'object') {
+            const id = (body as Record<string, unknown>)['id'];
+            if (id && (typeof id === 'string' || typeof id === 'number')) {
+                return String(id).trim() || null;
+            }
+        }
+        return null;
+    }
+
+    private async deleteAulaVirtualConference(
+        context: AulaVirtualRequestContext,
+        avId: string,
+    ): Promise<boolean> {
+        const url = new URL(`/gestion-conferencias/eliminar/${encodeURIComponent(avId)}`, context.baseUrl);
+        const response = await fetch(url.toString(), {
+            method: 'GET',
+            headers: {
+                accept: 'application/json, text/plain, */*',
+                cookie: context.cookie,
+                referer: `${context.baseUrl}/gestion-conferencias`,
+                'user-agent': 'Mozilla/5.0 (UAI Videoconferencias)',
+                'x-requested-with': 'XMLHttpRequest',
+            },
+            redirect: 'follow',
+        });
+        // Accept 200/302 as success; 404 means already gone
+        return response.ok || response.status === 302 || response.status === 404;
+    }
+
     async reconcile(id: string): Promise<ReconcileResult> {
         const recordId = String(id ?? '').trim();
         if (!recordId) {
