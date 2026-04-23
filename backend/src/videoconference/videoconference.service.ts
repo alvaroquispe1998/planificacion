@@ -3597,11 +3597,31 @@ export class VideoconferenceService implements OnModuleInit {
             .andWhere('(conference.delete_status IS NULL OR conference.delete_status != :deletedStatus)', { deletedStatus: 'DELETED' })
             .getOne();
         if (existing) {
-            // If the record was created as INHERITED (auto-generated child) but this occurrence
-            // is being processed as an owner, let it proceed — don't block as duplicate.
+            // If the record was auto-created as INHERITED (when the parent was processed in a
+            // previous chunk) but this occurrence is now being processed as an owner, do NOT
+            // recreate it — but also do NOT count it as a "blocked duplicate". Surface it as
+            // a normal INHERITED result so the UI shows it in the "heredadas" column.
             if (existing.link_mode === 'INHERITED' && !occurrence.inheritance.is_inherited) {
-                // Fall through to normal owner creation
-            } else {
+                const inheritedStatus: GenerateResultItem['status'] = existing.status === 'MATCHED'
+                    ? 'MATCHED'
+                    : existing.status === 'CREATED_UNMATCHED'
+                        ? 'CREATED_UNMATCHED'
+                        : 'BLOCKED_EXISTING';
+                return {
+                    schedule_id: occurrence.row.schedule_id,
+                    occurrence_key: occurrence.occurrence_key,
+                    conference_date: occurrence.effective_conference_date,
+                    status: inheritedStatus,
+                    message: 'Videoconferencia ya gestionada como herencia desde el horario padre.',
+                    record_id: existing.id,
+                    zoom_user_id: existing.zoom_user_id,
+                    zoom_user_email: existing.zoom_user_email,
+                    zoom_meeting_id: existing.zoom_meeting_id,
+                    link_mode: 'INHERITED',
+                    owner_videoconference_id: existing.owner_videoconference_id,
+                    inheritance: occurrence.inheritance,
+                };
+            }
             const blockedMessage = existing.zoom_meeting_id
                 ? 'Este horario ya tenia una videoconferencia conciliada con Zoom desde una ejecucion anterior. No se genero un duplicado.'
                 : 'Este horario ya fue procesado en una ejecucion anterior pero aun sin conciliar con Zoom. Usa "Reintentar match" para vincularla.';
@@ -3619,7 +3639,6 @@ export class VideoconferenceService implements OnModuleInit {
                 owner_videoconference_id: existing.owner_videoconference_id,
                 inheritance: occurrence.inheritance,
             };
-            } // end: not (inherited-then-owner)
         }
 
         let selectedZoomUser: ZoomPoolUser | null = null;
