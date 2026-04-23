@@ -2241,6 +2241,7 @@ export class VideoconferenceService implements OnModuleInit {
             .createQueryBuilder('conference')
             .where('conference.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds })
             .andWhere('DATE(conference.conference_date) IN (:...conferenceDates)', { conferenceDates })
+            .andWhere('(conference.delete_status IS NULL OR conference.delete_status != :deletedStatus)', { deletedStatus: 'DELETED' })
             .getMany();
 
         return new Map(
@@ -3376,16 +3377,42 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         // 2. Delete from Aula Virtual
-        const avId = this.extractAulaVirtualId(record.response_json);
-        if (avId) {
-            try {
-                const aulaVirtualContext = await this.getAulaVirtualRequestContext();
-                akademicDeleted = await this.deleteAulaVirtualConference(aulaVirtualContext, avId);
-            } catch (error) {
-                errors.push(`Aula Virtual: ${toErrorMessage(error)}`);
+        // First try to get the AV conference ID from the stored response_json.
+        // If not found, search via the /gestion-conferencias/list endpoint
+        // (same approach used by Copias Akademic) matching by topic and date.
+        let akademicDeleted = false;
+        try {
+            const aulaVirtualContext = await this.getAulaVirtualRequestContext();
+            let avId = this.extractAulaVirtualId(record.response_json);
+
+            if (!avId && record.topic && record.conference_date) {
+                const conferenceDate = toDateOnly(record.conference_date instanceof Date ? record.conference_date.toISOString() : String(record.conference_date));
+                const [year, month, day] = conferenceDate.split('-');
+                const akademicDate = year && month && day ? `${day}/${month}/${year}` : null;
+                if (akademicDate) {
+                    const listings = await this.listAulaVirtualConferences(
+                        aulaVirtualContext,
+                        akademicDate,
+                        akademicDate,
+                        record.topic,
+                        100,
+                    );
+                    const match = listings.rows.find((r) => r.name === record.topic);
+                    avId = match?.id ?? null;
+                }
             }
-        } else {
-            akademicDeleted = true; // no AV record to delete
+
+            if (avId) {
+                akademicDeleted = await this.deleteAulaVirtualConference(aulaVirtualContext, avId);
+                if (!akademicDeleted) {
+                    errors.push('Aula Virtual: no se pudo confirmar la eliminacion (respuesta inesperada).');
+                }
+            } else {
+                // No AV record found — treat as already deleted
+                akademicDeleted = true;
+            }
+        } catch (error) {
+            errors.push(`Aula Virtual: ${toErrorMessage(error)}`);
         }
 
         // 3. Mark as deleted in DB
@@ -3567,8 +3594,14 @@ export class VideoconferenceService implements OnModuleInit {
             .createQueryBuilder('conference')
             .where('conference.planning_subsection_schedule_id = :scheduleId', { scheduleId: occurrence.row.schedule_id })
             .andWhere('DATE(conference.conference_date) = DATE(:conferenceDate)', { conferenceDate: occurrence.effective_conference_date })
+            .andWhere('(conference.delete_status IS NULL OR conference.delete_status != :deletedStatus)', { deletedStatus: 'DELETED' })
             .getOne();
         if (existing) {
+            // If the record was created as INHERITED (auto-generated child) but this occurrence
+            // is being processed as an owner, let it proceed — don't block as duplicate.
+            if (existing.link_mode === 'INHERITED' && !occurrence.inheritance.is_inherited) {
+                // Fall through to normal owner creation
+            } else {
             const blockedMessage = existing.zoom_meeting_id
                 ? 'Este horario ya tenia una videoconferencia conciliada con Zoom desde una ejecucion anterior. No se genero un duplicado.'
                 : 'Este horario ya fue procesado en una ejecucion anterior pero aun sin conciliar con Zoom. Usa "Reintentar match" para vincularla.';
@@ -3586,6 +3619,7 @@ export class VideoconferenceService implements OnModuleInit {
                 owner_videoconference_id: existing.owner_videoconference_id,
                 inheritance: occurrence.inheritance,
             };
+            } // end: not (inherited-then-owner)
         }
 
         let selectedZoomUser: ZoomPoolUser | null = null;
