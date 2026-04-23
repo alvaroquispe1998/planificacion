@@ -60,12 +60,13 @@
           </tr>
         </thead>
         <tbody>
-          <tr *ngFor="let row of rows">
+          <tr *ngFor="let row of rows" [class.row-deleted]="row.delete_status === 'DELETED'">
             <td>
               <div class="cell-stack">
                 <strong>{{ dateLabel(row) }}</strong>
                 <span>{{ timeLabel(row) }}</span>
                 <span>Creada: {{ formatDateTime(row.created_at) }}</span>
+                <span *ngIf="row.delete_status === 'DELETED'" style="color:#c00;font-weight:600;">Eliminada: {{ formatDateTime(row.deleted_at) }}</span>
               </div>
             </td>
             <td>
@@ -78,6 +79,7 @@
             </td>
             <td>
               <div class="status-stack">
+                <span class="pill pill-error" *ngIf="row.delete_status === 'DELETED'" style="font-weight:700;">ELIMINADA</span>
                 <span class="pill" [class.pill-info]="row.link_mode === 'INHERITED'">{{ linkModeLabel(row.link_mode) }}</span>
                 <span class="pill" [ngClass]="statusToneClass(row.status)">{{ statusLabel(row.status) }}</span>
                 <span
@@ -92,7 +94,6 @@
                   [class.pill-error]="row.planning_sync_state?.includes('REMOVED')">
                   {{ planningSyncStatusLabel(row.planning_sync_state) }}
                 </span>
-                <span class="pill pill-error" *ngIf="row.deleted_at">Eliminada localmente</span>
               </div>
             </td>
             <td>
@@ -107,6 +108,7 @@
                 Abrir detalle
               </button>
               <button
+                *ngIf="row.delete_status !== 'DELETED'"
                 type="button"
                 class="btn btn-danger btn-sm"
                 [disabled]="deletingId === row.id"

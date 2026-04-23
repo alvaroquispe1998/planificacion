@@ -91,15 +91,22 @@ export class AuditCourseSectionPageComponent implements OnInit {
   }
 
   async deleteConference(row: any) {
-    const label = `${row.conference_date ? this.formatDateSafe(row.conference_date) : '--'} ${this.shortTime(row.start_time)}-${this.shortTime(row.end_time)}`;
-    if (!confirm(`¿Eliminar la videoconferencia del ${label}?\nSe eliminará en Zoom, Aula Virtual y la base de datos.`)) return;
+    const dateLabel = row.conference_date ? this.formatDateSafe(row.conference_date) : '--';
+    const timeLabel = `${this.shortTime(row.start_time)}-${this.shortTime(row.end_time)}`;
+    const topic = row.topic ? `\n"${row.topic}"` : '';
+    const confirmed = confirm(
+      `¿Confirmar eliminación de la videoconferencia?${topic}\n\nFecha: ${dateLabel} ${timeLabel}\n\nSe eliminará primero en Aula Virtual, luego en Zoom.\nEl registro seguirá visible en esta lista marcado como ELIMINADO.\n\nSi Aula Virtual falla, la operación se cancela completamente.`
+    );
+    if (!confirmed) return;
     this.deletingId = row.id;
     this.cdr.detectChanges();
     this.vcApi.deleteVideoconference(row.id).subscribe({
       next: (result) => {
-        alert(result.message);
-        this.rows = this.rows.filter((r) => r.id !== row.id);
-        this.totals.total = Math.max(0, this.totals.total - 1);
+        // Mark row as deleted in-place (soft delete — keep it visible)
+        const idx = this.rows.findIndex((r) => r.id === row.id);
+        if (idx !== -1) {
+          this.rows[idx] = { ...this.rows[idx], delete_status: 'DELETED', deleted_at: new Date().toISOString() };
+        }
         this.deletingId = '';
         this.cdr.detectChanges();
       },

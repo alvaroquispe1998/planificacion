@@ -3363,23 +3363,10 @@ export class VideoconferenceService implements OnModuleInit {
         const now = new Date();
         let zoomDeleted = false;
         let akademicDeleted = false;
-        const errors: string[] = [];
 
-        // 1. Delete from Zoom
-        if (record.zoom_meeting_id) {
-            const zoomResult = await this.zoomAccountService.deleteZoomMeeting(record.zoom_meeting_id);
-            zoomDeleted = zoomResult.deleted;
-            if (!zoomResult.deleted && zoomResult.reason) {
-                errors.push(`Zoom: ${zoomResult.reason}`);
-            }
-        } else {
-            zoomDeleted = true; // nothing to delete
-        }
-
-        // 2. Delete from Aula Virtual
-        // First try to get the AV conference ID from the stored response_json.
-        // If not found, search via the /gestion-conferencias/list endpoint
-        // (same approach used by Copias Akademic) matching by topic and date.
+        // 1. Delete from Aula Virtual FIRST.
+        // If the record exists in AV but cannot be deleted → abort entirely (don't touch Zoom or DB).
+        // If the record is not found in AV → treat as already deleted and continue.
         try {
             const aulaVirtualContext = await this.getAulaVirtualRequestContext();
             let avId = this.extractAulaVirtualId(record.response_json);
@@ -3405,32 +3392,46 @@ export class VideoconferenceService implements OnModuleInit {
             if (avId) {
                 akademicDeleted = await this.deleteAulaVirtualConference(aulaVirtualContext, avId);
                 if (!akademicDeleted) {
-                    errors.push('Aula Virtual: no se pudo confirmar la eliminacion (respuesta inesperada).');
+                    // AV record found but could not be deleted — abort to avoid inconsistency.
+                    throw new BadRequestException(
+                        'No se pudo eliminar la videoconferencia en Aula Virtual (respuesta inesperada). La reunion en Zoom y el registro local no fueron modificados.',
+                    );
                 }
             } else {
-                // No AV record found — treat as already deleted
+                // No AV record found — treat as already deleted, continue.
                 akademicDeleted = true;
             }
         } catch (error) {
-            errors.push(`Aula Virtual: ${toErrorMessage(error)}`);
+            if (error instanceof BadRequestException) throw error;
+            throw new BadRequestException(
+                `Error al contactar Aula Virtual: ${toErrorMessage(error)}. La reunion en Zoom y el registro local no fueron modificados.`,
+            );
         }
 
-        // 3. Mark as deleted in DB
+        // 2. Delete from Zoom (only after AV succeeded).
+        if (record.zoom_meeting_id) {
+            const zoomResult = await this.zoomAccountService.deleteZoomMeeting(record.zoom_meeting_id);
+            zoomDeleted = zoomResult.deleted;
+        } else {
+            zoomDeleted = true; // nothing to delete
+        }
+
+        // 3. Mark as deleted in DB (soft-delete, record stays visible).
         record.delete_status = 'DELETED';
         record.deleted_at = now;
         if (zoomDeleted) record.zoom_deleted_at = now;
         if (akademicDeleted) record.akademic_deleted_at = now;
-        if (errors.length) {
-            record.delete_error = errors.join(' | ');
-        }
+        record.delete_error = null;
         record.updated_at = now;
         await this.planningVideoconferencesRepo.save(record);
 
-        const message = errors.length
-            ? `Eliminada con advertencias: ${errors.join(' | ')}`
-            : 'Videoconferencia eliminada correctamente de Zoom, Aula Virtual y base de datos.';
-
-        return { success: true, message, zoom_deleted: zoomDeleted, akademic_deleted: akademicDeleted };
+        const zoomNote = !zoomDeleted ? ' La reunion de Zoom no pudo eliminarse (puede que ya no exista).' : '';
+        return {
+            success: true,
+            message: `Videoconferencia eliminada correctamente de Aula Virtual y marcada como eliminada.${zoomNote}`,
+            zoom_deleted: zoomDeleted,
+            akademic_deleted: akademicDeleted,
+        };
     }
 
     private extractAulaVirtualId(responseJson: Record<string, unknown> | null): string | null {
@@ -6102,10 +6103,11 @@ export class VideoconferenceService implements OnModuleInit {
                 }>();
 
             const children = childRows.map((child) => {
-                const childDestinationSectionId =
-                    child.child_effective_vc_section_id ??
-                    child.child_vc_section_id ??
-                    child.child_source_section_id;
+                // Only the effective id resolved via JOIN with vc_sections is valid
+                // for copying to Aula Virtual. The source/vc_section_id fields may
+                // point to sections that exist in Akademic but not in AV, which
+                // would cause the AV copy endpoint to return 500.
+                const childDestinationSectionId = child.child_effective_vc_section_id ?? null;
                 const childStatus =
                     !akademicConference
                         ? 'MISSING_AKADEMIC_CONFERENCE'
