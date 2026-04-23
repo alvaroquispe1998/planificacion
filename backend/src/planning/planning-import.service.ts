@@ -6905,6 +6905,21 @@ export class PlanningImportService {
     }
 
     const listedSourceSection = sourceSections?.find((item: AkademicSectionRow) => item.id === section.source_section_id) ?? null;
+
+    // Si obtuvimos la lista de Akademic, aprovechar para limpiar secciones hermanas huérfanas
+    if (sourceSections) {
+      const akademicSectionIds = new Set(sourceSections.map((s) => s.id));
+      const siblingSections = await this.sectionsRepo.find({ where: { planning_offer_id: offer.id } });
+      const orphanSiblings = siblingSections.filter(
+        (s) => s.id !== section.id && s.source_section_id && !akademicSectionIds.has(s.source_section_id),
+      );
+      for (const orphan of orphanSiblings) {
+        await this.offersRepo.manager.transaction(async (manager) => {
+          return this.deleteAkademicSectionTree(manager, orphan.id, offer, actor, true);
+        });
+      }
+    }
+
     if (sourceSections && !listedSourceSection) {
       const deleted = await this.offersRepo.manager.transaction(async (manager) => {
         return this.deleteAkademicSectionTree(manager, section.id, offer, actor, true);
