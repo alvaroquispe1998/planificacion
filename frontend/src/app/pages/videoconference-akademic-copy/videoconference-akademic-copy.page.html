@@ -89,8 +89,9 @@
           type="button"
           class="btn btn-success btn-sm"
           (click)="cloneVisibleVideoconferences()"
-          [disabled]="loading || bulkCloning || cloneableVisibleChildren.length === 0">
-          {{ bulkCloning ? bulkProgress : 'Clonar videoconferencias listadas' }}
+          [disabled]="loading || bulkCloning || cloneableVisibleChildren.length === 0"
+          [title]="cloneableVisibleChildren.length === 0 ? 'No hay hijos con payload listo' : 'Solo se clonaran los hijos con payload listo (' + cloneableVisibleChildren.length + ')'">
+          {{ bulkCloning ? bulkProgress : ('Clonar videoconferencias listadas (' + cloneableVisibleChildren.length + ')') }}
         </button>
       </div>
     </div>
