@@ -4970,12 +4970,7 @@ export class VideoconferenceService implements OnModuleInit {
                             return `${rule.skip_zoom ? '1' : '0'}|${rule.zoom_group_id ?? ''}|${rule.zoom_user_id ?? ''}`;
                         }),
                     );
-                    // Only "unified" when ALL rows share the same rule config AND
-                    // the same start_time (i.e. truly simultaneous groups, not
-                    // consecutive blocks).  Rows at different start times must
-                    // always be treated as independent "Por horario" sessions.
-                    const startTimes = new Set(groupRows.map((r) => compactTime(r.start_time)));
-                    isUnified = signatures.size === 1 && startTimes.size === 1;
+                    isUnified = signatures.size === 1;
                 }
                 if (!isUnified) {
                     mergeableRows = groupRows.filter((r) => !hostRuleMap.has(r.schedule_id));
