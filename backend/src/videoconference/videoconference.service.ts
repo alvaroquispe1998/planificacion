@@ -4970,7 +4970,15 @@ export class VideoconferenceService implements OnModuleInit {
                             return `${rule.skip_zoom ? '1' : '0'}|${rule.zoom_group_id ?? ''}|${rule.zoom_user_id ?? ''}`;
                         }),
                     );
-                    isUnified = signatures.size === 1;
+                    // "Asignación unificada" only when ALL rows share the same config AND
+                    // a specific zoom_user_id is set (not auto-assign).  When zoom_user_id
+                    // is null (auto-assign), the user is in "Por horario" mode and each
+                    // schedule must get its own independent Zoom session.
+                    const allHaveSpecificUser = groupRows.every((r) => {
+                        const rule = hostRuleMap.get(r.schedule_id)!;
+                        return Boolean(rule.zoom_user_id);
+                    });
+                    isUnified = signatures.size === 1 && allHaveSpecificUser;
                 }
                 if (!isUnified) {
                     mergeableRows = groupRows.filter((r) => !hostRuleMap.has(r.schedule_id));
