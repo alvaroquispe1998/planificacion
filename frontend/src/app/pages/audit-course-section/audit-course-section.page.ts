@@ -3,6 +3,7 @@ import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
+import { VideoconferenceApiService } from '../../services/videoconference-api.service';
 
 @Component({
   selector: 'app-audit-course-section-page',
@@ -26,8 +27,11 @@ export class AuditCourseSectionPageComponent implements OnInit {
   };
   filters: Record<string, string> = {};
 
+  deletingId = '';
+
   constructor(
     private readonly api: ApiService,
+    private readonly vcApi: VideoconferenceApiService,
     private readonly route: ActivatedRoute,
     private readonly router: Router,
     private readonly cdr: ChangeDetectorRef,
@@ -84,6 +88,27 @@ export class AuditCourseSectionPageComponent implements OnInit {
       this.router.createUrlTree(['/videoconferences/audit', row.id]),
     );
     window.open(url, '_blank', 'noopener');
+  }
+
+  async deleteConference(row: any) {
+    const label = `${row.conference_date ? this.formatDateSafe(row.conference_date) : '--'} ${this.shortTime(row.start_time)}-${this.shortTime(row.end_time)}`;
+    if (!confirm(`¿Eliminar la videoconferencia del ${label}?\nSe eliminará en Zoom, Aula Virtual y la base de datos.`)) return;
+    this.deletingId = row.id;
+    this.cdr.detectChanges();
+    this.vcApi.deleteVideoconference(row.id).subscribe({
+      next: (result) => {
+        alert(result.message);
+        this.rows = this.rows.filter((r) => r.id !== row.id);
+        this.totals.total = Math.max(0, this.totals.total - 1);
+        this.deletingId = '';
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        alert(err?.error?.message ?? 'Error al eliminar la videoconferencia.');
+        this.deletingId = '';
+        this.cdr.detectChanges();
+      },
+    });
   }
 
   onPageSizeChange(value: string | number) {
