@@ -1,0 +1,157 @@
+<div class="page">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">Fase de pruebas</p>
+      <h1>Analisis de clase vs Syllabus</h1>
+      <p class="hint">
+        Pega el syllabus de la sesion y el transcript de la clase. Gemini comparara ambos y generara un reporte visual
+        de cobertura, temas extra y momentos clave.
+      </p>
+    </div>
+    <div class="head-actions">
+      <button type="button" class="btn btn-ghost" (click)="loadSample()" [disabled]="loading">Cargar ejemplo</button>
+      <button type="button" class="btn btn-ghost" (click)="clearForm()" [disabled]="loading">Limpiar</button>
+    </div>
+  </header>
+
+  <section class="panel no-print">
+    <div class="grid-context">
+      <label>
+        <span>Curso</span>
+        <input type="text" [(ngModel)]="form.courseLabel" placeholder="MAT-201 - Calculo Diferencial" />
+      </label>
+      <label>
+        <span>Sesion</span>
+        <input type="text" [(ngModel)]="form.sessionLabel" placeholder="Semana 5 - Derivadas" />
+      </label>
+      <label>
+        <span>Docente (opcional)</span>
+        <input type="text" [(ngModel)]="form.teacherLabel" placeholder="Nombre del docente" />
+      </label>
+    </div>
+
+    <div class="grid-texts">
+      <label>
+        <span>Syllabus de la sesion</span>
+        <textarea
+          rows="12"
+          [(ngModel)]="form.syllabusText"
+          placeholder="Pega aqui los temas, subtemas y objetivos de la sesion segun el syllabus."></textarea>
+      </label>
+      <label>
+        <span>Transcript de la clase</span>
+        <textarea
+          rows="12"
+          [(ngModel)]="form.transcriptText"
+          placeholder="Pega aqui la transcripcion. Puede incluir marcas de tiempo [HH:MM:SS] o formato VTT."></textarea>
+      </label>
+    </div>
+
+    <div class="actions">
+      <button
+        type="button"
+        class="btn btn-primary"
+        (click)="analyze()"
+        [disabled]="!canSubmit">
+        {{ loading ? 'Analizando...' : 'Analizar clase' }}
+      </button>
+      <span class="inline-error" *ngIf="error">{{ error }}</span>
+    </div>
+  </section>
+
+  <section class="panel report" *ngIf="result">
+    <div class="report-head">
+      <div>
+        <p class="eyebrow">Reporte</p>
+        <h2>{{ form.courseLabel || 'Clase' }}<span *ngIf="form.sessionLabel"> - {{ form.sessionLabel }}</span></h2>
+        <p class="hint" *ngIf="form.teacherLabel">Docente: {{ form.teacherLabel }}</p>
+      </div>
+      <button type="button" class="btn btn-ghost no-print" (click)="print()">Imprimir / PDF</button>
+    </div>
+
+    <div class="coverage" [ngClass]="coverageClass()">
+      <div class="coverage-score">
+        <strong>{{ result.coverageScore }}</strong><small>/100</small>
+      </div>
+      <div class="coverage-bar">
+        <div class="bar-fill" [style.width.%]="result.coverageScore"></div>
+      </div>
+      <p class="coverage-summary">{{ result.overallAssessment }}</p>
+    </div>
+
+    <div class="tallies">
+      <div class="tally tally-covered"><strong>{{ coveredCount }}</strong><span>Cubiertos</span></div>
+      <div class="tally tally-partial"><strong>{{ partialCount }}</strong><span>Parciales</span></div>
+      <div class="tally tally-missing"><strong>{{ missingCount }}</strong><span>No abordados</span></div>
+      <div class="tally tally-extra"><strong>{{ result.extraTopics.length }}</strong><span>Fuera de syllabus</span></div>
+    </div>
+
+    <div class="grid-two">
+      <div class="card">
+        <h3>Temas del syllabus</h3>
+        <ul class="topic-list" *ngIf="result.topics.length; else noTopics">
+          <li *ngFor="let topic of result.topics" class="topic-item">
+            <div class="topic-head">
+              <span [ngClass]="statusClass(topic.status)">{{ statusLabel(topic.status) }}</span>
+              <strong>{{ topic.title }}</strong>
+              <small *ngIf="topic.timestamp">{{ topic.timestamp }}</small>
+            </div>
+            <p *ngIf="topic.evidence" class="topic-evidence">"{{ topic.evidence }}"</p>
+            <p *ngIf="topic.note" class="topic-note">{{ topic.note }}</p>
+          </li>
+        </ul>
+        <ng-template #noTopics>
+          <p class="empty">Sin temas detectados.</p>
+        </ng-template>
+      </div>
+
+      <div class="card">
+        <h3>Temas fuera del syllabus</h3>
+        <ul *ngIf="result.extraTopics.length; else noExtras">
+          <li *ngFor="let extra of result.extraTopics">{{ extra }}</li>
+        </ul>
+        <ng-template #noExtras>
+          <p class="empty">No se detectaron temas adicionales.</p>
+        </ng-template>
+
+        <h3 class="mt-24">Momentos clave</h3>
+        <ul *ngIf="result.keyMoments.length; else noKey">
+          <li *ngFor="let km of result.keyMoments" class="key-moment">
+            <span class="timestamp" *ngIf="km.timestamp">{{ km.timestamp }}</span>
+            {{ km.summary }}
+          </li>
+        </ul>
+        <ng-template #noKey>
+          <p class="empty">Sin momentos clave relevantes.</p>
+        </ng-template>
+      </div>
+    </div>
+
+    <div class="grid-two">
+      <div class="card card-strengths">
+        <h3>Fortalezas</h3>
+        <ul *ngIf="result.strengths.length; else noStrengths">
+          <li *ngFor="let s of result.strengths">{{ s }}</li>
+        </ul>
+        <ng-template #noStrengths><p class="empty">Sin fortalezas destacadas.</p></ng-template>
+      </div>
+      <div class="card card-gaps">
+        <h3>Oportunidades de mejora</h3>
+        <ul *ngIf="result.gaps.length; else noGaps">
+          <li *ngFor="let g of result.gaps">{{ g }}</li>
+        </ul>
+        <ng-template #noGaps><p class="empty">Sin brechas detectadas.</p></ng-template>
+      </div>
+    </div>
+
+    <div class="card" *ngIf="result.pedagogyNotes">
+      <h3>Notas pedagogicas</h3>
+      <p>{{ result.pedagogyNotes }}</p>
+    </div>
+
+    <details class="raw-transcript no-print">
+      <summary>Ver metadatos de la ejecucion</summary>
+      <pre>{{ result.meta | json }}</pre>
+    </details>
+  </section>
+</div>

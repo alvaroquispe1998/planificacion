@@ -29,6 +29,12 @@ export class AuditCourseSectionPageComponent implements OnInit {
 
   deletingId = '';
 
+  // Confirm-delete modal state
+  confirmDeleteOpen = false;
+  confirmDeleteRow: any = null;
+  deleteErrorMessage = '';
+  deleteSuccessMessage = '';
+
   constructor(
     private readonly api: ApiService,
     private readonly vcApi: VideoconferenceApiService,
@@ -91,31 +97,81 @@ export class AuditCourseSectionPageComponent implements OnInit {
   }
 
   async deleteConference(row: any) {
-    const dateLabel = row.conference_date ? this.formatDateSafe(row.conference_date) : '--';
-    const timeLabel = `${this.shortTime(row.start_time)}-${this.shortTime(row.end_time)}`;
-    const topic = row.topic ? `\n"${row.topic}"` : '';
-    const confirmed = confirm(
-      `¿Confirmar eliminación de la videoconferencia?${topic}\n\nFecha: ${dateLabel} ${timeLabel}\n\nSe eliminará primero en Aula Virtual, luego en Zoom.\nEl registro seguirá visible en esta lista marcado como ELIMINADO.\n\nSi Aula Virtual falla, la operación se cancela completamente.`
-    );
-    if (!confirmed) return;
-    this.deletingId = row.id;
+    this.confirmDeleteRow = row;
+    this.confirmDeleteOpen = true;
+    this.deleteErrorMessage = '';
+    this.deleteSuccessMessage = '';
     this.cdr.detectChanges();
+  }
+
+  cancelDelete() {
+    this.confirmDeleteOpen = false;
+    this.confirmDeleteRow = null;
+    this.deleteErrorMessage = '';
+    this.cdr.detectChanges();
+  }
+
+  confirmDelete() {
+    const row = this.confirmDeleteRow;
+    if (!row || !row.id) {
+      this.deleteErrorMessage = 'Registro invalido: no tiene ID.';
+      this.cdr.detectChanges();
+      return;
+    }
+    this.deletingId = row.id;
+    this.deleteErrorMessage = '';
+    this.cdr.detectChanges();
+
+    // eslint-disable-next-line no-console
+    console.log('[DELETE videoconference] id:', row.id, 'topic:', row.topic);
+
     this.vcApi.deleteVideoconference(row.id).subscribe({
       next: (result) => {
-        // Mark row as deleted in-place (soft delete — keep it visible)
         const idx = this.rows.findIndex((r) => r.id === row.id);
         if (idx !== -1) {
-          this.rows[idx] = { ...this.rows[idx], delete_status: 'DELETED', deleted_at: new Date().toISOString() };
+          this.rows[idx] = {
+            ...this.rows[idx],
+            delete_status: 'DELETED',
+            deleted_at: new Date().toISOString(),
+          };
         }
         this.deletingId = '';
+        this.deleteSuccessMessage = result?.message || 'Videoconferencia eliminada correctamente.';
+        this.confirmDeleteOpen = false;
+        this.confirmDeleteRow = null;
         this.cdr.detectChanges();
+        // Auto-hide success message after 5s
+        setTimeout(() => {
+          this.deleteSuccessMessage = '';
+          this.cdr.detectChanges();
+        }, 5000);
       },
       error: (err) => {
-        alert(err?.error?.message ?? 'Error al eliminar la videoconferencia.');
         this.deletingId = '';
+        const status = err?.status ? ` (HTTP ${err.status})` : '';
+        const msg = err?.error?.message ?? err?.message ?? 'Error al eliminar la videoconferencia.';
+        this.deleteErrorMessage = `${msg}${status}`;
+        // eslint-disable-next-line no-console
+        console.error('[DELETE videoconference] error:', err);
         this.cdr.detectChanges();
       },
     });
+  }
+
+  get confirmDeleteTopic(): string {
+    return this.confirmDeleteRow?.topic || '';
+  }
+  get confirmDeleteDate(): string {
+    return this.confirmDeleteRow ? this.dateLabel(this.confirmDeleteRow) : '';
+  }
+  get confirmDeleteTime(): string {
+    return this.confirmDeleteRow ? this.timeLabel(this.confirmDeleteRow) : '';
+  }
+  get confirmDeleteId(): string {
+    return this.confirmDeleteRow?.id || '';
+  }
+  get confirmDeleteZoomMeetingId(): string {
+    return this.confirmDeleteRow?.zoom_meeting_id || '';
   }
 
   onPageSizeChange(value: string | number) {

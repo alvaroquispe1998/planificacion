@@ -146,3 +146,46 @@
     </ng-template>
   </section>
 </section>
+
+<!-- Success banner -->
+<div class="toast toast-success" *ngIf="deleteSuccessMessage">
+  <strong>Eliminacion completada</strong>
+  <span>{{ deleteSuccessMessage }}</span>
+</div>
+
+<!-- Confirm delete modal -->
+<div class="modal-backdrop" *ngIf="confirmDeleteOpen" (click)="cancelDelete()">
+  <div class="modal-card" (click)="$event.stopPropagation()">
+    <header class="modal-head">
+      <h3>Confirmar eliminacion</h3>
+      <button type="button" class="modal-close" (click)="cancelDelete()" [disabled]="deletingId">&times;</button>
+    </header>
+
+    <div class="modal-body">
+      <p class="modal-question">Vas a eliminar esta videoconferencia:</p>
+
+      <div class="modal-data">
+        <div><span>Topic</span><strong>{{ confirmDeleteTopic || '(sin topic)' }}</strong></div>
+        <div><span>Fecha</span><strong>{{ confirmDeleteDate }} {{ confirmDeleteTime }}</strong></div>
+        <div><span>ID videoconferencia</span><code>{{ confirmDeleteId }}</code></div>
+        <div *ngIf="confirmDeleteZoomMeetingId"><span>Zoom meeting ID</span><code>{{ confirmDeleteZoomMeetingId }}</code></div>
+      </div>
+
+      <ol class="modal-steps">
+        <li>Se elimina primero en <strong>Aula Virtual</strong>.</li>
+        <li>Luego en <strong>Zoom</strong>.</li>
+        <li>Finalmente se marca como <strong>ELIMINADA</strong> en la base de datos (el registro seguira visible en esta lista con estilo tachado).</li>
+      </ol>
+      <p class="modal-warn">Si Aula Virtual falla, la operacion se cancela completamente y nada se borra.</p>
+
+      <p class="modal-error" *ngIf="deleteErrorMessage">{{ deleteErrorMessage }}</p>
+    </div>
+
+    <footer class="modal-foot">
+      <button type="button" class="btn btn-secondary" (click)="cancelDelete()" [disabled]="deletingId">Cancelar</button>
+      <button type="button" class="btn btn-danger" (click)="confirmDelete()" [disabled]="deletingId">
+        {{ deletingId ? 'Eliminando...' : 'Si, eliminar' }}
+      </button>
+    </footer>
+  </div>
+</div>

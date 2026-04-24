@@ -184,6 +184,15 @@ export const APP_NAV_GROUPS: NavGroup[] = [
               prefix: ['/videoconferences/audit/'],
             },
           },
+          {
+            label: 'Analisis de clase (beta)',
+            path: '/analisis/transcripcion',
+            icon: 'spark',
+            window: 'window.audit',
+            match: {
+              exact: ['/analisis/transcripcion'],
+            },
+          },
         ],
       },
     ],

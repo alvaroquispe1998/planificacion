@@ -7,6 +7,7 @@ import { PlanningModule } from './planning/planning.module';
 import { SettingsModule } from './settings/settings.module';
 import { SyncModule } from './sync/sync.module';
 import { SyllabusModule } from './syllabus/syllabus.module';
+import { TranscriptAnalysisModule } from './transcript-analysis/transcript-analysis.module';
 import { VideoconferenceModule } from './videoconference/videoconference.module';
 import { AppController } from './app.controller';
 import { buildTypeOrmConfig } from './config/typeorm.config';
@@ -24,6 +25,7 @@ import { buildTypeOrmConfig } from './config/typeorm.config';
     SyncModule,
     AuditModule,
     SyllabusModule,
+    TranscriptAnalysisModule,
     VideoconferenceModule,
   ],
   controllers: [AppController],

@@ -46,15 +46,18 @@ export class VideoconferenceAkademicCopyPageComponent {
 
   get totals() {
     const children = this.rows.flatMap((row) => row.children);
+    // Every child falls into exactly one bucket so created + pending + review = children.length
     const created = children.filter((child) => this.isAlreadyCopied(child)).length;
-    const pending = children.filter((child) => child.payload && !this.isAlreadyCopied(child)).length;
-    const review = children.filter((child) => !child.payload).length + this.rows.filter((row) => row.status !== 'READY').length;
+    const pending = children.filter((child) => !!child.payload && !this.isAlreadyCopied(child)).length;
+    const review = children.filter((child) => !child.payload && !this.isAlreadyCopied(child)).length;
+    // Parents that have no children at all also deserve attention but do not appear in `children`.
+    const parentsWithoutChildren = this.rows.filter((row) => row.children.length === 0).length;
     return {
       total: this.rows.length,
       created,
       pending,
       missing: this.rows.filter((row) => row.status === 'MISSING_AKADEMIC_CONFERENCE').length,
-      attention: review,
+      attention: review + parentsWithoutChildren,
     };
   }
 

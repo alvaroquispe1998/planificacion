@@ -22,6 +22,7 @@ import { VideoconferenceInheritancesPageComponent } from './pages/videoconferenc
 import { VideoconferenceAkademicCopyPageComponent } from './pages/videoconference-akademic-copy/videoconference-akademic-copy.page';
 import { VideoconferenceZoomUsersPageComponent } from './pages/videoconference-zoom-users/videoconference-zoom-users.page';
 import { VideoconferenceReschedulesPageComponent } from './pages/videoconference-reschedules/videoconference-reschedules.page';
+import { TranscriptAnalysisPageComponent } from './pages/transcript-analysis/transcript-analysis.page';
 
 import { VideoconferencesPageComponent } from './pages/videoconferences/videoconferences.page';
 import { VideoconferenceEspecialesPageComponent } from './pages/videoconference-especiales/videoconference-especiales.page';
@@ -163,6 +164,12 @@ export const routes: Routes = [
       requiredWindow: 'window.videoconferences',
       requiredPermission: 'action.videoconferences.reprogramaciones.view',
     },
+  },
+  {
+    path: 'analisis/transcripcion',
+    component: TranscriptAnalysisPageComponent,
+    canActivate: [windowGuard],
+    data: { requiredWindow: 'window.audit' },
   },
   {
     path: 'integrations/sync',
