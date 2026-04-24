@@ -1264,6 +1264,7 @@ export class VideoconferenceService implements OnModuleInit {
                 .where('vc.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds: uniqueScheduleIds })
                 .andWhere('DATE(vc.conference_date) IN (:...conferenceDates)', { conferenceDates })
                 .andWhere("vc.status != 'ERROR'")
+                .andWhere("(vc.delete_status IS NULL OR vc.delete_status != 'DELETED')")
                 .select([
                     'vc.id',
                     'vc.planning_subsection_schedule_id',
@@ -1312,6 +1313,7 @@ export class VideoconferenceService implements OnModuleInit {
             .andWhere('DATE(vc.conference_date) >= DATE(:startDate)', { startDate })
             .andWhere('DATE(vc.conference_date) <= DATE(:endDate)', { endDate })
             .andWhere("vc.status != 'ERROR'")
+            .andWhere("(vc.delete_status IS NULL OR vc.delete_status != 'DELETED')")
             .select([
                 'vc.id',
                 'vc.planning_subsection_schedule_id',
