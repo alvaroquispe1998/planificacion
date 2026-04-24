@@ -63,8 +63,16 @@ export interface TranscriptAvailability {
   }>;
 }
 
-const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_API_BASE =
+  'https://generativelanguage.googleapis.com/v1beta/models';
+const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash';
+const ALLOWED_GEMINI_MODELS = new Set([
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+  'gemini-1.5-pro',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+]);
 
 const SYSTEM_INSTRUCTION = `Eres un asistente pedagogico que analiza la transcripcion de una clase universitaria
 en comparacion con un syllabus. Tu tarea es evaluar la cobertura de temas del syllabus,
@@ -223,7 +231,8 @@ export class TranscriptAnalysisService {
       .filter(Boolean)
       .join('\n\n');
 
-    const model = 'gemini-2.0-flash';
+    const model =
+      dto.model && ALLOWED_GEMINI_MODELS.has(dto.model) ? dto.model : DEFAULT_GEMINI_MODEL;
     const requestBody = {
       systemInstruction: {
         role: 'system',
@@ -247,11 +256,14 @@ export class TranscriptAnalysisService {
     const startedAt = Date.now();
     let response: Response;
     try {
-      response = await fetch(`${GEMINI_API_URL}?key=${encodeURIComponent(apiKey)}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(requestBody),
-      });
+      response = await fetch(
+        `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        },
+      );
     } catch (error) {
       this.logger.error('Gemini fetch error', error as Error);
       throw new BadRequestException(
@@ -261,14 +273,20 @@ export class TranscriptAnalysisService {
 
     const rawText = await response.text();
     if (!response.ok) {
-      this.logger.error(`Gemini responded ${response.status}: ${rawText.slice(0, 500)}`);
+      this.logger.error(`Gemini responded ${response.status}: ${rawText.slice(0, 1000)}`);
+      const detail = this.extractGeminiErrorDetail(rawText);
+      if (response.status === 429) {
+        throw new BadRequestException(
+          `Cuota de Gemini agotada para el modelo ${model} (429). ${detail} Sugerencia: espera unos minutos o cambia el modelo (ej. gemini-1.5-flash tiene cuota gratis mas amplia).`,
+        );
+      }
       if (response.status === 400 || response.status === 401 || response.status === 403) {
         throw new BadRequestException(
-          `Gemini rechazo la apiKey (${response.status}). Verifica que sea valida en https://aistudio.google.com.`,
+          `Gemini rechazo la peticion (${response.status}). ${detail} Verifica que la apiKey sea valida y tenga acceso al modelo ${model}.`,
         );
       }
       throw new BadRequestException(
-        `Gemini devolvio ${response.status}: ${rawText.slice(0, 300)}`,
+        `Gemini devolvio ${response.status} con modelo ${model}. ${detail}`,
       );
     }
 
@@ -309,6 +327,20 @@ export class TranscriptAnalysisService {
         generatedAt: new Date().toISOString(),
       },
     };
+  }
+
+  private extractGeminiErrorDetail(rawText: string): string {
+    try {
+      const parsed = JSON.parse(rawText) as { error?: { message?: string; status?: string } };
+      const msg = parsed?.error?.message;
+      const status = parsed?.error?.status;
+      if (msg) {
+        return status ? `${status}: ${msg}` : msg;
+      }
+    } catch {
+      /* fallthrough */
+    }
+    return rawText.slice(0, 600);
   }
 
   private isTranscriptRecording(r: MeetingRecordingEntity): boolean {

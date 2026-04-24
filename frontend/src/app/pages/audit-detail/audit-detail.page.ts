@@ -100,7 +100,15 @@ export class AuditDetailPageComponent implements OnInit {
   analysisForm = {
     apiKey: '',
     syllabusText: '',
+    model: 'gemini-1.5-flash',
   };
+  readonly analysisModels = [
+    { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash (recomendado en free tier)' },
+    { value: 'gemini-1.5-flash-8b', label: 'Gemini 1.5 Flash-8B (mas ligero)' },
+    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (mejor calidad, cuota limitada)' },
+    { value: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite' },
+    { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro (mas preciso, tier pago)' },
+  ];
   analysisAvailability: TranscriptAvailability | null = null;
   analysisAvailabilityLoading = false;
   analysisLoading = false;
@@ -478,6 +486,7 @@ export class AuditDetailPageComponent implements OnInit {
 
     const body = {
       apiKey: this.analysisForm.apiKey.trim(),
+      model: this.analysisForm.model || undefined,
       syllabusText: this.analysisForm.syllabusText,
       videoconferenceId: this.record.id,
       courseLabel:

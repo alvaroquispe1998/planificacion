@@ -3648,18 +3648,72 @@ export class VideoconferenceService implements OnModuleInit {
     ): Promise<boolean> {
         const url = new URL(`/gestion-conferencias/eliminar/${encodeURIComponent(avId)}`, context.baseUrl);
         const response = await fetch(url.toString(), {
-            method: 'GET',
+            method: 'POST',
             headers: {
                 accept: 'application/json, text/plain, */*',
+                'content-length': '0',
                 cookie: context.cookie,
+                origin: context.baseUrl,
                 referer: `${context.baseUrl}/gestion-conferencias`,
                 'user-agent': 'Mozilla/5.0 (UAI Videoconferencias)',
                 'x-requested-with': 'XMLHttpRequest',
             },
             redirect: 'follow',
         });
-        // Accept 200/302 as success; 404 means already gone
-        return response.ok || response.status === 302 || response.status === 404;
+
+        const bodyText = await response.text();
+        const contentType = response.headers.get('content-type') ?? '';
+        const redirectedToLogin =
+            response.redirected && /login|signin|account\/login/i.test(response.url);
+        const htmlLooksLikeLogin =
+            contentType.includes('text/html') && /login|iniciar sesi[oó]n|password/i.test(bodyText);
+
+        console.log(
+            `[deleteAulaVirtualConference] avId=${avId} status=${response.status} finalUrl=${response.url} ct=${contentType} redirectedLogin=${redirectedToLogin} htmlLogin=${htmlLooksLikeLogin} bodyPreview=${bodyText.slice(0, 200).replace(/\s+/g, ' ')}`,
+        );
+
+        if (redirectedToLogin || htmlLooksLikeLogin) {
+            throw new BadRequestException(
+                'La sesion de Aula Virtual expiro. Renueva la cookie en Configuracion y vuelve a intentarlo.',
+            );
+        }
+
+        // If we got a JSON response, honor its success flag.
+        const parsed = parseMaybeJson(bodyText) as Record<string, unknown> | null;
+        if (parsed && typeof parsed === 'object') {
+            const successField = parsed['success'] ?? parsed['ok'] ?? parsed['status'];
+            if (typeof successField === 'boolean') {
+                if (!successField) return false;
+            } else if (typeof successField === 'string') {
+                if (/^(false|error|fail)/i.test(successField)) return false;
+            }
+        }
+
+        if (response.status === 404) {
+            // Already deleted — verify by listing won't help since it's 404.
+            return true;
+        }
+        if (!response.ok && response.status !== 302) {
+            return false;
+        }
+
+        // Verify deletion actually took effect by re-querying the list for this avId.
+        try {
+            const verify = await this.listAulaVirtualConferences(context, null, null, avId, 10, 0);
+            const stillThere = verify.rows.some((r) => r.id === avId);
+            if (stillThere) {
+                console.log(
+                    `[deleteAulaVirtualConference] POST-delete verification: avId=${avId} still present in /gestion-conferencias/list. Treating as FAILED.`,
+                );
+                return false;
+            }
+        } catch (err) {
+            console.log(
+                `[deleteAulaVirtualConference] POST-delete verification failed to query list: ${toErrorMessage(err)}`,
+            );
+            // If we cannot verify, be conservative: trust the initial 2xx/302 response.
+        }
+        return true;
     }
 
     async reconcile(id: string): Promise<ReconcileResult> {
