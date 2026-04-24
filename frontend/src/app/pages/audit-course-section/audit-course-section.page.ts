@@ -35,6 +35,13 @@ export class AuditCourseSectionPageComponent implements OnInit {
   deleteErrorMessage = '';
   deleteSuccessMessage = '';
 
+  // Aula Virtual lookup preview
+  aulaVirtualLookupLoading = false;
+  aulaVirtualLookupId = '';
+  aulaVirtualLookupMessage = '';
+  aulaVirtualLookupSource: 'response_json' | 'list_lookup' | 'not_found' | '' = '';
+  aulaVirtualLookupFound = false;
+
   constructor(
     private readonly api: ApiService,
     private readonly vcApi: VideoconferenceApiService,
@@ -101,7 +108,36 @@ export class AuditCourseSectionPageComponent implements OnInit {
     this.confirmDeleteOpen = true;
     this.deleteErrorMessage = '';
     this.deleteSuccessMessage = '';
+    this.aulaVirtualLookupId = '';
+    this.aulaVirtualLookupMessage = '';
+    this.aulaVirtualLookupSource = '';
+    this.aulaVirtualLookupFound = false;
+    this.aulaVirtualLookupLoading = true;
     this.cdr.detectChanges();
+
+    this.vcApi.lookupAulaVirtualId(row.id).subscribe({
+      next: (res) => {
+        this.aulaVirtualLookupLoading = false;
+        this.aulaVirtualLookupId = res.aula_virtual_id || '';
+        this.aulaVirtualLookupMessage = res.message || '';
+        this.aulaVirtualLookupSource = res.source;
+        this.aulaVirtualLookupFound = !!res.aula_virtual_id;
+        // eslint-disable-next-line no-console
+        console.log('[AV lookup]', res);
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.aulaVirtualLookupLoading = false;
+        this.aulaVirtualLookupId = '';
+        this.aulaVirtualLookupFound = false;
+        this.aulaVirtualLookupSource = 'not_found';
+        this.aulaVirtualLookupMessage =
+          err?.error?.message ||
+          err?.message ||
+          'No se pudo consultar Aula Virtual.';
+        this.cdr.detectChanges();
+      },
+    });
   }
 
   cancelDelete() {

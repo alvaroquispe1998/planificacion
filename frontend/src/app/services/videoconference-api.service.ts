@@ -751,6 +751,22 @@ export class VideoconferenceApiService {
         );
     }
 
+    lookupAulaVirtualId(id: string) {
+        return this.http.get<{
+            local_id: string;
+            topic: string | null;
+            course_code: string | null;
+            section: string | null;
+            aula_virtual_id: string | null;
+            aula_virtual_section_id: string | null;
+            aula_virtual_date: string | null;
+            source: 'response_json' | 'list_lookup' | 'not_found';
+            matches: Array<{ id: string; name: string; sectionId: string; date: string }>;
+            zoom_meeting_id: string | null;
+            message: string;
+        }>(`${this.baseUrl}/${encodeURIComponent(id)}/aula-virtual-lookup`);
+    }
+
     upsertOverride(payload: VideoconferenceOverridePayload) {
         return this.http.post<any>(`${this.baseUrl}/overrides`, payload);
     }

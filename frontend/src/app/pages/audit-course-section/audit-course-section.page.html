@@ -167,9 +167,26 @@
       <div class="modal-data">
         <div><span>Topic</span><strong>{{ confirmDeleteTopic || '(sin topic)' }}</strong></div>
         <div><span>Fecha</span><strong>{{ confirmDeleteDate }} {{ confirmDeleteTime }}</strong></div>
-        <div><span>ID videoconferencia</span><code>{{ confirmDeleteId }}</code></div>
-        <div *ngIf="confirmDeleteZoomMeetingId"><span>Zoom meeting ID</span><code>{{ confirmDeleteZoomMeetingId }}</code></div>
+        <div>
+          <span>ID Aula Virtual</span>
+          <ng-container *ngIf="aulaVirtualLookupLoading">
+            <em>Buscando en Aula Virtual...</em>
+          </ng-container>
+          <ng-container *ngIf="!aulaVirtualLookupLoading">
+            <code *ngIf="aulaVirtualLookupFound" class="av-found">{{ aulaVirtualLookupId }}</code>
+            <em *ngIf="!aulaVirtualLookupFound" class="av-missing">No encontrada en Aula Virtual</em>
+          </ng-container>
+        </div>
+        <div>
+          <span>Zoom meeting ID</span>
+          <code *ngIf="confirmDeleteZoomMeetingId">{{ confirmDeleteZoomMeetingId }}</code>
+          <em *ngIf="!confirmDeleteZoomMeetingId" class="av-missing">Sin Zoom meeting ID</em>
+        </div>
       </div>
+
+      <p class="modal-hint" *ngIf="aulaVirtualLookupMessage && !aulaVirtualLookupLoading">
+        {{ aulaVirtualLookupMessage }}
+      </p>
 
       <ol class="modal-steps">
         <li>Se elimina primero en <strong>Aula Virtual</strong>.</li>
