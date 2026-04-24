@@ -182,3 +182,19 @@ tr.row-deleted .pill-error {
 }
 .toast-success strong { color: #86efac; font-size: 13px; }
 .toast-success span { font-size: 13px; }
+
+
+.modal-data code.av-found {
+  background: #dcfce7;
+  color: #166534;
+  font-weight: 600;
+}
+.modal-data em.av-missing {
+  color: #b45309;
+  font-style: italic;
+}
+.modal-hint {
+  margin: 0.25rem 0 0.75rem;
+  font-size: 0.85rem;
+  color: #475569;
+}

@@ -3465,6 +3465,150 @@ export class VideoconferenceService implements OnModuleInit {
         };
     }
 
+    /**
+     * Looks up the Aula Virtual id for a given local videoconference record without deleting.
+     * Mirrors the lookup logic used in deleteVideoconference so the UI can preview the AV id.
+     */
+    async lookupAulaVirtualId(id: string): Promise<{
+        local_id: string;
+        topic: string | null;
+        course_code: string | null;
+        section: string | null;
+        aula_virtual_id: string | null;
+        aula_virtual_section_id: string | null;
+        aula_virtual_date: string | null;
+        source: 'response_json' | 'list_lookup' | 'not_found';
+        matches: Array<{ id: string; name: string; sectionId: string; date: string }>;
+        zoom_meeting_id: string | null;
+        message: string;
+    }> {
+        const recordId = String(id ?? '').trim();
+        if (!recordId) {
+            throw new BadRequestException('id es requerido.');
+        }
+
+        const record = await this.planningVideoconferencesRepo.findOne({ where: { id: recordId } });
+        if (!record) {
+            throw new BadRequestException('No se encontro la videoconferencia.');
+        }
+
+        const topic = record.topic ?? null;
+        const meta = topic ? this.parseTopicMetadata(topic) : { courseCode: null, section: null };
+
+        // Prefer the id we already stored when creating the AV entry.
+        const storedAvId = this.extractAulaVirtualId(record.response_json);
+        if (storedAvId) {
+            return {
+                local_id: record.id,
+                topic,
+                course_code: meta.courseCode,
+                section: meta.section,
+                aula_virtual_id: storedAvId,
+                aula_virtual_section_id: null,
+                aula_virtual_date: null,
+                source: 'response_json',
+                matches: [],
+                zoom_meeting_id: record.zoom_meeting_id ?? null,
+                message: 'AV id obtenido del response_json almacenado al crear la reunion.',
+            };
+        }
+
+        if (!topic) {
+            return {
+                local_id: record.id,
+                topic: null,
+                course_code: null,
+                section: null,
+                aula_virtual_id: null,
+                aula_virtual_section_id: null,
+                aula_virtual_date: null,
+                source: 'not_found',
+                matches: [],
+                zoom_meeting_id: record.zoom_meeting_id ?? null,
+                message: 'El registro no tiene topic. No se puede buscar en Aula Virtual.',
+            };
+        }
+
+        let context: AulaVirtualRequestContext;
+        try {
+            context = await this.getAulaVirtualRequestContext();
+        } catch (error) {
+            throw new BadRequestException(
+                `No se pudo obtener la sesion de Aula Virtual: ${toErrorMessage(error)}`,
+            );
+        }
+
+        let rows: Array<{ id: string; name: string; sectionId: string; date: string }> = [];
+        if (meta.courseCode) {
+            const listing = await this.listAulaVirtualConferences(
+                context,
+                null,
+                null,
+                topic,
+                100,
+                0,
+                meta.courseCode,
+                meta.section,
+            );
+            rows = listing.rows;
+        }
+
+        let match =
+            rows.find((r) => r.name === topic) ??
+            rows.find((r) => r.name.trim() === topic.trim()) ??
+            null;
+
+        // Fallback: search by date if courseCode search didn't yield a match.
+        if (!match && record.conference_date) {
+            const rawDate = record.conference_date;
+            const conferenceDate = toDateOnly(typeof rawDate === 'string' ? rawDate : (rawDate as Date).toISOString());
+            const [year, month, day] = conferenceDate.split('-');
+            const akademicDate = year && month && day ? `${day}/${month}/${year}` : null;
+            if (akademicDate) {
+                const listing = await this.listAulaVirtualConferences(
+                    context,
+                    akademicDate,
+                    akademicDate,
+                    topic,
+                    100,
+                );
+                rows = listing.rows;
+                match = rows.find((r) => r.name === topic) ?? null;
+            }
+        }
+
+        if (!match) {
+            return {
+                local_id: record.id,
+                topic,
+                course_code: meta.courseCode,
+                section: meta.section,
+                aula_virtual_id: null,
+                aula_virtual_section_id: null,
+                aula_virtual_date: null,
+                source: 'not_found',
+                matches: rows,
+                zoom_meeting_id: record.zoom_meeting_id ?? null,
+                message:
+                    'No se encontro la videoconferencia en Aula Virtual. Puede que ya haya sido eliminada o el topic haya cambiado.',
+            };
+        }
+
+        return {
+            local_id: record.id,
+            topic,
+            course_code: meta.courseCode,
+            section: meta.section,
+            aula_virtual_id: match.id,
+            aula_virtual_section_id: match.sectionId || null,
+            aula_virtual_date: match.date || null,
+            source: 'list_lookup',
+            matches: rows,
+            zoom_meeting_id: record.zoom_meeting_id ?? null,
+            message: `AV id encontrado vía /gestion-conferencias/list (${rows.length} filas).`,
+        };
+    }
+
     private extractAulaVirtualId(responseJson: Record<string, unknown> | null): string | null {
         if (!responseJson) return null;
         const body = responseJson['body'];

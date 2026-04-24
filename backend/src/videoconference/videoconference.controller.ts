@@ -137,6 +137,11 @@ export class VideoconferenceController {
         return this.service.deleteVideoconference(id);
     }
 
+    @Get(':id/aula-virtual-lookup')
+    async lookupAulaVirtualId(@Param('id') id: string) {
+        return this.service.lookupAulaVirtualId(id);
+    }
+
     @Post('overrides')
     async upsertOverride(@Body() payload: UpsertVideoconferenceOverrideDto) {
         return this.service.upsertOverride(payload);
