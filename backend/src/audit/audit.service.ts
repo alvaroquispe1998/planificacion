@@ -45,10 +45,20 @@ import {
   PlanningSubsectionVideoconferenceEntity,
 } from '../videoconference/videoconference.entity';
 
-function toDateOnly(value: string | Date | null | undefined): string {
-  if (!value) return '';
-  const str = typeof value === 'string' ? value : value.toISOString();
-  return str.slice(0, 10);
+function toDateOnly(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '';
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '';
+    return value.toISOString().slice(0, 10);
+  }
+  const str = String(value).trim();
+  if (!str) return '';
+  const iso = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[0];
+  // Fallback for Date.toString() formats like "Fri Apr 17 2026 ..."
+  const parsed = new Date(str);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
 }
 
 type PlanningAuditListRow = {
@@ -599,8 +609,8 @@ export class AuditService {
         subsection_code: recordString(row, 'subsection_code'),
         subsection_kind: recordString(row, 'subsection_kind'),
         subsection_denomination: recordString(row, 'subsection_denomination'),
-        first_conference_date: toDateOnly(recordString(row, 'first_conference_date')),
-        last_conference_date: toDateOnly(recordString(row, 'last_conference_date')),
+        first_conference_date: toDateOnly(row['first_conference_date']),
+        last_conference_date: toDateOnly(row['last_conference_date']),
         session_count: recordNumber(row, 'session_count'),
         matched_count: recordNumber(row, 'matched_count'),
         error_count: recordNumber(row, 'error_count'),
