@@ -339,6 +339,13 @@
         </label>
 
         <label>
+          <span>Modelo Gemini</span>
+          <select [(ngModel)]="analysisForm.model">
+            <option *ngFor="let m of analysisModels" [value]="m.value">{{ m.label }}</option>
+          </select>
+        </label>
+
+        <label>
           <span>Syllabus de la sesion</span>
           <textarea
             rows="8"

@@ -7,6 +7,12 @@ export class RunTranscriptAnalysisDto {
   @MaxLength(200)
   apiKey!: string;
 
+  /** Optional Gemini model override (default: gemini-1.5-flash). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  model?: string;
+
   @IsString()
   @MinLength(10, { message: 'El syllabus debe tener al menos 10 caracteres.' })
   @MaxLength(60000, { message: 'El syllabus excede 60000 caracteres.' })
