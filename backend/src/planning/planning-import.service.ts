@@ -806,6 +806,9 @@ export class PlanningImportService {
         vcAcademicPrograms: null,
       };
 
+      // Tracks all offer IDs processed (or protected) during this AKADEMIC batch run
+      const allAkademicTouchedOfferIds = new Set<string>();
+
       for (let index = 0; index < scopeEntries.length; index += 1) {
         const [scopeKey, scopeRows] = scopeEntries[index];
         const decision = scopeDecisionMap.get(scopeKey);
@@ -830,6 +833,17 @@ export class PlanningImportService {
               current_scope_label: scopeLabel,
             },
           );
+          // Protect skipped-scope offers from the orphan cleanup pass
+          if (batch.source_kind === 'AKADEMIC' && scope) {
+            const skippedWhere: Record<string, unknown> = { semester_id: scope.semester_id };
+            if (scope.campus_id) skippedWhere.campus_id = scope.campus_id;
+            if (scope.faculty_id) skippedWhere.faculty_id = scope.faculty_id;
+            if (scope.academic_program_id) skippedWhere.academic_program_id = scope.academic_program_id;
+            if (scope.study_plan_id) skippedWhere.study_plan_id = scope.study_plan_id;
+            if (scope.cycle != null) skippedWhere.cycle = scope.cycle;
+            const skippedOffers = await this.offersRepo.find({ where: skippedWhere as any });
+            skippedOffers.forEach((o) => allAkademicTouchedOfferIds.add(o.id));
+          }
           continue;
         }
 
@@ -850,7 +864,7 @@ export class PlanningImportService {
           continue;
         }
 
-        let created: { plan_rules: number; offers: number; sections: number; subsections: number; schedules: number };
+        let created: { plan_rules: number; offers: number; sections: number; subsections: number; schedules: number; touchedOfferIds?: string[] };
 
         if (batch.source_kind === 'AKADEMIC') {
           // Akademic: merge in-place. Updates existing records (keeping IDs stable so
@@ -875,6 +889,7 @@ export class PlanningImportService {
             executionCaches,
             actor,
           );
+          created.touchedOfferIds?.forEach((id) => allAkademicTouchedOfferIds.add(id));
           executionSummary.replaced_scope_count = numberValue(executionSummary.replaced_scope_count) + 1;
         } else {
           if (hasExistingData(decision?.existing_summary_json) && decision?.decision === 'REPLACE_SCOPE') {
@@ -932,6 +947,57 @@ export class PlanningImportService {
             current_scope_label: scopeLabel,
           },
         );
+      }
+
+      // ── Post-loop: delete orphaned AKADEMIC offers whose scope had no rows ──
+      // This handles offers from campuses/scopes that completely disappeared from
+      // Akademic (they were never touched by any scope run above).
+      if (batch.source_kind === 'AKADEMIC') {
+        const sourceScopeJson = asRecord(batch.source_scope_json);
+        const batchSemesterId = recordString(sourceScopeJson, 'semester_id');
+        if (batchSemesterId) {
+          const orphanWhere: Record<string, unknown> = { source_system: 'AKADEMIC', semester_id: batchSemesterId };
+          const batchCampusId = recordString(sourceScopeJson, 'campus_id');
+          const batchFacultyId = recordString(sourceScopeJson, 'faculty_id');
+          const batchProgramId = recordString(sourceScopeJson, 'academic_program_id');
+          const batchStudyPlanId = recordString(sourceScopeJson, 'study_plan_id');
+          const batchStudyPlanCourseId = recordString(sourceScopeJson, 'study_plan_course_id');
+          if (batchCampusId) orphanWhere.campus_id = batchCampusId;
+          if (batchFacultyId) orphanWhere.faculty_id = batchFacultyId;
+          if (batchProgramId) orphanWhere.academic_program_id = batchProgramId;
+          if (batchStudyPlanId) orphanWhere.study_plan_id = batchStudyPlanId;
+          if (batchStudyPlanCourseId) orphanWhere.study_plan_course_id = batchStudyPlanCourseId;
+
+          const allOffersInScope = await this.offersRepo.find({ where: orphanWhere as any });
+          const orphanedOffers = allOffersInScope.filter((o) => !allAkademicTouchedOfferIds.has(o.id));
+
+          for (const orphanOffer of orphanedOffers) {
+            const orphanSections = await this.sectionsRepo.find({ where: { planning_offer_id: orphanOffer.id } });
+            const orphanSectionIds = orphanSections.map((s) => s.id);
+            const orphanSubsections = orphanSectionIds.length
+              ? await this.subsectionsRepo.find({ where: { planning_section_id: In(orphanSectionIds) } })
+              : [];
+            const orphanSubsectionIds = orphanSubsections.map((s) => s.id);
+            const orphanScheduleIds = orphanSubsectionIds.length
+              ? (await this.schedulesRepo.find({ where: { planning_subsection_id: In(orphanSubsectionIds) } })).map((s) => s.id)
+              : [];
+
+            if (orphanScheduleIds.length) {
+              await this.planningVideoconferenceOverridesRepo.delete({ planning_subsection_schedule_id: In(orphanScheduleIds) });
+              await this.planningVideoconferencesRepo.delete({ planning_subsection_schedule_id: In(orphanScheduleIds) });
+              await this.offersRepo.manager.delete(PlanningSubsectionScheduleVcInheritanceEntity, { parent_schedule_id: In(orphanScheduleIds) });
+              await this.offersRepo.manager.delete(PlanningSubsectionScheduleVcInheritanceEntity, { child_schedule_id: In(orphanScheduleIds) });
+              await this.schedulesRepo.delete({ id: In(orphanScheduleIds) });
+            }
+            if (orphanSubsectionIds.length) {
+              await this.subsectionsRepo.delete({ id: In(orphanSubsectionIds) });
+            }
+            if (orphanSectionIds.length) {
+              await this.sectionsRepo.delete({ id: In(orphanSectionIds) });
+            }
+            await this.offersRepo.delete({ id: orphanOffer.id });
+          }
+        }
       }
 
       batch.status = 'EXECUTED';
@@ -2975,7 +3041,7 @@ export class PlanningImportService {
     catalog: ImportCatalog,
     caches: ImportExecutionCaches,
     actor?: ImportActor | null,
-  ): Promise<{ plan_rules: number; offers: number; sections: number; subsections: number; schedules: number }> {
+  ): Promise<{ plan_rules: number; offers: number; sections: number; subsections: number; schedules: number; touchedOfferIds: string[] }> {
     const now = new Date();
 
     // ── 1. Resolve VC context (identical to importRowsForScope) ───────────────
@@ -3694,7 +3760,7 @@ export class PlanningImportService {
       await this.planningManualService.recalculateVcMatches(actor as any, { offer_id: offer.id });
     }
 
-    return result;
+    return { ...result, touchedOfferIds: [...touchedOfferIds] };
   }
 
   private async importRowsForScope(
@@ -6905,6 +6971,21 @@ export class PlanningImportService {
     }
 
     const listedSourceSection = sourceSections?.find((item: AkademicSectionRow) => item.id === section.source_section_id) ?? null;
+
+    // Si obtuvimos la lista de Akademic, aprovechar para limpiar secciones hermanas huérfanas
+    if (sourceSections) {
+      const akademicSectionIds = new Set(sourceSections.map((s) => s.id));
+      const siblingSections = await this.sectionsRepo.find({ where: { planning_offer_id: offer.id } });
+      const orphanSiblings = siblingSections.filter(
+        (s) => s.id !== section.id && s.source_section_id && !akademicSectionIds.has(s.source_section_id),
+      );
+      for (const orphan of orphanSiblings) {
+        await this.offersRepo.manager.transaction(async (manager) => {
+          return this.deleteAkademicSectionTree(manager, orphan.id, offer, actor, true);
+        });
+      }
+    }
+
     if (sourceSections && !listedSourceSection) {
       const deleted = await this.offersRepo.manager.transaction(async (manager) => {
         return this.deleteAkademicSectionTree(manager, section.id, offer, actor, true);
