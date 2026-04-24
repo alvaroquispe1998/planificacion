@@ -3371,21 +3371,52 @@ export class VideoconferenceService implements OnModuleInit {
             const aulaVirtualContext = await this.getAulaVirtualRequestContext();
             let avId = this.extractAulaVirtualId(record.response_json);
 
-            if (!avId && record.topic && record.conference_date) {
-                const rawDate = record.conference_date;
-                const conferenceDate = toDateOnly(typeof rawDate === 'string' ? rawDate : (rawDate as Date).toISOString());
-                const [year, month, day] = conferenceDate.split('-');
-                const akademicDate = year && month && day ? `${day}/${month}/${year}` : null;
-                if (akademicDate) {
+            if (!avId && record.topic) {
+                // Look up AV id by courseCode + section (parsed from topic) and match by topic name.
+                // Topic format: "{period}-{semester}-{courseCode}|{courseName}|{section} - {branch}|..."
+                const meta = this.parseTopicMetadata(record.topic);
+                const topic = record.topic;
+                if (meta.courseCode) {
+                    console.log(
+                        `[deleteVideoconference] Looking up AV id for local=${record.id} by courseCode=${meta.courseCode} section=${meta.section ?? '-'} topic="${topic}"`,
+                    );
                     const listings = await this.listAulaVirtualConferences(
                         aulaVirtualContext,
-                        akademicDate,
-                        akademicDate,
-                        record.topic,
+                        null,
+                        null,
+                        topic,
                         100,
+                        0,
+                        meta.courseCode,
+                        meta.section,
                     );
-                    const match = listings.rows.find((r) => r.name === record.topic);
+                    const match =
+                        listings.rows.find((r) => r.name === topic) ??
+                        listings.rows.find((r) => r.name.trim() === topic.trim()) ??
+                        null;
                     avId = match?.id ?? null;
+                    console.log(
+                        `[deleteVideoconference] AV lookup returned ${listings.rows.length} rows; matched avId=${avId ?? 'null'}`,
+                    );
+                }
+
+                // Fallback: old date-based lookup (in case the topic parsing fails).
+                if (!avId && record.conference_date) {
+                    const rawDate = record.conference_date;
+                    const conferenceDate = toDateOnly(typeof rawDate === 'string' ? rawDate : (rawDate as Date).toISOString());
+                    const [year, month, day] = conferenceDate.split('-');
+                    const akademicDate = year && month && day ? `${day}/${month}/${year}` : null;
+                    if (akademicDate) {
+                        const listings = await this.listAulaVirtualConferences(
+                            aulaVirtualContext,
+                            akademicDate,
+                            akademicDate,
+                            topic,
+                            100,
+                        );
+                        const match = listings.rows.find((r) => r.name === topic);
+                        avId = match?.id ?? null;
+                    }
                 }
             }
 
@@ -3394,7 +3425,7 @@ export class VideoconferenceService implements OnModuleInit {
                 if (!akademicDeleted) {
                     // AV record found but could not be deleted — abort to avoid inconsistency.
                     throw new BadRequestException(
-                        'No se pudo eliminar la videoconferencia en Aula Virtual (respuesta inesperada). La reunion en Zoom y el registro local no fueron modificados.',
+                        `No se pudo eliminar la videoconferencia en Aula Virtual (avId=${avId}, respuesta inesperada). La reunion en Zoom y el registro local no fueron modificados.`,
                     );
                 }
             } else {
@@ -3444,6 +3475,27 @@ export class VideoconferenceService implements OnModuleInit {
             }
         }
         return null;
+    }
+
+    /**
+     * Parses the UAI topic string to extract courseCode and section for Aula Virtual lookups.
+     * Expected format: "{period}-{semester}-{courseCode}|{courseName}|{section} - {branch}|..."
+     * Example: "P02-20261-P02A3135|ENFERMERIA EN SALUD DEL ADULTO II|BP - CH|47125274|..."
+     *   → { courseCode: 'P02A3135', section: 'BP' }
+     */
+    private parseTopicMetadata(topic: string): { courseCode: string | null; section: string | null } {
+        const parts = String(topic ?? '').split('|').map((p) => p.trim());
+        let courseCode: string | null = null;
+        if (parts[0]) {
+            const segments = parts[0].split('-').map((s) => s.trim()).filter(Boolean);
+            courseCode = segments.length > 0 ? segments[segments.length - 1] : null;
+        }
+        let section: string | null = null;
+        if (parts[2]) {
+            // "BP - CH" → "BP"
+            section = parts[2].split(/\s*-\s*/)[0]?.trim() || null;
+        }
+        return { courseCode, section };
     }
 
     private async deleteAulaVirtualConference(
@@ -5518,6 +5570,8 @@ export class VideoconferenceService implements OnModuleInit {
         searchValue: string,
         length = 50,
         start = 0,
+        courseCode: string | null = null,
+        section: string | null = null,
     ): Promise<{
         rows: Array<{ id: string; name: string; sectionId: string; date: string }>;
         recordsTotal: number | null;
@@ -5539,6 +5593,12 @@ export class VideoconferenceService implements OnModuleInit {
         }
         if (dateEnd) {
             params.set('dateEnd', dateEnd);
+        }
+        if (courseCode) {
+            params.set('courseCode', courseCode);
+        }
+        if (section) {
+            params.set('section', section);
         }
 
         const url = new URL(`/gestion-conferencias/list?${params.toString()}`, context.baseUrl);

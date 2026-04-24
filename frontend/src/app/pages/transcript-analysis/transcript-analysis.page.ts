@@ -56,6 +56,7 @@ export class TranscriptAnalysisPageComponent {
   showRawTranscript = false;
 
   form = {
+    apiKey: '',
     courseLabel: '',
     sessionLabel: '',
     teacherLabel: '',
@@ -63,14 +64,45 @@ export class TranscriptAnalysisPageComponent {
     transcriptText: '',
   };
 
+  private readonly API_KEY_STORAGE = 'uai.geminiApiKey';
+
   constructor(
     private readonly http: HttpClient,
     private readonly cdr: ChangeDetectorRef,
-  ) {}
+  ) {
+    try {
+      const saved = localStorage.getItem(this.API_KEY_STORAGE);
+      if (saved) this.form.apiKey = saved;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  rememberApiKey() {
+    try {
+      if (this.form.apiKey) {
+        localStorage.setItem(this.API_KEY_STORAGE, this.form.apiKey);
+      } else {
+        localStorage.removeItem(this.API_KEY_STORAGE);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  forgetApiKey() {
+    this.form.apiKey = '';
+    try {
+      localStorage.removeItem(this.API_KEY_STORAGE);
+    } catch {
+      /* ignore */
+    }
+  }
 
   get canSubmit() {
     return (
       !this.loading &&
+      this.form.apiKey.trim().length >= 10 &&
       this.form.syllabusText.trim().length >= 10 &&
       this.form.transcriptText.trim().length >= 10
     );
@@ -130,7 +162,9 @@ export class TranscriptAnalysisPageComponent {
   }
 
   clearForm() {
+    const keepKey = this.form.apiKey;
     this.form = {
+      apiKey: keepKey,
       courseLabel: '',
       sessionLabel: '',
       teacherLabel: '',
@@ -143,7 +177,7 @@ export class TranscriptAnalysisPageComponent {
 
   analyze() {
     if (!this.canSubmit) {
-      this.error = 'Pega el syllabus y el transcript (minimo 10 caracteres cada uno).';
+      this.error = 'Pega la API key de Gemini, el syllabus y el transcript (minimo 10 caracteres cada uno).';
       return;
     }
     this.loading = true;
@@ -153,6 +187,7 @@ export class TranscriptAnalysisPageComponent {
 
     this.http
       .post<TranscriptAnalysisResult>(`${API_BASE_URL}/transcript-analysis/run`, {
+        apiKey: this.form.apiKey.trim(),
         syllabusText: this.form.syllabusText,
         transcriptText: this.form.transcriptText,
         courseLabel: this.form.courseLabel || undefined,

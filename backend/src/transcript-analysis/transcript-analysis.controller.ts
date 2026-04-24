@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { RunTranscriptAnalysisDto } from './dto/run-analysis.dto';
@@ -12,5 +12,10 @@ export class TranscriptAnalysisController {
   @Post('run')
   run(@Body() dto: RunTranscriptAnalysisDto) {
     return this.service.analyze(dto);
+  }
+
+  @Get('availability/:videoconferenceId')
+  availability(@Param('videoconferenceId') videoconferenceId: string) {
+    return this.service.getAvailability(videoconferenceId);
   }
 }

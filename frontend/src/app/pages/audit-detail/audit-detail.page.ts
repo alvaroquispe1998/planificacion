@@ -1,12 +1,66 @@
 import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import { API_BASE_URL } from '../../core/api-base';
 import { ApiService } from '../../core/api.service';
+
+export type TranscriptTopicStatus = 'covered' | 'partial' | 'missing';
+
+export interface TranscriptAnalysisTopic {
+  title: string;
+  status: TranscriptTopicStatus;
+  evidence?: string;
+  timestamp?: string;
+  note?: string;
+}
+
+export interface TranscriptKeyMoment {
+  timestamp?: string;
+  summary: string;
+}
+
+export interface TranscriptAnalysisResult {
+  coverageScore: number;
+  overallAssessment: string;
+  topics: TranscriptAnalysisTopic[];
+  extraTopics: string[];
+  keyMoments: TranscriptKeyMoment[];
+  strengths: string[];
+  gaps: string[];
+  pedagogyNotes?: string;
+  language?: string;
+  transcriptPreview?: string;
+  transcriptSource?: 'manual' | 'zoom-recording';
+  meta: {
+    model: string;
+    tookMs: number;
+    transcriptChars: number;
+    syllabusChars: number;
+    promptChars: number;
+    generatedAt: string;
+  };
+}
+
+interface TranscriptAvailability {
+  videoconferenceId: string;
+  available: boolean;
+  message: string;
+  recordings: Array<{
+    recordingId: string;
+    instanceId: string;
+    recordingType: string;
+    fileExtension: string | null;
+    startTime: string | null;
+    hasDownloadUrl: boolean;
+  }>;
+}
 
 @Component({
   selector: 'app-audit-detail-page',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, FormsModule],
   templateUrl: './audit-detail.page.html',
   styleUrl: './audit-detail.page.css',
 })
@@ -42,12 +96,32 @@ export class AuditDetailPageComponent implements OnInit {
   copiedKey: 'join' | 'start' | '' = '';
   private copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Transcript analysis panel
+  analysisForm = {
+    apiKey: '',
+    syllabusText: '',
+  };
+  analysisAvailability: TranscriptAvailability | null = null;
+  analysisAvailabilityLoading = false;
+  analysisLoading = false;
+  analysisError = '';
+  analysisResult: TranscriptAnalysisResult | null = null;
+  private readonly API_KEY_STORAGE = 'uai.geminiApiKey';
+
   constructor(
     private readonly route: ActivatedRoute,
     private readonly router: Router,
     private readonly api: ApiService,
+    private readonly http: HttpClient,
     private readonly cdr: ChangeDetectorRef,
-  ) {}
+  ) {
+    try {
+      const saved = localStorage.getItem(this.API_KEY_STORAGE);
+      if (saved) this.analysisForm.apiKey = saved;
+    } catch {
+      /* ignore */
+    }
+  }
 
   ngOnInit(): void {
     const id = this.route.snapshot.paramMap.get('id');
@@ -78,6 +152,9 @@ export class AuditDetailPageComponent implements OnInit {
         if (needsSync && this.record?.can_sync) {
           this.syncZoomData();
         }
+        if (this.record?.id) {
+          this.loadAnalysisAvailability();
+        }
       },
       error: (err) => {
         this.error = err?.error?.message ?? 'No se pudo cargar el detalle de auditoria.';
@@ -103,6 +180,9 @@ export class AuditDetailPageComponent implements OnInit {
           '';
         this.syncing = false;
         this.cdr.detectChanges();
+        if (this.record?.id) {
+          this.loadAnalysisAvailability();
+        }
       },
       error: (err) => {
         this.error = err?.error?.message ?? 'No se pudo sincronizar la reunion con Zoom.';
@@ -322,5 +402,137 @@ export class AuditDetailPageComponent implements OnInit {
 
   backToList() {
     this.router.navigate(['/videoconferences/audit']);
+  }
+
+  // ---------- Transcript analysis ----------
+
+  rememberApiKey() {
+    try {
+      if (this.analysisForm.apiKey) {
+        localStorage.setItem(this.API_KEY_STORAGE, this.analysisForm.apiKey);
+      } else {
+        localStorage.removeItem(this.API_KEY_STORAGE);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  forgetApiKey() {
+    this.analysisForm.apiKey = '';
+    try {
+      localStorage.removeItem(this.API_KEY_STORAGE);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  loadAnalysisAvailability() {
+    if (!this.record?.id) return;
+    this.analysisAvailabilityLoading = true;
+    this.cdr.detectChanges();
+    this.http
+      .get<TranscriptAvailability>(`${API_BASE_URL}/transcript-analysis/availability/${this.record.id}`)
+      .subscribe({
+        next: (res) => {
+          this.analysisAvailability = res;
+          this.analysisAvailabilityLoading = false;
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.analysisAvailability = {
+            videoconferenceId: this.record.id,
+            available: false,
+            message:
+              err?.error?.message ||
+              err?.message ||
+              'No se pudo consultar disponibilidad del transcript.',
+            recordings: [],
+          };
+          this.analysisAvailabilityLoading = false;
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  get canAnalyze() {
+    return (
+      !this.analysisLoading &&
+      this.analysisForm.apiKey.trim().length >= 10 &&
+      this.analysisForm.syllabusText.trim().length >= 10 &&
+      this.analysisAvailability?.available === true
+    );
+  }
+
+  analyzeClass() {
+    if (!this.record?.id) return;
+    if (!this.canAnalyze) {
+      this.analysisError =
+        'Completa la API key, el syllabus y verifica que exista un transcript en Zoom.';
+      return;
+    }
+    this.analysisLoading = true;
+    this.analysisError = '';
+    this.analysisResult = null;
+    this.cdr.detectChanges();
+
+    const body = {
+      apiKey: this.analysisForm.apiKey.trim(),
+      syllabusText: this.analysisForm.syllabusText,
+      videoconferenceId: this.record.id,
+      courseLabel:
+        this.record?.course_name ||
+        this.record?.course_code ||
+        undefined,
+      sessionLabel: this.record?.subsection_code
+        ? `Grupo ${this.record.subsection_code}`
+        : undefined,
+    };
+
+    this.http
+      .post<TranscriptAnalysisResult>(`${API_BASE_URL}/transcript-analysis/run`, body)
+      .subscribe({
+        next: (res) => {
+          this.analysisResult = res;
+          this.analysisLoading = false;
+          this.cdr.detectChanges();
+        },
+        error: (err) => {
+          this.analysisLoading = false;
+          this.analysisError =
+            err?.error?.message ||
+            err?.message ||
+            'Error al llamar al servicio de analisis.';
+          this.cdr.detectChanges();
+        },
+      });
+  }
+
+  analysisTopicLabel(status: TranscriptTopicStatus) {
+    switch (status) {
+      case 'covered':
+        return 'Cubierto';
+      case 'partial':
+        return 'Parcial';
+      case 'missing':
+        return 'No abordado';
+    }
+  }
+
+  analysisCoverageClass() {
+    const s = this.analysisResult?.coverageScore ?? 0;
+    if (s >= 75) return 'coverage-high';
+    if (s >= 45) return 'coverage-mid';
+    return 'coverage-low';
+  }
+
+  get analysisCoveredCount() {
+    return this.analysisResult?.topics.filter((t) => t.status === 'covered').length ?? 0;
+  }
+  get analysisPartialCount() {
+    return this.analysisResult?.topics.filter((t) => t.status === 'partial').length ?? 0;
+  }
+  get analysisMissingCount() {
+    return this.analysisResult?.topics.filter((t) => t.status === 'missing').length ?? 0;
   }
 }

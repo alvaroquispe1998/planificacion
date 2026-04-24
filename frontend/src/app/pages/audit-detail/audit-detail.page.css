@@ -422,3 +422,209 @@ pre {
     justify-items: start;
   }
 }
+
+
+/* ---------- Transcript analysis panel ---------- */
+
+.analysis-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.analysis-panel .analysis-availability {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  background: #f1f5fb;
+  border: 1px solid #dbe8f4;
+}
+.analysis-panel .analysis-availability.ok {
+  background: #e6f7ec;
+  border-color: #a9e1bc;
+  color: #1f6b3a;
+}
+.analysis-panel .analysis-availability.warn {
+  background: #fff4e5;
+  border-color: #f2c48a;
+  color: #8a4b0d;
+}
+.analysis-panel .analysis-availability .link-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.analysis-form {
+  display: grid;
+  gap: 0.75rem;
+}
+.analysis-form label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: #3c4b63;
+}
+.analysis-form label > span small {
+  color: #6b7a90;
+  font-weight: normal;
+  margin-left: 0.25rem;
+}
+.analysis-form input[type=password],
+.analysis-form input[type=text],
+.analysis-form textarea {
+  width: 100%;
+  border: 1px solid #cdd8e8;
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font-family: inherit;
+  font-size: 0.92rem;
+  background: #fff;
+}
+.analysis-form textarea {
+  resize: vertical;
+  min-height: 160px;
+}
+.analysis-form .apikey-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.analysis-form .apikey-row input {
+  flex: 1 1 auto;
+}
+.analysis-form .apikey-row .link-btn {
+  background: transparent;
+  border: none;
+  color: #1d4ed8;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+}
+.analysis-form .actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.analysis-form .inline-error {
+  color: #b91c1c;
+  font-size: 0.9rem;
+}
+
+.analysis-result {
+  display: grid;
+  gap: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #dbe8f4;
+}
+.analysis-result .coverage-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+.coverage-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 110px;
+  height: 110px;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 700;
+}
+.coverage-score .score-value { font-size: 2.2rem; line-height: 1; }
+.coverage-score .score-label { font-size: 0.7rem; opacity: 0.9; margin-top: 0.25rem; }
+.coverage-high { background: #15803d; }
+.coverage-mid  { background: #d97706; }
+.coverage-low  { background: #b91c1c; }
+
+.coverage-tallies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.tally {
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  background: #eef2f7;
+  color: #374151;
+}
+.tally-covered { background: #dcfce7; color: #166534; }
+.tally-partial { background: #fef9c3; color: #854d0e; }
+.tally-missing { background: #fee2e2; color: #991b1b; }
+.tally-extra   { background: #e0e7ff; color: #3730a3; }
+
+.overall-assessment {
+  background: #f8fafc;
+  border-left: 4px solid #1d4ed8;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin: 0;
+}
+
+.analysis-section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  color: #1f2937;
+}
+.topic-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.topic-list li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #e5eaf2;
+  border-radius: 10px;
+  background: #fff;
+}
+.topic-list .pill {
+  align-self: start;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.pill-covered { background: #dcfce7; color: #166534; }
+.pill-partial { background: #fef9c3; color: #854d0e; }
+.pill-missing { background: #fee2e2; color: #991b1b; }
+.topic-body strong { display: block; margin-bottom: 0.25rem; }
+.topic-body p { margin: 0.1rem 0; font-size: 0.88rem; color: #4b5563; }
+
+.bullet-list { margin: 0; padding-left: 1.25rem; display: grid; gap: 0.25rem; }
+.bullet-list code {
+  background: #f1f5f9;
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+  margin-right: 0.25rem;
+}
+
+.analysis-two-cols {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.analysis-meta {
+  color: #6b7280;
+  font-size: 0.8rem;
+}

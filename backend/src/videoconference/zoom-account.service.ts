@@ -372,6 +372,34 @@ export class ZoomAccountService {
             .filter((item): item is ZoomMeetingRecordingFile => Boolean(item));
     }
 
+    /**
+     * Downloads a recording file as plain text (intended for TRANSCRIPT / VTT / CC files).
+     * Zoom recording download URLs require an OAuth token either via query string or Authorization header.
+     */
+    async downloadRecordingAsText(downloadUrl: string): Promise<string> {
+        if (!downloadUrl) {
+            throw new BadRequestException('download_url vacio.');
+        }
+        const token = await this.getAccessToken();
+        const response = await this.fetchWithDiagnostics(
+            downloadUrl,
+            {
+                method: 'GET',
+                headers: {
+                    authorization: `Bearer ${token}`,
+                },
+            },
+            'Zoom download',
+        );
+        const text = await response.text();
+        if (!response.ok) {
+            throw new BadRequestException(
+                `Zoom rechazo la descarga (${response.status}): ${text.slice(0, 200)}`,
+            );
+        }
+        return text;
+    }
+
     private async findConfigEntity() {
         const rows = await this.zoomConfigRepo.find({
             order: { created_at: 'ASC' },
