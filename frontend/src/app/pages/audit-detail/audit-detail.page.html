@@ -305,6 +305,140 @@
         </ng-template>
       </article>
     </section>
+
+    <section class="panel analysis-panel" *ngIf="record?.id">
+      <div class="section-head compact">
+        <div>
+          <p class="eyebrow">Gemini 2.0 Flash</p>
+          <h2>Analisis de clase vs Syllabus (beta)</h2>
+        </div>
+      </div>
+
+      <div class="analysis-availability" [class.ok]="analysisAvailability?.available" [class.warn]="analysisAvailability && !analysisAvailability.available">
+        <ng-container *ngIf="analysisAvailabilityLoading">Consultando grabaciones...</ng-container>
+        <ng-container *ngIf="!analysisAvailabilityLoading && analysisAvailability">
+          <strong *ngIf="analysisAvailability.available">Transcript de Zoom disponible.</strong>
+          <strong *ngIf="!analysisAvailability.available">Sin transcript utilizable.</strong>
+          <span>{{ analysisAvailability.message }}</span>
+          <button type="button" class="link-btn" (click)="loadAnalysisAvailability()">Revisar de nuevo</button>
+        </ng-container>
+      </div>
+
+      <div class="analysis-form">
+        <label class="apikey-label">
+          <span>Gemini API key <small>(pegala desde Google AI Studio, no se guarda en el servidor)</small></span>
+          <div class="apikey-row">
+            <input
+              type="password"
+              autocomplete="off"
+              [(ngModel)]="analysisForm.apiKey"
+              (change)="rememberApiKey()"
+              placeholder="AI..." />
+            <button type="button" class="link-btn" (click)="forgetApiKey()" *ngIf="analysisForm.apiKey">Olvidar</button>
+          </div>
+        </label>
+
+        <label>
+          <span>Syllabus de la sesion</span>
+          <textarea
+            rows="8"
+            [(ngModel)]="analysisForm.syllabusText"
+            placeholder="Pega aqui los temas, subtemas y objetivos de la sesion segun el syllabus."></textarea>
+        </label>
+
+        <div class="actions">
+          <button
+            type="button"
+            class="btn btn-primary"
+            (click)="analyzeClass()"
+            [disabled]="!canAnalyze">
+            {{ analysisLoading ? 'Analizando...' : 'Analizar clase' }}
+          </button>
+          <span class="inline-error" *ngIf="analysisError">{{ analysisError }}</span>
+        </div>
+      </div>
+
+      <div class="analysis-result" *ngIf="analysisResult as result">
+        <div class="coverage-head">
+          <div class="coverage-score" [ngClass]="analysisCoverageClass()">
+            <span class="score-value">{{ result.coverageScore }}</span>
+            <span class="score-label">Cobertura / 100</span>
+          </div>
+          <div class="coverage-tallies">
+            <span class="tally tally-covered">Cubiertos: {{ analysisCoveredCount }}</span>
+            <span class="tally tally-partial">Parciales: {{ analysisPartialCount }}</span>
+            <span class="tally tally-missing">Faltantes: {{ analysisMissingCount }}</span>
+            <span class="tally tally-extra">Extras: {{ result.extraTopics.length }}</span>
+          </div>
+        </div>
+
+        <p class="overall-assessment" *ngIf="result.overallAssessment">{{ result.overallAssessment }}</p>
+
+        <div class="analysis-section" *ngIf="result.topics.length > 0">
+          <h3>Temas del syllabus</h3>
+          <ul class="topic-list">
+            <li *ngFor="let topic of result.topics">
+              <span class="pill" [class.pill-covered]="topic.status === 'covered'" [class.pill-partial]="topic.status === 'partial'" [class.pill-missing]="topic.status === 'missing'">
+                {{ analysisTopicLabel(topic.status) }}
+              </span>
+              <div class="topic-body">
+                <strong>{{ topic.title }}</strong>
+                <p *ngIf="topic.evidence"><em>Evidencia:</em> {{ topic.evidence }}</p>
+                <p *ngIf="topic.timestamp"><em>Timestamp:</em> {{ topic.timestamp }}</p>
+                <p *ngIf="topic.note"><em>Nota:</em> {{ topic.note }}</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <div class="analysis-section" *ngIf="result.extraTopics.length > 0">
+          <h3>Temas extra no planeados</h3>
+          <ul class="bullet-list">
+            <li *ngFor="let extra of result.extraTopics">{{ extra }}</li>
+          </ul>
+        </div>
+
+        <div class="analysis-section" *ngIf="result.keyMoments.length > 0">
+          <h3>Momentos clave</h3>
+          <ul class="bullet-list">
+            <li *ngFor="let moment of result.keyMoments">
+              <code *ngIf="moment.timestamp">[{{ moment.timestamp }}]</code>
+              {{ moment.summary }}
+            </li>
+          </ul>
+        </div>
+
+        <div class="analysis-section analysis-two-cols">
+          <div *ngIf="result.strengths.length > 0">
+            <h3>Fortalezas</h3>
+            <ul class="bullet-list">
+              <li *ngFor="let s of result.strengths">{{ s }}</li>
+            </ul>
+          </div>
+          <div *ngIf="result.gaps.length > 0">
+            <h3>Brechas</h3>
+            <ul class="bullet-list">
+              <li *ngFor="let g of result.gaps">{{ g }}</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="analysis-section" *ngIf="result.pedagogyNotes">
+          <h3>Notas pedagogicas</h3>
+          <p>{{ result.pedagogyNotes }}</p>
+        </div>
+
+        <div class="analysis-meta">
+          <small>
+            Modelo: {{ result.meta.model }} &middot;
+            {{ result.meta.tookMs }} ms &middot;
+            Syllabus {{ result.meta.syllabusChars }} chars &middot;
+            Transcript {{ result.meta.transcriptChars }} chars &middot;
+            Fuente: {{ result.transcriptSource === 'zoom-recording' ? 'Grabacion Zoom' : 'Pegado manual' }}
+          </small>
+        </div>
+      </div>
+    </section>
   </ng-container>
 
   <ng-template #loadingState>

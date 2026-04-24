@@ -15,6 +15,21 @@
   </header>
 
   <section class="panel no-print">
+    <div class="apikey-row">
+      <label class="apikey-label">
+        <span>Gemini API key <small>(Google AI Studio)</small></span>
+        <input
+          type="password"
+          autocomplete="off"
+          [(ngModel)]="form.apiKey"
+          (change)="rememberApiKey()"
+          placeholder="AI..." />
+      </label>
+      <button type="button" class="btn btn-ghost" (click)="forgetApiKey()" *ngIf="form.apiKey">
+        Olvidar
+      </button>
+    </div>
+
     <div class="grid-context">
       <label>
         <span>Curso</span>

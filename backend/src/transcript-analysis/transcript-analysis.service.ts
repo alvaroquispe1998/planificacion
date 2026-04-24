@@ -1,5 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import {
+  MeetingInstanceEntity,
+  MeetingRecordingEntity,
+} from '../entities/audit.entities';
+import { ZoomAccountService } from '../videoconference/zoom-account.service';
 import { RunTranscriptAnalysisDto } from './dto/run-analysis.dto';
 
 export type TranscriptTopicStatus = 'covered' | 'partial' | 'missing';
@@ -27,6 +33,8 @@ export interface TranscriptAnalysisResult {
   gaps: string[];
   pedagogyNotes?: string;
   language?: string;
+  transcriptPreview?: string;
+  transcriptSource?: 'manual' | 'zoom-recording';
   rawLlmResponse?: unknown;
   meta: {
     model: string;
@@ -39,6 +47,20 @@ export interface TranscriptAnalysisResult {
     teacherLabel?: string;
     generatedAt: string;
   };
+}
+
+export interface TranscriptAvailability {
+  videoconferenceId: string;
+  available: boolean;
+  message: string;
+  recordings: Array<{
+    recordingId: string;
+    instanceId: string;
+    recordingType: string;
+    fileExtension: string | null;
+    startTime: string | null;
+    hasDownloadUrl: boolean;
+  }>;
 }
 
 const GEMINI_API_URL =
@@ -98,24 +120,87 @@ const RESPONSE_SCHEMA = {
 export class TranscriptAnalysisService {
   private readonly logger = new Logger(TranscriptAnalysisService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    @InjectRepository(MeetingInstanceEntity)
+    private readonly instancesRepo: Repository<MeetingInstanceEntity>,
+    @InjectRepository(MeetingRecordingEntity)
+    private readonly recordingsRepo: Repository<MeetingRecordingEntity>,
+    private readonly zoomAccount: ZoomAccountService,
+  ) {}
+
+  async getAvailability(videoconferenceId: string): Promise<TranscriptAvailability> {
+    if (!videoconferenceId) {
+      throw new BadRequestException('videoconferenceId requerido.');
+    }
+    const instances = await this.instancesRepo.find({
+      where: { planning_subsection_videoconference_id: videoconferenceId },
+      select: { id: true },
+    });
+    const instanceIds = instances.map((i) => i.id);
+    if (!instanceIds.length) {
+      return {
+        videoconferenceId,
+        available: false,
+        message: 'La videoconferencia no tiene instancias registradas. Sincroniza datos Zoom primero.',
+        recordings: [],
+      };
+    }
+    const all = await this.recordingsRepo
+      .createQueryBuilder('r')
+      .where('r.meeting_instance_id IN (:...ids)', { ids: instanceIds })
+      .orderBy('r.start_time', 'DESC')
+      .getMany();
+    const transcripts = all.filter((r) => this.isTranscriptRecording(r));
+    const mapped = transcripts.map((r) => ({
+      recordingId: r.id,
+      instanceId: r.meeting_instance_id,
+      recordingType: r.recording_type,
+      fileExtension: r.file_extension,
+      startTime: r.start_time ? r.start_time.toISOString() : null,
+      hasDownloadUrl: Boolean(r.download_url),
+    }));
+    if (!transcripts.length) {
+      return {
+        videoconferenceId,
+        available: false,
+        message:
+          'No se encontraron grabaciones de tipo TRANSCRIPT/VTT. Verifica que la clase tenga Cloud Recording con Audio Transcript habilitado y vuelve a sincronizar.',
+        recordings: [],
+      };
+    }
+    return {
+      videoconferenceId,
+      available: transcripts.some((r) => Boolean(r.download_url)),
+      message: `Se encontraron ${transcripts.length} archivos de transcript.`,
+      recordings: mapped,
+    };
+  }
 
   async analyze(dto: RunTranscriptAnalysisDto): Promise<TranscriptAnalysisResult> {
-    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
-    if (!apiKey || !apiKey.trim()) {
+    const apiKey = (dto.apiKey || '').trim();
+    if (!apiKey) {
       throw new BadRequestException(
-        'Falta la variable de entorno GEMINI_API_KEY en el backend. Obten una en https://aistudio.google.com.',
+        'Falta el apiKey de Gemini. Pega tu clave de Google AI Studio antes de procesar.',
       );
     }
 
-    const syllabus = dto.syllabusText.trim();
-    const transcript = dto.transcriptText.trim();
-
+    const syllabus = (dto.syllabusText || '').trim();
     if (syllabus.length < 10) {
-      throw new BadRequestException('El syllabus es demasiado corto.');
+      throw new BadRequestException('El syllabus es demasiado corto (minimo 10 caracteres).');
+    }
+
+    let transcript = (dto.transcriptText || '').trim();
+    let transcriptSource: 'manual' | 'zoom-recording' = 'manual';
+    if (!transcript && dto.videoconferenceId) {
+      transcript = await this.fetchTranscriptFromVideoconference(dto.videoconferenceId);
+      transcriptSource = 'zoom-recording';
     }
     if (transcript.length < 10) {
-      throw new BadRequestException('El transcript es demasiado corto.');
+      throw new BadRequestException(
+        dto.videoconferenceId
+          ? 'No se pudo obtener un transcript utilizable desde la videoconferencia. Revisa que exista una grabacion con transcript.'
+          : 'El transcript es demasiado corto (minimo 10 caracteres).',
+      );
     }
 
     const header = [
@@ -177,6 +262,11 @@ export class TranscriptAnalysisService {
     const rawText = await response.text();
     if (!response.ok) {
       this.logger.error(`Gemini responded ${response.status}: ${rawText.slice(0, 500)}`);
+      if (response.status === 400 || response.status === 401 || response.status === 403) {
+        throw new BadRequestException(
+          `Gemini rechazo la apiKey (${response.status}). Verifica que sea valida en https://aistudio.google.com.`,
+        );
+      }
       throw new BadRequestException(
         `Gemini devolvio ${response.status}: ${rawText.slice(0, 300)}`,
       );
@@ -205,6 +295,8 @@ export class TranscriptAnalysisService {
     return {
       ...normalized,
       rawLlmResponse: apiJson,
+      transcriptSource,
+      transcriptPreview: transcript.length > 500 ? transcript.slice(0, 500) + '...' : transcript,
       meta: {
         model,
         tookMs,
@@ -217,6 +309,63 @@ export class TranscriptAnalysisService {
         generatedAt: new Date().toISOString(),
       },
     };
+  }
+
+  private isTranscriptRecording(r: MeetingRecordingEntity): boolean {
+    const type = String(r.recording_type || '').toUpperCase();
+    const ext = String(r.file_extension || '').toUpperCase();
+    return type === 'TRANSCRIPT' || type === 'VTT' || ext === 'VTT';
+  }
+
+  private async fetchTranscriptFromVideoconference(videoconferenceId: string): Promise<string> {
+    const availability = await this.getAvailability(videoconferenceId);
+    if (!availability.recordings.length) {
+      throw new BadRequestException(availability.message);
+    }
+    const withUrl = availability.recordings.find((r) => r.hasDownloadUrl);
+    if (!withUrl) {
+      throw new BadRequestException(
+        'Hay grabaciones de transcript pero ninguna tiene download_url registrada. Sincroniza datos Zoom de la reunion.',
+      );
+    }
+    const recording = await this.recordingsRepo.findOne({ where: { id: withUrl.recordingId } });
+    if (!recording?.download_url) {
+      throw new BadRequestException('Grabacion sin download_url.');
+    }
+    let raw: string;
+    try {
+      raw = await this.zoomAccount.downloadRecordingAsText(recording.download_url);
+    } catch (error) {
+      throw new BadRequestException(
+        `No se pudo descargar el transcript desde Zoom: ${(error as Error).message || 'error desconocido'}`,
+      );
+    }
+    return this.flattenVtt(raw);
+  }
+
+  /** Convert a WEBVTT blob into plain text with [HH:MM:SS] markers. If already plain, return as-is. */
+  private flattenVtt(raw: string): string {
+    const text = raw.replace(/\r\n/g, '\n').trim();
+    if (!/^WEBVTT/i.test(text) && !text.includes('-->')) {
+      return text;
+    }
+    const lines = text.split('\n');
+    const out: string[] = [];
+    let currentTs: string | null = null;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || /^WEBVTT/i.test(trimmed) || /^NOTE\b/i.test(trimmed)) continue;
+      if (/^\d+$/.test(trimmed)) continue;
+      const tsMatch = trimmed.match(/^(\d{1,2}:\d{2}(?::\d{2})?)[.,]?\d*\s*-->/);
+      if (tsMatch) {
+        currentTs = tsMatch[1];
+        continue;
+      }
+      const prefix = currentTs ? `[${currentTs}] ` : '';
+      out.push(`${prefix}${trimmed}`);
+      currentTs = null;
+    }
+    return out.join('\n').trim() || text;
   }
 
   private extractCandidateText(apiJson: unknown): string | null {
@@ -260,7 +409,7 @@ export class TranscriptAnalysisService {
     }
   }
 
-  private normalizeResult(data: Record<string, unknown>): Omit<TranscriptAnalysisResult, 'meta' | 'rawLlmResponse'> {
+  private normalizeResult(data: Record<string, unknown>): Omit<TranscriptAnalysisResult, 'meta' | 'rawLlmResponse' | 'transcriptPreview' | 'transcriptSource'> {
     const coverageRaw = Number(data.coverageScore);
     const coverageScore = Number.isFinite(coverageRaw)
       ? Math.max(0, Math.min(100, Math.round(coverageRaw)))
