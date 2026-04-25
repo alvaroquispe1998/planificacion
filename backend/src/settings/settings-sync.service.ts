@@ -338,7 +338,7 @@ const RESOURCE_DEFINITIONS: Array<{
     },
     {
       code: 'vc_section_rosters',
-      label: 'VC: Secciones con alumnos (AULAVIRTUAL)',
+      label: 'VC: Secciones con alumnos',
       source: 'AULAVIRTUAL',
       module_code: 'VIDEOCONFERENCE',
       module_label: 'Videoconferencia',
@@ -707,14 +707,23 @@ export class SettingsSyncService {
       sourceCodes.map(async (sourceCode) => {
         const sourceJobs = jobsBySource.get(sourceCode) || [];
 
-        // vc_section_rosters depende de vc_sections (ambos escriben en la tabla
-        // vc_sections y pueden deadlock si corren en paralelo). Lo sacamos del
-        // batch concurrente y lo ejecutamos al final de forma secuencial.
-        const rosterJobs = sourceJobs.filter(
-          (item) => item.resource === 'vc_section_rosters',
-        );
+        // Algunos recursos AULAVIRTUAL hacen muchos requests al mismo
+        // endpoint /secciones/get y pueden saturar la sesión / la BD si corren
+        // en paralelo entre ellos. Los sacamos del batch concurrente y los
+        // ejecutamos de forma secuencial al final, en este orden:
+        //   vc_sections -> course_sections -> vc_section_rosters
+        // (vc_section_rosters depende de vc_sections para no entrar en
+        // deadlock al actualizar la misma tabla).
+        const SERIAL_RESOURCES: ResourceCode[] = [
+          'vc_sections',
+          'course_sections',
+          'vc_section_rosters',
+        ];
+        const serialJobs = SERIAL_RESOURCES.map((resourceCode) =>
+          sourceJobs.find((item) => item.resource === resourceCode),
+        ).filter((item): item is (typeof sourceJobs)[number] => Boolean(item));
         const otherJobs = sourceJobs.filter(
-          (item) => item.resource !== 'vc_section_rosters',
+          (item) => !SERIAL_RESOURCES.includes(item.resource),
         );
 
         const runJob = async ({ job, resource }: (typeof sourceJobs)[number]) => {
@@ -759,9 +768,9 @@ export class SettingsSyncService {
         // Within each source, run jobs with controlled concurrency
         await runWithConcurrency(otherJobs, 2, runJob);
 
-        // Rosters al final, uno por uno (evita deadlocks con vc_sections)
-        for (const rosterJob of rosterJobs) {
-          await runJob(rosterJob);
+        // Recursos pesados/secciones al final, uno por uno
+        for (const serialJob of serialJobs) {
+          await runJob(serialJob);
         }
       }),
     );
