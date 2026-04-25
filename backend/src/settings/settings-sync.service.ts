@@ -703,7 +703,7 @@ export class SettingsSyncService {
     const sourceCodes = [...jobsBySource.keys()];
 
     // Process sources in parallel
-    await Promise.all(
+    await Promise.allSettled(
       sourceCodes.map(async (sourceCode) => {
         const sourceJobs = jobsBySource.get(sourceCode) || [];
 
@@ -726,7 +726,7 @@ export class SettingsSyncService {
           (item) => !SERIAL_RESOURCES.includes(item.resource),
         );
 
-        const runJob = async ({ job, resource }: (typeof sourceJobs)[number]) => {
+        const runJobInner = async ({ job, resource }: (typeof sourceJobs)[number]) => {
           try {
             const sourceResult =
               sourceProbeCache.get(sourceCode) ??
@@ -758,10 +758,34 @@ export class SettingsSyncService {
             await this.completeJob(job);
           } catch (error) {
             const message = this.toErrorMessage(error);
-            await this.failJob(job, message);
-            await this.log(job.id, 'ERROR', `Error en sync de ${resource}`, {
-              error: message,
-            });
+            try {
+              await this.failJob(job, message);
+              await this.log(job.id, 'ERROR', `Error en sync de ${resource}`, {
+                error: message,
+              });
+            } catch (fatalError) {
+              // Si fallar el job tambien rompe (DB caida, etc.) lo logueamos a
+              // consola pero NO dejamos que la excepcion escape: hacerlo
+              // colgaria el resto de jobs en la cola.
+              console.error(
+                `[SYNC] No se pudo marcar como FAILED el job ${job.id} (${resource}):`,
+                fatalError,
+              );
+            }
+          }
+        };
+
+        // Wrapper que garantiza que NUNCA propague una excepcion al runner.
+        // Si algo se sale del try/catch interno (caso extremo), igual pasa
+        // como rejection silencioso para no romper la cola.
+        const runJob = async (item: (typeof sourceJobs)[number]) => {
+          try {
+            await runJobInner(item);
+          } catch (err) {
+            console.error(
+              `[SYNC] Excepcion no controlada en runJob ${item.job.id} (${item.resource}):`,
+              err,
+            );
           }
         };
 
@@ -774,10 +798,40 @@ export class SettingsSyncService {
         }
       }),
     );
+
+    // Reaper: cualquier job de esta tanda que haya quedado en PENDING o
+    // RUNNING al terminar el orquestador es una anomalia (el wrapper deberia
+    // garantizar que todos terminen). Lo marcamos como FAILED para que la UI
+    // no muestre eternamente "1 pendiente / 0 ejecutando".
+    try {
+      const jobIds = jobs.map((item) => item.job.id);
+      if (jobIds.length > 0) {
+        const stuck = await this.jobsRepo.find({
+          where: { id: In(jobIds), status: In(['PENDING', 'RUNNING']) as never },
+        });
+        for (const job of stuck) {
+          console.warn(
+            `[SYNC] Job ${job.id} (${job.resource}) quedo en ${job.status}; marcado como FAILED por el reaper.`,
+          );
+          await this.failJob(
+            job,
+            `Sync no completado (estado previo: ${job.status}). Reintentar el recurso.`,
+          );
+          await this.log(
+            job.id,
+            'ERROR',
+            'Job destrabado por reaper al final del lote',
+            { previous_status: job.status },
+          );
+        }
+      }
+    } catch (err) {
+      console.error('[SYNC] Error en reaper de jobs colgados:', err);
+    }
   }
 
-  async listJobs(limit = 20) {
-    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, Number(limit))) : 20;
+  async listJobs(limit = 50) {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, Number(limit))) : 50;
     const jobs = await this.jobsRepo.find({
       order: { created_at: 'DESC' },
       take: safeLimit,
@@ -2400,9 +2454,25 @@ export class SettingsSyncService {
     }
 
     const ids = validRows.map((row) => row.id as string);
-    const existing = await repo.find({ where: { id: In(ids) } });
-    const existingIds = new Set(existing.map((row: { id: string }) => row.id));
-    await repo.save(validRows);
+
+    // Find existing in chunks of 1000 to avoid huge IN() lists.
+    const existingIds = new Set<string>();
+    const ID_CHUNK = 1000;
+    for (let i = 0; i < ids.length; i += ID_CHUNK) {
+      const slice = ids.slice(i, i + ID_CHUNK);
+      const found = await repo.find({ where: { id: In(slice) } });
+      for (const row of found as Array<{ id: string }>) {
+        existingIds.add(row.id);
+      }
+    }
+
+    // Save in chunks to avoid one giant statement that can hold locks too
+    // long or hit packet size limits when JSON columns are big (vc_sections).
+    const SAVE_CHUNK = 200;
+    for (let i = 0; i < validRows.length; i += SAVE_CHUNK) {
+      const slice = validRows.slice(i, i + SAVE_CHUNK);
+      await repo.save(slice);
+    }
 
     const updated = validRows.filter((row) => existingIds.has(row.id as string)).length;
     const created = validRows.length - updated;
