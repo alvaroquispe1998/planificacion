@@ -7,6 +7,7 @@ import {
   VcAcademicProgramEntity,
   VcCourseEntity,
   VcSectionEntity,
+  VcSectionStudentEntity,
 } from '../videoconference/videoconference.entity';
 import {
   AcademicProgramCampusEntity,
@@ -64,6 +65,7 @@ import { SettingsSyncService } from './settings-sync.service';
       VcAcademicProgramEntity,
       VcCourseEntity,
       VcSectionEntity,
+      VcSectionStudentEntity,
     ]),
   ],
   controllers: [SettingsSyncController, CatalogController],

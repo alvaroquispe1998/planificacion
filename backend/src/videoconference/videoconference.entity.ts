@@ -182,6 +182,44 @@ export class VcSectionEntity {
 
     @Column({ type: 'json', nullable: true })
     teachers_json!: Record<string, unknown>[] | null;
+
+    @Column({ type: 'int', unsigned: true, nullable: true })
+    student_count!: number | null;
+
+    @Column({ type: 'datetime', nullable: true })
+    roster_synced_at!: Date | null;
+}
+
+@Entity({ name: 'vc_section_students' })
+@Index(['section_id'])
+@Index(['dni'])
+export class VcSectionStudentEntity {
+    @PrimaryColumn({ type: 'varchar', length: 80 })
+    id!: string;
+
+    @Column({ type: 'varchar', length: 36 })
+    section_id!: string;
+
+    @Column({ type: 'varchar', length: 36, nullable: true })
+    student_id!: string | null;
+
+    @Column({ type: 'varchar', length: 30, nullable: true })
+    dni!: string | null;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    full_name!: string | null;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    email!: string | null;
+
+    @Column({ type: 'varchar', length: 60, nullable: true })
+    state!: string | null;
+
+    @Column({ type: 'json', nullable: true })
+    raw_json!: Record<string, unknown> | null;
+
+    @Column({ type: 'datetime' })
+    synced_at!: Date;
 }
 
 @Entity({ name: 'zoom_config' })

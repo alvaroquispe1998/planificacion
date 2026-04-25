@@ -37,6 +37,7 @@ import {
   VcFacultyEntity,
   VcPeriodEntity,
   VcSectionEntity,
+  VcSectionStudentEntity,
 } from '../videoconference/videoconference.entity';
 import { RunSettingsSyncDto, UpsertSourceSessionDto } from './dto/settings-sync.dto';
 
@@ -62,7 +63,8 @@ type ResourceCode =
   | 'vc_faculties'
   | 'vc_academic_programs'
   | 'vc_courses'
-  | 'vc_sections';
+  | 'vc_sections'
+  | 'vc_section_rosters';
 
 type SourceProbeResult = {
   ok: boolean;
@@ -334,6 +336,16 @@ const RESOURCE_DEFINITIONS: Array<{
       module_order: 60,
       resource_order: 50,
     },
+    {
+      code: 'vc_section_rosters',
+      label: 'VC: Secciones con alumnos (AULAVIRTUAL)',
+      source: 'AULAVIRTUAL',
+      module_code: 'VIDEOCONFERENCE',
+      module_label: 'Videoconferencia',
+      module_description: 'Recursos para videoconferencias.',
+      module_order: 60,
+      resource_order: 60,
+    },
   ];
 
 const RESOURCE_CODES = RESOURCE_DEFINITIONS.map((item) => item.code);
@@ -422,6 +434,8 @@ export class SettingsSyncService {
     private readonly vcCoursesRepo: Repository<VcCourseEntity>,
     @InjectRepository(VcSectionEntity)
     private readonly vcSectionsRepo: Repository<VcSectionEntity>,
+    @InjectRepository(VcSectionStudentEntity)
+    private readonly vcSectionStudentsRepo: Repository<VcSectionStudentEntity>,
   ) {
     this.allowInsecureTls =
       this.configService.get<string>('SYNC_TLS_ALLOW_INSECURE', 'true') === 'true';
@@ -1064,6 +1078,23 @@ export class SettingsSyncService {
       return results.flat();
     }
 
+    if (resource === 'vc_section_rosters') {
+      const courseIds = await this.resolveVcCourseIds();
+      const results = await runWithConcurrency(courseIds, 6, async (courseId) => {
+        const partial = await this.fetchRows(
+          source,
+          cookie,
+          `/web/course/${courseId}/sections/list`,
+          { termId: '' },
+        );
+        return partial.map((item) => ({
+          ...(item as Record<string, unknown>),
+          __course_id: courseId,
+        }));
+      });
+      return results.flat();
+    }
+
     return [];
   }
 
@@ -1337,6 +1368,10 @@ export class SettingsSyncService {
           teachers_json: (row.teachers as Record<string, unknown>[]) ?? [],
         })),
       );
+    }
+
+    if (resource === 'vc_section_rosters') {
+      return this.persistVcSectionRosters(rows);
     }
 
     return { received: 0, processed: 0, created: 0, updated: 0, skipped: 0, deduplicated: 0 };
@@ -2631,6 +2666,99 @@ export class SettingsSyncService {
   private async resolveVcCourseIdsByProgram(programId: string) {
     const rows = await this.vcCoursesRepo.find({ where: { program_id: programId }, select: { id: true } });
     return rows.map((row) => row.id);
+  }
+
+  private async persistVcSectionRosters(rows: Record<string, unknown>[]) {
+    const received = rows.length;
+    let processed = 0;
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    const now = new Date();
+
+    for (const row of rows) {
+      const sectionId = asString(pick(row, 'id', 'sectionId'));
+      if (!sectionId) {
+        skipped += 1;
+        continue;
+      }
+      const courseId = asString(pick(row, '__course_id', 'courseId'));
+      const sectionName = asNullableString(pick(row, 'name', 'text', 'sectionName'));
+
+      const studentsRaw =
+        (pick(row, 'students', 'alumnos', 'enrollments', 'enrolledStudents') as
+          | unknown[]
+          | null) ?? [];
+      const students = Array.isArray(studentsRaw) ? studentsRaw : [];
+
+      const studentRows = students
+        .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
+        .map((student, index) => {
+          const studentId = asNullableString(
+            pick(student, 'id', 'studentId', 'userId'),
+          );
+          const dni = asNullableString(
+            pick(student, 'dni', 'documentNumber', 'document', 'identification'),
+          );
+          const fullName = asNullableString(
+            pick(student, 'fullName', 'name', 'text', 'displayName'),
+          );
+          const email = asNullableString(pick(student, 'email', 'mail'));
+          const state = asNullableString(pick(student, 'state', 'status', 'estado'));
+          const idKey = studentId ?? dni ?? `idx-${index}`;
+          return {
+            id: `${sectionId}::${idKey}`.slice(0, 80),
+            section_id: sectionId,
+            student_id: studentId,
+            dni,
+            full_name: fullName,
+            email,
+            state,
+            raw_json: student,
+            synced_at: now,
+          };
+        });
+
+      await this.dataSource.transaction(async (manager) => {
+        const existingSection = await manager.findOne(VcSectionEntity, {
+          where: { id: sectionId },
+        });
+        if (existingSection) {
+          existingSection.student_count = studentRows.length;
+          existingSection.roster_synced_at = now;
+          if (sectionName) {
+            existingSection.name = sectionName;
+          }
+          if (courseId) {
+            existingSection.course_id = courseId;
+          }
+          await manager.save(VcSectionEntity, existingSection);
+          updated += 1;
+        } else if (courseId) {
+          await manager.save(VcSectionEntity, {
+            id: sectionId,
+            name: sectionName ?? sectionId,
+            course_id: courseId,
+            teachers_json: null,
+            student_count: studentRows.length,
+            roster_synced_at: now,
+          } as Partial<VcSectionEntity>);
+          created += 1;
+        } else {
+          skipped += 1;
+          return;
+        }
+
+        await manager.delete(VcSectionStudentEntity, { section_id: sectionId });
+        if (studentRows.length > 0) {
+          await manager.save(VcSectionStudentEntity, studentRows);
+        }
+      });
+
+      processed += 1;
+    }
+
+    return { received, processed, created, updated, skipped, deduplicated: 0 };
   }
 
   private async markSessionStatus(

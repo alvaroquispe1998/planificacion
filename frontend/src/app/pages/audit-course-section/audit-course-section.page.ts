@@ -3,7 +3,6 @@ import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
-import { VideoconferenceApiService } from '../../services/videoconference-api.service';
 
 @Component({
   selector: 'app-audit-course-section-page',
@@ -27,24 +26,8 @@ export class AuditCourseSectionPageComponent implements OnInit {
   };
   filters: Record<string, string> = {};
 
-  deletingId = '';
-
-  // Confirm-delete modal state
-  confirmDeleteOpen = false;
-  confirmDeleteRow: any = null;
-  deleteErrorMessage = '';
-  deleteSuccessMessage = '';
-
-  // Aula Virtual lookup preview
-  aulaVirtualLookupLoading = false;
-  aulaVirtualLookupId = '';
-  aulaVirtualLookupMessage = '';
-  aulaVirtualLookupSource: 'response_json' | 'list_lookup' | 'not_found' | '' = '';
-  aulaVirtualLookupFound = false;
-
   constructor(
     private readonly api: ApiService,
-    private readonly vcApi: VideoconferenceApiService,
     private readonly route: ActivatedRoute,
     private readonly router: Router,
     private readonly cdr: ChangeDetectorRef,
@@ -101,113 +84,6 @@ export class AuditCourseSectionPageComponent implements OnInit {
       this.router.createUrlTree(['/videoconferences/audit', row.id]),
     );
     window.open(url, '_blank', 'noopener');
-  }
-
-  async deleteConference(row: any) {
-    this.confirmDeleteRow = row;
-    this.confirmDeleteOpen = true;
-    this.deleteErrorMessage = '';
-    this.deleteSuccessMessage = '';
-    this.aulaVirtualLookupId = '';
-    this.aulaVirtualLookupMessage = '';
-    this.aulaVirtualLookupSource = '';
-    this.aulaVirtualLookupFound = false;
-    this.aulaVirtualLookupLoading = true;
-    this.cdr.detectChanges();
-
-    this.vcApi.lookupAulaVirtualId(row.id).subscribe({
-      next: (res) => {
-        this.aulaVirtualLookupLoading = false;
-        this.aulaVirtualLookupId = res.aula_virtual_id || '';
-        this.aulaVirtualLookupMessage = res.message || '';
-        this.aulaVirtualLookupSource = res.source;
-        this.aulaVirtualLookupFound = !!res.aula_virtual_id;
-        // eslint-disable-next-line no-console
-        console.log('[AV lookup]', res);
-        this.cdr.detectChanges();
-      },
-      error: (err) => {
-        this.aulaVirtualLookupLoading = false;
-        this.aulaVirtualLookupId = '';
-        this.aulaVirtualLookupFound = false;
-        this.aulaVirtualLookupSource = 'not_found';
-        this.aulaVirtualLookupMessage =
-          err?.error?.message ||
-          err?.message ||
-          'No se pudo consultar Aula Virtual.';
-        this.cdr.detectChanges();
-      },
-    });
-  }
-
-  cancelDelete() {
-    this.confirmDeleteOpen = false;
-    this.confirmDeleteRow = null;
-    this.deleteErrorMessage = '';
-    this.cdr.detectChanges();
-  }
-
-  confirmDelete() {
-    const row = this.confirmDeleteRow;
-    if (!row || !row.id) {
-      this.deleteErrorMessage = 'Registro invalido: no tiene ID.';
-      this.cdr.detectChanges();
-      return;
-    }
-    this.deletingId = row.id;
-    this.deleteErrorMessage = '';
-    this.cdr.detectChanges();
-
-    // eslint-disable-next-line no-console
-    console.log('[DELETE videoconference] id:', row.id, 'topic:', row.topic);
-
-    this.vcApi.deleteVideoconference(row.id).subscribe({
-      next: (result) => {
-        const idx = this.rows.findIndex((r) => r.id === row.id);
-        if (idx !== -1) {
-          this.rows[idx] = {
-            ...this.rows[idx],
-            delete_status: 'DELETED',
-            deleted_at: new Date().toISOString(),
-          };
-        }
-        this.deletingId = '';
-        this.deleteSuccessMessage = result?.message || 'Videoconferencia eliminada correctamente.';
-        this.confirmDeleteOpen = false;
-        this.confirmDeleteRow = null;
-        this.cdr.detectChanges();
-        // Auto-hide success message after 5s
-        setTimeout(() => {
-          this.deleteSuccessMessage = '';
-          this.cdr.detectChanges();
-        }, 5000);
-      },
-      error: (err) => {
-        this.deletingId = '';
-        const status = err?.status ? ` (HTTP ${err.status})` : '';
-        const msg = err?.error?.message ?? err?.message ?? 'Error al eliminar la videoconferencia.';
-        this.deleteErrorMessage = `${msg}${status}`;
-        // eslint-disable-next-line no-console
-        console.error('[DELETE videoconference] error:', err);
-        this.cdr.detectChanges();
-      },
-    });
-  }
-
-  get confirmDeleteTopic(): string {
-    return this.confirmDeleteRow?.topic || '';
-  }
-  get confirmDeleteDate(): string {
-    return this.confirmDeleteRow ? this.dateLabel(this.confirmDeleteRow) : '';
-  }
-  get confirmDeleteTime(): string {
-    return this.confirmDeleteRow ? this.timeLabel(this.confirmDeleteRow) : '';
-  }
-  get confirmDeleteId(): string {
-    return this.confirmDeleteRow?.id || '';
-  }
-  get confirmDeleteZoomMeetingId(): string {
-    return this.confirmDeleteRow?.zoom_meeting_id || '';
   }
 
   onPageSizeChange(value: string | number) {
