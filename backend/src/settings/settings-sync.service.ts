@@ -707,10 +707,21 @@ export class SettingsSyncService {
       sourceCodes.map(async (sourceCode) => {
         const sourceJobs = jobsBySource.get(sourceCode) || [];
 
-        // Within each source, run jobs with controlled concurrency
-        await runWithConcurrency(sourceJobs, 2, async ({ job, resource }) => {
+        // vc_section_rosters depende de vc_sections (ambos escriben en la tabla
+        // vc_sections y pueden deadlock si corren en paralelo). Lo sacamos del
+        // batch concurrente y lo ejecutamos al final de forma secuencial.
+        const rosterJobs = sourceJobs.filter(
+          (item) => item.resource === 'vc_section_rosters',
+        );
+        const otherJobs = sourceJobs.filter(
+          (item) => item.resource !== 'vc_section_rosters',
+        );
+
+        const runJob = async ({ job, resource }: (typeof sourceJobs)[number]) => {
           try {
-            const sourceResult = sourceProbeCache.get(sourceCode) ?? (await this.probeSourceSession(sourceCode));
+            const sourceResult =
+              sourceProbeCache.get(sourceCode) ??
+              (await this.probeSourceSession(sourceCode));
 
             if (sourceResult.ok) {
               sourceProbeCache.set(sourceCode, sourceResult);
@@ -727,16 +738,31 @@ export class SettingsSyncService {
               mode: dto.mode ?? 'FULL',
             });
 
-            const rows = await this.fetchResourceRows(resource, sourceResult.source, sourceResult.cookie, dto);
+            const rows = await this.fetchResourceRows(
+              resource,
+              sourceResult.source,
+              sourceResult.cookie,
+              dto,
+            );
             const persisted = await this.persistResourceRows(resource, rows);
             await this.log(job.id, 'INFO', `Sync de ${resource} completado`, persisted);
             await this.completeJob(job);
           } catch (error) {
             const message = this.toErrorMessage(error);
             await this.failJob(job, message);
-            await this.log(job.id, 'ERROR', `Error en sync de ${resource}`, { error: message });
+            await this.log(job.id, 'ERROR', `Error en sync de ${resource}`, {
+              error: message,
+            });
           }
-        });
+        };
+
+        // Within each source, run jobs with controlled concurrency
+        await runWithConcurrency(otherJobs, 2, runJob);
+
+        // Rosters al final, uno por uno (evita deadlocks con vc_sections)
+        for (const rosterJob of rosterJobs) {
+          await runJob(rosterJob);
+        }
       }),
     );
   }
@@ -1081,20 +1107,49 @@ export class SettingsSyncService {
     if (resource === 'vc_section_rosters') {
       const courseIds = await this.resolveVcCourseIds();
       console.log(`[SYNC vc_section_rosters] Courses to fetch: ${courseIds.length}`);
+
       let okCount = 0;
       let failCount = 0;
+      let totalRows = 0;
+      let sampleLogged = false;
       const results = await runWithConcurrency(courseIds, 12, async (courseId) => {
         try {
-          const partial = await this.fetchRows(
+          const payload = await this.fetchPayload(
             source,
             cookie,
             `/web/course/${courseId}/sections/list`,
             { termId: '' },
           );
+          // Shape esperado: { courseName: string, sections: [...] }
+          // Desempaquetar manualmente: extractRows no maneja .sections.
+          let sections: Record<string, unknown>[] = [];
+          if (Array.isArray(payload)) {
+            sections = payload as Record<string, unknown>[];
+          } else if (payload && typeof payload === 'object') {
+            const obj = payload as Record<string, unknown>;
+            const candidate = (obj.sections ?? obj.data ?? obj.rows) as unknown;
+            if (Array.isArray(candidate)) {
+              sections = candidate as Record<string, unknown>[];
+            }
+          }
+          const courseName = asNullableString(
+            (payload as Record<string, unknown> | null)?.courseName,
+          );
+
           okCount += 1;
-          return partial.map((item) => ({
-            ...(item as Record<string, unknown>),
+          totalRows += sections.length;
+          if (!sampleLogged && sections.length > 0) {
+            sampleLogged = true;
+            console.log(
+              `[SYNC vc_section_rosters] Sample row (course=${courseId}): ${JSON.stringify(
+                sections[0],
+              ).slice(0, 1000)}`,
+            );
+          }
+          return sections.map((item) => ({
+            ...item,
             __course_id: courseId,
+            __course_name: courseName,
           }));
         } catch (error) {
           failCount += 1;
@@ -1109,7 +1164,7 @@ export class SettingsSyncService {
         }
       });
       console.log(
-        `[SYNC vc_section_rosters] Cursos OK=${okCount} Fallidos=${failCount}`,
+        `[SYNC vc_section_rosters] Cursos OK=${okCount} Fallidos=${failCount} TotalFilas=${totalRows}`,
       );
       return results.flat();
     }
@@ -2725,45 +2780,56 @@ export class SettingsSyncService {
         skipped += 1;
         continue;
       }
-      const sectionName = asNullableString(pick(row, 'name', 'text', 'sectionName')) ?? sectionId;
+      const sectionName =
+        asNullableString(pick(row, 'name', 'text', 'sectionName', 'sectionCode')) ?? sectionId;
 
-      const studentsRaw =
-        (pick(row, 'students', 'alumnos', 'enrollments', 'enrolledStudents') as
-          | unknown[]
-          | null) ?? [];
-      const students = Array.isArray(studentsRaw) ? studentsRaw : [];
+      const studentsRaw = pick(row, 'students', 'alumnos', 'enrollments', 'enrolledStudents');
 
-      const studentRows = students
-        .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
-        .map((student, index) => {
-          const studentId = asNullableString(pick(student, 'id', 'studentId', 'userId'));
-          const dni = asNullableString(
-            pick(student, 'dni', 'documentNumber', 'document', 'identification'),
-          );
-          const fullName = asNullableString(
-            pick(student, 'fullName', 'name', 'text', 'displayName'),
-          );
-          const email = asNullableString(pick(student, 'email', 'mail'));
-          const state = asNullableString(pick(student, 'state', 'status', 'estado'));
-          const idKey = studentId ?? dni ?? `idx-${index}`;
-          return {
-            id: `${sectionId}::${idKey}`.slice(0, 80),
-            section_id: sectionId,
-            student_id: studentId,
-            dni,
-            full_name: fullName,
-            email,
-            state,
-            raw_json: student,
-            synced_at: now,
-          };
-        });
+      // El endpoint /web/course/{id}/sections/list devuelve `students` como
+      // numero (conteo) por seccion. Otros endpoints podrian devolver un array
+      // con detalle por alumno; soportamos ambos casos.
+      let studentRows: SectionUpdate['students'] = [];
+      let studentCount = 0;
+
+      if (typeof studentsRaw === 'number' && Number.isFinite(studentsRaw)) {
+        studentCount = Math.max(0, Math.trunc(studentsRaw));
+      } else if (typeof studentsRaw === 'string' && studentsRaw.trim() !== '') {
+        const parsed = Number(studentsRaw);
+        studentCount = Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
+      } else if (Array.isArray(studentsRaw)) {
+        studentRows = studentsRaw
+          .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
+          .map((student, index) => {
+            const studentId = asNullableString(pick(student, 'id', 'studentId', 'userId'));
+            const dni = asNullableString(
+              pick(student, 'dni', 'documentNumber', 'document', 'identification'),
+            );
+            const fullName = asNullableString(
+              pick(student, 'fullName', 'name', 'text', 'displayName'),
+            );
+            const email = asNullableString(pick(student, 'email', 'mail'));
+            const state = asNullableString(pick(student, 'state', 'status', 'estado'));
+            const idKey = studentId ?? dni ?? `idx-${index}`;
+            return {
+              id: `${sectionId}::${idKey}`.slice(0, 80),
+              section_id: sectionId,
+              student_id: studentId,
+              dni,
+              full_name: fullName,
+              email,
+              state,
+              raw_json: student,
+              synced_at: now,
+            };
+          });
+        studentCount = studentRows.length;
+      }
 
       sectionUpdates.push({
         id: sectionId,
         course_id: courseId,
         name: sectionName,
-        student_count: studentRows.length,
+        student_count: studentCount,
         students: studentRows,
       });
     }
@@ -2781,35 +2847,35 @@ export class SettingsSyncService {
       });
       const existingIds = new Set(existing.map((e) => e.id));
 
-      // Upsert vc_sections en chunks
-      const sectionRowsToSave = sectionUpdates.map((s) => ({
-        id: s.id,
-        name: s.name,
-        course_id: s.course_id,
-        teachers_json: null as Record<string, unknown>[] | null,
-        student_count: s.student_count,
-        roster_synced_at: now,
-      }));
-      // Save preserva campos no especificados solo si la entidad existe; aqui
-      // queremos NO sobreescribir teachers_json existente. Hacemos update individual
-      // de student_count + roster_synced_at + name + course_id sin tocar teachers_json.
+      // Upsert vc_sections en chunks. Como este job corre DESPUES de
+      // vc_sections, confiamos en que los registros ya existen con name +
+      // course_id + teachers_json correctos. Solo actualizamos student_count y
+      // roster_synced_at para minimizar el tiempo de lock.
       const CHUNK = 200;
-      for (let i = 0; i < sectionRowsToSave.length; i += CHUNK) {
-        const chunk = sectionRowsToSave.slice(i, i + CHUNK);
+      for (let i = 0; i < sectionUpdates.length; i += CHUNK) {
+        const chunk = sectionUpdates.slice(i, i + CHUNK);
         const newOnes = chunk.filter((c) => !existingIds.has(c.id));
         const existingOnes = chunk.filter((c) => existingIds.has(c.id));
         if (newOnes.length > 0) {
-          await manager.insert(VcSectionEntity, newOnes as any);
+          await manager.insert(
+            VcSectionEntity,
+            newOnes.map((c) => ({
+              id: c.id,
+              name: c.name,
+              course_id: c.course_id,
+              teachers_json: null,
+              student_count: c.student_count,
+              roster_synced_at: now,
+            })) as any,
+          );
         }
         for (const row of existingOnes) {
           await manager.update(
             VcSectionEntity,
             { id: row.id },
             {
-              name: row.name,
-              course_id: row.course_id,
               student_count: row.student_count,
-              roster_synced_at: row.roster_synced_at,
+              roster_synced_at: now,
             },
           );
         }
