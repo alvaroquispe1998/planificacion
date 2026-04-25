@@ -496,7 +496,7 @@ export class SettingsPageComponent implements OnInit, OnDestroy {
   }
 
   refreshJobs() {
-    this.api.listSyncJobs(20).subscribe({
+    this.api.listSyncJobs(50).subscribe({
       next: (jobs) => {
         this.zone.run(() => {
           this.jobs = jobs;

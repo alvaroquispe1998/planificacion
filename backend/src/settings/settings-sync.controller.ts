@@ -52,7 +52,7 @@ export class SettingsSyncController {
   @Get('jobs')
   listJobs(@Query('limit') limit?: string) {
     const parsed = Number(limit);
-    return this.settingsSyncService.listJobs(Number.isFinite(parsed) ? parsed : 20);
+    return this.settingsSyncService.listJobs(Number.isFinite(parsed) ? parsed : 50);
   }
 
   @Post('planning-workspace-reset/preview')
