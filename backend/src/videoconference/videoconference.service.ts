@@ -4586,7 +4586,7 @@ export class VideoconferenceService implements OnModuleInit {
         const vcCourseMap = mapById(vcCourses);
         const vcSectionMap = mapById(vcSections);
 
-        return rows.map((row) => {
+        const resolved = rows.map((row) => {
             const offerVcContext = readOfferVcContextMetadata(row.offer_source_payload_json);
             const sectionVcContext = readSectionVcContextMetadata(row.section_source_payload_json);
             const sourceCourse = vcCourseMap.get(offerVcContext.source_vc_course_id ?? '') ?? null;
@@ -4650,6 +4650,86 @@ export class VideoconferenceService implements OnModuleInit {
                 vc_context_message: useSourceContext
                     ? 'Contexto AV restaurado desde la sincronizacion.'
                     : offerVcContext.vc_context_message,
+            };
+        });
+
+        // Fallback: si la seccion VC matcheada esta "vacia" (sin docentes y sin
+        // alumnos) probablemente sea un duplicado obsoleto. Buscar una hermana
+        // con el mismo course_id + name que tenga docentes o alumnos.
+        const isEmptyVcSection = (section: VcSectionEntity | null | undefined) => {
+            if (!section) return false;
+            const teachers = Array.isArray(section.teachers_json) ? section.teachers_json : [];
+            const hasTeachers = teachers.length > 0;
+            const hasStudents =
+                typeof section.student_count === 'number' && section.student_count > 0;
+            return !hasTeachers && !hasStudents;
+        };
+
+        const replacementsNeeded = new Map<string, { course_id: string; name: string }>();
+        for (const row of resolved) {
+            const sectionId = row.vc_section_id ?? null;
+            if (!sectionId) continue;
+            const section = vcSectionMap.get(sectionId);
+            if (!section || !isEmptyVcSection(section)) continue;
+            const courseId = (row.vc_course_id ?? section.course_id ?? '').trim();
+            const sectionName = (row.vc_section_name ?? section.name ?? '').trim();
+            if (!courseId || !sectionName) continue;
+            const key = `${courseId}::${sectionName}`;
+            if (!replacementsNeeded.has(key)) {
+                replacementsNeeded.set(key, { course_id: courseId, name: sectionName });
+            }
+        }
+
+        if (replacementsNeeded.size === 0) {
+            return resolved;
+        }
+
+        const courseIdsToQuery = uniqueIds(
+            [...replacementsNeeded.values()].map((item) => item.course_id),
+        );
+        const namesToQuery = Array.from(
+            new Set([...replacementsNeeded.values()].map((item) => item.name)),
+        );
+        const candidateSiblings = await this.vcSectionsRepo.find({
+            where: {
+                course_id: In(courseIdsToQuery),
+                name: In(namesToQuery),
+            },
+        });
+
+        const replacementByKey = new Map<string, VcSectionEntity>();
+        for (const sibling of candidateSiblings) {
+            if (isEmptyVcSection(sibling)) continue;
+            const key = `${sibling.course_id}::${sibling.name}`;
+            const existing = replacementByKey.get(key);
+            if (!existing) {
+                replacementByKey.set(key, sibling);
+                continue;
+            }
+            // Preferir la que tenga mas alumnos; en empate, la que tenga docentes.
+            const existingCount = existing.student_count ?? 0;
+            const siblingCount = sibling.student_count ?? 0;
+            if (siblingCount > existingCount) {
+                replacementByKey.set(key, sibling);
+            }
+        }
+
+        if (replacementByKey.size === 0) {
+            return resolved;
+        }
+
+        return resolved.map((row) => {
+            const sectionId = row.vc_section_id ?? null;
+            if (!sectionId) return row;
+            const currentSection = vcSectionMap.get(sectionId);
+            if (!currentSection || !isEmptyVcSection(currentSection)) return row;
+            const courseId = (row.vc_course_id ?? currentSection.course_id ?? '').trim();
+            const sectionName = (row.vc_section_name ?? currentSection.name ?? '').trim();
+            const replacement = replacementByKey.get(`${courseId}::${sectionName}`);
+            if (!replacement || replacement.id === sectionId) return row;
+            return {
+                ...row,
+                vc_section_id: replacement.id,
             };
         });
     }

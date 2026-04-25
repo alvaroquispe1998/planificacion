@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { API_BASE_URL } from '../../core/api-base';
 import { ApiService } from '../../core/api.service';
+import { VideoconferenceApiService } from '../../services/videoconference-api.service';
 
 export type TranscriptTopicStatus = 'covered' | 'partial' | 'missing';
 
@@ -116,10 +117,22 @@ export class AuditDetailPageComponent implements OnInit {
   analysisResult: TranscriptAnalysisResult | null = null;
   private readonly API_KEY_STORAGE = 'uai.geminiApiKey';
 
+  // Delete modal state
+  confirmDeleteOpen = false;
+  deleting = false;
+  deleteErrorMessage = '';
+  deleteSuccessMessage = '';
+  aulaVirtualLookupLoading = false;
+  aulaVirtualLookupId = '';
+  aulaVirtualLookupMessage = '';
+  aulaVirtualLookupSource: 'response_json' | 'list_lookup' | 'not_found' | '' = '';
+  aulaVirtualLookupFound = false;
+
   constructor(
     private readonly route: ActivatedRoute,
     private readonly router: Router,
     private readonly api: ApiService,
+    private readonly vcApi: VideoconferenceApiService,
     private readonly http: HttpClient,
     private readonly cdr: ChangeDetectorRef,
   ) {
@@ -411,6 +424,102 @@ export class AuditDetailPageComponent implements OnInit {
   backToList() {
     this.router.navigate(['/videoconferences/audit']);
   }
+
+  // ---------- Delete videoconference ----------
+
+  openDeleteModal() {
+    if (!this.record?.id || this.record?.delete_status === 'DELETED') return;
+    this.confirmDeleteOpen = true;
+    this.deleteErrorMessage = '';
+    this.deleteSuccessMessage = '';
+    this.aulaVirtualLookupId = '';
+    this.aulaVirtualLookupMessage = '';
+    this.aulaVirtualLookupSource = '';
+    this.aulaVirtualLookupFound = false;
+    this.aulaVirtualLookupLoading = true;
+    this.cdr.detectChanges();
+
+    this.vcApi.lookupAulaVirtualId(this.record.id).subscribe({
+      next: (res) => {
+        this.aulaVirtualLookupLoading = false;
+        this.aulaVirtualLookupId = res.aula_virtual_id || '';
+        this.aulaVirtualLookupMessage = res.message || '';
+        this.aulaVirtualLookupSource = res.source;
+        this.aulaVirtualLookupFound = !!res.aula_virtual_id;
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.aulaVirtualLookupLoading = false;
+        this.aulaVirtualLookupId = '';
+        this.aulaVirtualLookupFound = false;
+        this.aulaVirtualLookupSource = 'not_found';
+        this.aulaVirtualLookupMessage =
+          err?.error?.message || err?.message || 'No se pudo consultar Aula Virtual.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  cancelDelete() {
+    if (this.deleting) return;
+    this.confirmDeleteOpen = false;
+    this.deleteErrorMessage = '';
+    this.cdr.detectChanges();
+  }
+
+  confirmDelete() {
+    const id = this.record?.id;
+    if (!id) {
+      this.deleteErrorMessage = 'Registro invalido: no tiene ID.';
+      this.cdr.detectChanges();
+      return;
+    }
+    this.deleting = true;
+    this.deleteErrorMessage = '';
+    this.cdr.detectChanges();
+
+    this.vcApi.deleteVideoconference(id).subscribe({
+      next: (result) => {
+        this.deleting = false;
+        this.confirmDeleteOpen = false;
+        if (this.record) {
+          this.record = {
+            ...this.record,
+            delete_status: 'DELETED',
+            deleted_at: new Date().toISOString(),
+          };
+        }
+        this.deleteSuccessMessage = result?.message || 'Videoconferencia eliminada correctamente.';
+        this.cdr.detectChanges();
+        setTimeout(() => {
+          this.deleteSuccessMessage = '';
+          this.cdr.detectChanges();
+        }, 6000);
+      },
+      error: (err) => {
+        this.deleting = false;
+        const status = err?.status ? ` (HTTP ${err.status})` : '';
+        const msg = err?.error?.message ?? err?.message ?? 'Error al eliminar la videoconferencia.';
+        this.deleteErrorMessage = `${msg}${status}`;
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  get deleteTopic(): string { return this.record?.topic || ''; }
+  get deleteDateLabel(): string {
+    const d = this.record?.conference_date;
+    if (!d) return '';
+    try { return new Date(d).toLocaleDateString(); } catch { return String(d); }
+  }
+  get deleteTimeLabel(): string {
+    const s = this.record?.start_time;
+    const e = this.record?.end_time;
+    if (!s && !e) return '';
+    const f = (v: string | null | undefined) => (v ? String(v).slice(0, 5) : '--');
+    return `${f(s)} - ${f(e)}`;
+  }
+  get deleteZoomMeetingId(): string { return this.record?.zoom_meeting_id || ''; }
 
   // ---------- Transcript analysis ----------
 
