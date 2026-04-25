@@ -1080,18 +1080,37 @@ export class SettingsSyncService {
 
     if (resource === 'vc_section_rosters') {
       const courseIds = await this.resolveVcCourseIds();
-      const results = await runWithConcurrency(courseIds, 6, async (courseId) => {
-        const partial = await this.fetchRows(
-          source,
-          cookie,
-          `/web/course/${courseId}/sections/list`,
-          { termId: '' },
-        );
-        return partial.map((item) => ({
-          ...(item as Record<string, unknown>),
-          __course_id: courseId,
-        }));
+      console.log(`[SYNC vc_section_rosters] Courses to fetch: ${courseIds.length}`);
+      let okCount = 0;
+      let failCount = 0;
+      const results = await runWithConcurrency(courseIds, 12, async (courseId) => {
+        try {
+          const partial = await this.fetchRows(
+            source,
+            cookie,
+            `/web/course/${courseId}/sections/list`,
+            { termId: '' },
+          );
+          okCount += 1;
+          return partial.map((item) => ({
+            ...(item as Record<string, unknown>),
+            __course_id: courseId,
+          }));
+        } catch (error) {
+          failCount += 1;
+          if (failCount <= 5) {
+            console.warn(
+              `[SYNC vc_section_rosters] curso ${courseId} fallo: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+          return [] as Record<string, unknown>[];
+        }
       });
+      console.log(
+        `[SYNC vc_section_rosters] Cursos OK=${okCount} Fallidos=${failCount}`,
+      );
       return results.flat();
     }
 
@@ -2676,6 +2695,25 @@ export class SettingsSyncService {
     let skipped = 0;
     const now = new Date();
 
+    type SectionUpdate = {
+      id: string;
+      course_id: string;
+      name: string;
+      student_count: number;
+      students: Array<{
+        id: string;
+        section_id: string;
+        student_id: string | null;
+        dni: string | null;
+        full_name: string | null;
+        email: string | null;
+        state: string | null;
+        raw_json: Record<string, unknown>;
+        synced_at: Date;
+      }>;
+    };
+
+    const sectionUpdates: SectionUpdate[] = [];
     for (const row of rows) {
       const sectionId = asString(pick(row, 'id', 'sectionId'));
       if (!sectionId) {
@@ -2683,7 +2721,11 @@ export class SettingsSyncService {
         continue;
       }
       const courseId = asString(pick(row, '__course_id', 'courseId'));
-      const sectionName = asNullableString(pick(row, 'name', 'text', 'sectionName'));
+      if (!courseId) {
+        skipped += 1;
+        continue;
+      }
+      const sectionName = asNullableString(pick(row, 'name', 'text', 'sectionName')) ?? sectionId;
 
       const studentsRaw =
         (pick(row, 'students', 'alumnos', 'enrollments', 'enrolledStudents') as
@@ -2694,9 +2736,7 @@ export class SettingsSyncService {
       const studentRows = students
         .filter((s): s is Record<string, unknown> => !!s && typeof s === 'object')
         .map((student, index) => {
-          const studentId = asNullableString(
-            pick(student, 'id', 'studentId', 'userId'),
-          );
+          const studentId = asNullableString(pick(student, 'id', 'studentId', 'userId'));
           const dni = asNullableString(
             pick(student, 'dni', 'documentNumber', 'document', 'identification'),
           );
@@ -2719,45 +2759,82 @@ export class SettingsSyncService {
           };
         });
 
-      await this.dataSource.transaction(async (manager) => {
-        const existingSection = await manager.findOne(VcSectionEntity, {
-          where: { id: sectionId },
-        });
-        if (existingSection) {
-          existingSection.student_count = studentRows.length;
-          existingSection.roster_synced_at = now;
-          if (sectionName) {
-            existingSection.name = sectionName;
-          }
-          if (courseId) {
-            existingSection.course_id = courseId;
-          }
-          await manager.save(VcSectionEntity, existingSection);
-          updated += 1;
-        } else if (courseId) {
-          await manager.save(VcSectionEntity, {
-            id: sectionId,
-            name: sectionName ?? sectionId,
-            course_id: courseId,
-            teachers_json: null,
-            student_count: studentRows.length,
-            roster_synced_at: now,
-          } as Partial<VcSectionEntity>);
-          created += 1;
-        } else {
-          skipped += 1;
-          return;
-        }
-
-        await manager.delete(VcSectionStudentEntity, { section_id: sectionId });
-        if (studentRows.length > 0) {
-          await manager.save(VcSectionStudentEntity, studentRows);
-        }
+      sectionUpdates.push({
+        id: sectionId,
+        course_id: courseId,
+        name: sectionName,
+        student_count: studentRows.length,
+        students: studentRows,
       });
-
-      processed += 1;
     }
 
+    if (sectionUpdates.length === 0) {
+      return { received, processed: 0, created, updated, skipped, deduplicated: 0 };
+    }
+
+    // Una sola transaccion para todo: mucho mas rapido que 1 transaccion por seccion.
+    await this.dataSource.transaction(async (manager) => {
+      const sectionIds = sectionUpdates.map((s) => s.id);
+      const existing = await manager.find(VcSectionEntity, {
+        where: { id: In(sectionIds) },
+        select: { id: true },
+      });
+      const existingIds = new Set(existing.map((e) => e.id));
+
+      // Upsert vc_sections en chunks
+      const sectionRowsToSave = sectionUpdates.map((s) => ({
+        id: s.id,
+        name: s.name,
+        course_id: s.course_id,
+        teachers_json: null as Record<string, unknown>[] | null,
+        student_count: s.student_count,
+        roster_synced_at: now,
+      }));
+      // Save preserva campos no especificados solo si la entidad existe; aqui
+      // queremos NO sobreescribir teachers_json existente. Hacemos update individual
+      // de student_count + roster_synced_at + name + course_id sin tocar teachers_json.
+      const CHUNK = 200;
+      for (let i = 0; i < sectionRowsToSave.length; i += CHUNK) {
+        const chunk = sectionRowsToSave.slice(i, i + CHUNK);
+        const newOnes = chunk.filter((c) => !existingIds.has(c.id));
+        const existingOnes = chunk.filter((c) => existingIds.has(c.id));
+        if (newOnes.length > 0) {
+          await manager.insert(VcSectionEntity, newOnes as any);
+        }
+        for (const row of existingOnes) {
+          await manager.update(
+            VcSectionEntity,
+            { id: row.id },
+            {
+              name: row.name,
+              course_id: row.course_id,
+              student_count: row.student_count,
+              roster_synced_at: row.roster_synced_at,
+            },
+          );
+        }
+      }
+
+      created += sectionUpdates.filter((s) => !existingIds.has(s.id)).length;
+      updated += sectionUpdates.filter((s) => existingIds.has(s.id)).length;
+
+      // Borrar TODOS los rosters de las secciones afectadas en un solo DELETE
+      for (let i = 0; i < sectionIds.length; i += CHUNK) {
+        const idsChunk = sectionIds.slice(i, i + CHUNK);
+        await manager.delete(VcSectionStudentEntity, { section_id: In(idsChunk) });
+      }
+
+      // Insertar todos los students en chunks
+      const allStudents = sectionUpdates.flatMap((s) => s.students);
+      for (let i = 0; i < allStudents.length; i += CHUNK) {
+        const chunk = allStudents.slice(i, i + CHUNK);
+        if (chunk.length > 0) {
+          await manager.insert(VcSectionStudentEntity, chunk as any);
+        }
+      }
+    });
+
+    processed = sectionUpdates.length;
     return { received, processed, created, updated, skipped, deduplicated: 0 };
   }
 
