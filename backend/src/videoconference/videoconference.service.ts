@@ -4734,6 +4734,94 @@ export class VideoconferenceService implements OnModuleInit {
         });
     }
 
+    /**
+     * Dada una lista de vc_section_id, devuelve un map id_original -> id_efectivo.
+     * Si la sección original esta "vacía" (sin docentes y sin alumnos), busca una
+     * hermana con el mismo course_id + name que tenga datos reales y devuelve
+     * el id de esa hermana. Caso contrario devuelve el mismo id.
+     *
+     * Mismo criterio que `resolveRowsWithAvContext` para mantener coherencia
+     * entre la previsualización/creación de videoconferencias y la copia
+     * Akademic de herencias.
+     */
+    private async resolveEffectiveVcSectionIds(
+        sectionIds: Array<string | null | undefined>,
+    ): Promise<Map<string, string>> {
+        const isEmpty = (section: VcSectionEntity | null | undefined) => {
+            if (!section) return false;
+            const teachers = Array.isArray(section.teachers_json) ? section.teachers_json : [];
+            const hasTeachers = teachers.length > 0;
+            const hasStudents =
+                typeof section.student_count === 'number' && section.student_count > 0;
+            return !hasTeachers && !hasStudents;
+        };
+
+        const out = new Map<string, string>();
+        const unique = Array.from(
+            new Set(sectionIds.filter((id): id is string => typeof id === 'string' && id.length > 0)),
+        );
+        if (unique.length === 0) return out;
+
+        const sections = await this.vcSectionsRepo.find({ where: { id: In(unique) } });
+        const sectionMap = new Map(sections.map((s) => [s.id, s] as const));
+
+        const replacementsNeeded = new Map<string, { course_id: string; name: string }>();
+        for (const section of sections) {
+            if (!isEmpty(section)) continue;
+            const courseId = (section.course_id ?? '').trim();
+            const sectionName = (section.name ?? '').trim();
+            if (!courseId || !sectionName) continue;
+            replacementsNeeded.set(`${courseId}::${sectionName}`, {
+                course_id: courseId,
+                name: sectionName,
+            });
+        }
+
+        if (replacementsNeeded.size === 0) {
+            for (const id of unique) out.set(id, id);
+            return out;
+        }
+
+        const courseIdsToQuery = Array.from(
+            new Set([...replacementsNeeded.values()].map((i) => i.course_id)),
+        );
+        const namesToQuery = Array.from(
+            new Set([...replacementsNeeded.values()].map((i) => i.name)),
+        );
+        const candidates = await this.vcSectionsRepo.find({
+            where: { course_id: In(courseIdsToQuery), name: In(namesToQuery) },
+        });
+
+        const replacementByKey = new Map<string, VcSectionEntity>();
+        for (const sibling of candidates) {
+            if (isEmpty(sibling)) continue;
+            const key = `${sibling.course_id}::${sibling.name}`;
+            const existing = replacementByKey.get(key);
+            if (!existing) {
+                replacementByKey.set(key, sibling);
+                continue;
+            }
+            const existingCount = existing.student_count ?? 0;
+            const siblingCount = sibling.student_count ?? 0;
+            if (siblingCount > existingCount) {
+                replacementByKey.set(key, sibling);
+            }
+        }
+
+        for (const id of unique) {
+            const section = sectionMap.get(id);
+            if (!section || !isEmpty(section)) {
+                out.set(id, id);
+                continue;
+            }
+            const key = `${(section.course_id ?? '').trim()}::${(section.name ?? '').trim()}`;
+            const replacement = replacementByKey.get(key);
+            out.set(id, replacement?.id ?? id);
+        }
+
+        return out;
+    }
+
     private async findManyByIds<T extends { id: string }>(
         repo: Repository<T>,
         ids: Array<string | null | undefined>,
@@ -6181,6 +6269,14 @@ export class VideoconferenceService implements OnModuleInit {
                 .addSelect('child_sub.vc_section_id', 'child_vc_section_id')
                 .getRawMany<{ child_schedule_id: string; child_vc_section_id: string | null }>();
 
+            // Aplicar fallback: si la vc_section apuntada por la copia esta
+            // "vacia" (sin docentes y sin alumnos), reemplazarla por una hermana
+            // con datos reales (mismo course_id + name). Coherente con la
+            // lógica usada en la previsualización/creación de videoconfs.
+            const effectiveSectionMap = await this.resolveEffectiveVcSectionIds(
+                childRows.map((c) => c.child_vc_section_id),
+            );
+
             let allOk = true;
 
             for (const child of childRows) {
@@ -6199,12 +6295,20 @@ export class VideoconferenceService implements OnModuleInit {
                     continue;
                 }
 
+                const effectiveSectionId =
+                    effectiveSectionMap.get(child.child_vc_section_id) ?? child.child_vc_section_id;
+                if (effectiveSectionId !== child.child_vc_section_id) {
+                    console.log(
+                        `[AkademicCopy] Fallback vc_section: ${child.child_vc_section_id} -> ${effectiveSectionId} (child=${child.child_schedule_id})`,
+                    );
+                }
+
                 try {
                     await this.copyAulaVirtualConference(
                         aulaVirtualContext,
                         akademicId,
                         parent.topic ?? '',
-                        child.child_vc_section_id,
+                        effectiveSectionId,
                     );
                     result.copied++;
                 } catch (err) {
@@ -6442,12 +6546,25 @@ export class VideoconferenceService implements OnModuleInit {
                     child_course_name: string | null;
                 }>();
 
+            // Resolver fallback de secciones vacías para que el preview muestre
+            // el mismo id que la ejecución real enviará a Aula Virtual.
+            const effectiveChildSectionMap = await this.resolveEffectiveVcSectionIds(
+                childRows.map((c) => c.child_effective_vc_section_id),
+            );
+
             const children = childRows.map((child) => {
                 // Only the effective id resolved via JOIN with vc_sections is valid
                 // for copying to Aula Virtual. The source/vc_section_id fields may
                 // point to sections that exist in Akademic but not in AV, which
                 // would cause the AV copy endpoint to return 500.
-                const childDestinationSectionId = child.child_effective_vc_section_id ?? null;
+                const baseDestinationSectionId = child.child_effective_vc_section_id ?? null;
+                // Aplicar el mismo fallback que la ejecución real: si la sección
+                // está "vacía" (sin docente y sin alumnos) usar la hermana con
+                // datos. Garantiza que el preview/"Ver payload" coincida con lo
+                // que efectivamente se enviará a Aula Virtual.
+                const childDestinationSectionId = baseDestinationSectionId
+                    ? effectiveChildSectionMap.get(baseDestinationSectionId) ?? baseDestinationSectionId
+                    : null;
                 const childStatus =
                     !akademicConference
                         ? 'MISSING_AKADEMIC_CONFERENCE'
