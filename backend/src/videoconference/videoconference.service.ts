@@ -35,6 +35,7 @@ import {
     PlanningSubsectionVideoconferenceEntity,
     PlanningSubsectionVideoconferenceOverrideEntity,
     PlanningSubsectionScheduleVcInheritanceEntity,
+    PlanningInheritanceCopyLogEntity,
     PlanningSubsectionVideoconferenceLinkModeValues,
     VcAcademicProgramEntity,
     VcCourseEntity,
@@ -463,6 +464,8 @@ export class VideoconferenceService implements OnModuleInit {
         private readonly hostRulesRepo: Repository<VcScheduleHostRuleEntity>,
         @InjectRepository(PlanningSubsectionScheduleVcInheritanceEntity)
         private readonly inheritanceRepo: Repository<PlanningSubsectionScheduleVcInheritanceEntity>,
+        @InjectRepository(PlanningInheritanceCopyLogEntity)
+        private readonly inheritanceCopyLogsRepo: Repository<PlanningInheritanceCopyLogEntity>,
         @InjectRepository(PlanningSubsectionVideoconferenceEntity)
         private readonly planningVideoconferencesRepo: Repository<PlanningSubsectionVideoconferenceEntity>,
         @InjectRepository(PlanningSubsectionVideoconferenceOverrideEntity)
@@ -6116,6 +6119,20 @@ export class VideoconferenceService implements OnModuleInit {
                 akademic_copy_error: ok ? null : `Akademic respondio ${result.status}`,
             });
         }
+        // Registrar log por (herencia, videoconferencia padre por fecha) para
+        // que la UI sepa exactamente cuáles fechas ya fueron copiadas.
+        if (inheritanceId && parentLocalVideoconferenceId) {
+            await this.recordInheritanceCopyLog({
+                inheritanceId,
+                parentVideoconferenceId: parentLocalVideoconferenceId,
+                akademicConferenceId: id,
+                childDestinationSectionId: sectionIdTo,
+                status: ok ? 'COPIED' : 'ERROR',
+                payload,
+                response: result.body as Record<string, unknown>,
+                errorMessage: ok ? null : `Akademic respondio ${result.status}`,
+            });
+        }
         if (parentLocalVideoconferenceId && ok) {
             await this.refreshParentAkademicCopyStatus(parentLocalVideoconferenceId);
         }
@@ -6127,6 +6144,83 @@ export class VideoconferenceService implements OnModuleInit {
             inheritanceId,
             parentLocalVideoconferenceId,
         };
+    }
+
+    /**
+     * Inserta o actualiza un log de copia Akademic para el par
+     * (herencia, videoconferencia padre concreta por fecha).
+     *
+     * Esta tabla es la fuente de verdad de "qué fechas ya están clonadas".
+     * El campo `inheritanceRepo.akademic_copy_status` queda como vista
+     * agregada/legacy y se sigue manteniendo para compatibilidad, pero la UI
+     * de "Ya clonada" debe consultar este log por (inheritance_id, parent_vc_id).
+     */
+    private async recordInheritanceCopyLog(params: {
+        inheritanceId: string;
+        parentVideoconferenceId: string;
+        akademicConferenceId: string | null;
+        childDestinationSectionId: string | null;
+        status: 'COPIED' | 'ERROR';
+        payload: Record<string, unknown> | null;
+        response: Record<string, unknown> | null;
+        errorMessage: string | null;
+    }) {
+        // Recuperar conference_date desde la VC padre para denormalizarlo.
+        let conferenceDate = '';
+        try {
+            const parentVc = await this.planningVideoconferencesRepo.findOne({
+                where: { id: params.parentVideoconferenceId },
+                select: { id: true, conference_date: true },
+            });
+            conferenceDate =
+                typeof parentVc?.conference_date === 'string'
+                    ? parentVc.conference_date.slice(0, 10)
+                    : (parentVc?.conference_date as unknown as Date | undefined)
+                        ?.toISOString?.()
+                        .slice(0, 10) ?? '';
+        } catch {
+            conferenceDate = '';
+        }
+
+        const now = new Date();
+        const existing = await this.inheritanceCopyLogsRepo.findOne({
+            where: {
+                inheritance_id: params.inheritanceId,
+                parent_videoconference_id: params.parentVideoconferenceId,
+            },
+        });
+
+        if (existing) {
+            existing.akademic_conference_id = params.akademicConferenceId;
+            existing.child_destination_section_id = params.childDestinationSectionId;
+            existing.status = params.status;
+            existing.payload_json = params.payload ?? null;
+            existing.response_json = params.response ?? null;
+            existing.error_message = params.errorMessage;
+            existing.copied_at = now;
+            existing.updated_at = now;
+            if (conferenceDate) {
+                existing.conference_date = conferenceDate;
+            }
+            await this.inheritanceCopyLogsRepo.save(existing);
+            return;
+        }
+
+        const entity = new PlanningInheritanceCopyLogEntity();
+        entity.id = newId();
+        entity.inheritance_id = params.inheritanceId;
+        entity.parent_videoconference_id = params.parentVideoconferenceId;
+        entity.conference_date = conferenceDate || now.toISOString().slice(0, 10);
+        entity.akademic_conference_id = params.akademicConferenceId;
+        entity.child_destination_section_id = params.childDestinationSectionId;
+        entity.status = params.status;
+        entity.payload_json = params.payload ?? null;
+        entity.response_json = params.response ?? null;
+        entity.error_message = params.errorMessage;
+        entity.copied_at = now;
+        entity.created_at = now;
+        entity.updated_at = now;
+        await this.inheritanceCopyLogsRepo.save(entity);
     }
 
     private async refreshParentAkademicCopyStatus(parentLocalVideoconferenceId: string) {
@@ -6267,7 +6361,8 @@ export class VideoconferenceService implements OnModuleInit {
                 )
                 .select('sched.id', 'child_schedule_id')
                 .addSelect('child_sub.vc_section_id', 'child_vc_section_id')
-                .getRawMany<{ child_schedule_id: string; child_vc_section_id: string | null }>();
+                .addSelect('inh.id', 'inheritance_id')
+                .getRawMany<{ child_schedule_id: string; child_vc_section_id: string | null; inheritance_id: string }>();
 
             // Aplicar fallback: si la vc_section apuntada por la copia esta
             // "vacia" (sin docentes y sin alumnos), reemplazarla por una hermana
@@ -6304,13 +6399,25 @@ export class VideoconferenceService implements OnModuleInit {
                 }
 
                 try {
-                    await this.copyAulaVirtualConference(
+                    const copyResult = await this.copyAulaVirtualConference(
                         aulaVirtualContext,
                         akademicId,
                         parent.topic ?? '',
                         effectiveSectionId,
                     );
                     result.copied++;
+                    if (child.inheritance_id) {
+                        await this.recordInheritanceCopyLog({
+                            inheritanceId: child.inheritance_id,
+                            parentVideoconferenceId: parent.vc_id,
+                            akademicConferenceId: akademicId,
+                            childDestinationSectionId: effectiveSectionId,
+                            status: 'COPIED',
+                            payload: { id: akademicId, name: parent.topic ?? '', sectionIdTo: effectiveSectionId },
+                            response: (copyResult?.body as Record<string, unknown> | null) ?? null,
+                            errorMessage: null,
+                        });
+                    }
                 } catch (err) {
                     const reason = err instanceof Error ? err.message : String(err);
                     console.warn(
@@ -6324,6 +6431,18 @@ export class VideoconferenceService implements OnModuleInit {
                         child_schedule_id: child.child_schedule_id,
                         reason,
                     });
+                    if (child.inheritance_id) {
+                        await this.recordInheritanceCopyLog({
+                            inheritanceId: child.inheritance_id,
+                            parentVideoconferenceId: parent.vc_id,
+                            akademicConferenceId: akademicId,
+                            childDestinationSectionId: effectiveSectionId,
+                            status: 'ERROR',
+                            payload: { id: akademicId, name: parent.topic ?? '', sectionIdTo: effectiveSectionId },
+                            response: null,
+                            errorMessage: reason,
+                        });
+                    }
                     allOk = false;
                 }
             }
@@ -6552,6 +6671,28 @@ export class VideoconferenceService implements OnModuleInit {
                 childRows.map((c) => c.child_effective_vc_section_id),
             );
 
+            // Estado de copia POR FECHA: consultar log de copias específico
+            // para esta videoconferencia padre (parent.vc_id). Cada herencia
+            // puede haberse copiado en distintas fechas independientemente.
+            // Antes el preview leía akademic_copy_status de la herencia, lo
+            // que marcaba TODAS las fechas como "Ya clonada" cuando solo se
+            // había copiado una.
+            const inheritanceIdsForParent = childRows
+                .map((c) => c.inheritance_id)
+                .filter((id): id is string => Boolean(id));
+            const copyLogMap = new Map<string, PlanningInheritanceCopyLogEntity>();
+            if (inheritanceIdsForParent.length > 0) {
+                const logs = await this.inheritanceCopyLogsRepo.find({
+                    where: {
+                        inheritance_id: In(inheritanceIdsForParent),
+                        parent_videoconference_id: parent.vc_id,
+                    },
+                });
+                for (const log of logs) {
+                    copyLogMap.set(log.inheritance_id, log);
+                }
+            }
+
             const children = childRows.map((child) => {
                 // Only the effective id resolved via JOIN with vc_sections is valid
                 // for copying to Aula Virtual. The source/vc_section_id fields may
@@ -6565,6 +6706,10 @@ export class VideoconferenceService implements OnModuleInit {
                 const childDestinationSectionId = baseDestinationSectionId
                     ? effectiveChildSectionMap.get(baseDestinationSectionId) ?? baseDestinationSectionId
                     : null;
+                const perDateLog = copyLogMap.get(child.inheritance_id) ?? null;
+                // Para esta fecha concreta, el estado proviene del log
+                // (inheritance_id + parent_vc_id). Si no hay log, queda
+                // pendiente aunque la herencia ya se haya copiado en otra fecha.
                 const childStatus =
                     !akademicConference
                         ? 'MISSING_AKADEMIC_CONFERENCE'
@@ -6573,8 +6718,8 @@ export class VideoconferenceService implements OnModuleInit {
                             : 'READY';
                 return {
                     inheritanceId: child.inheritance_id,
-                    akademicCopyStatus: child.child_akademic_copy_status,
-                    akademicCopiedAt: child.child_akademic_copied_at,
+                    akademicCopyStatus: perDateLog ? perDateLog.status : null,
+                    akademicCopiedAt: perDateLog ? perDateLog.copied_at : null,
                     childScheduleId: child.child_schedule_id,
                     childVcSectionId: child.child_vc_section_id,
                     childSourceSectionId: child.child_source_section_id,
