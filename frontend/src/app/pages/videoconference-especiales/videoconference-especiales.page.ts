@@ -590,10 +590,20 @@ export class VideoconferenceEspecialesPageComponent implements OnInit {
   formatSectionDisplay(section: { section_code?: string | null; section_external_code?: string | null }): string {
     const code = String(section.section_code ?? '').trim();
     const external = String(section.section_external_code ?? '').trim();
-    if (code && external && external.toLowerCase() !== code.toLowerCase()) {
-      return `${code} - ${external}`;
+    if (!external) return code || 'Sin seccion';
+    if (!code) return external;
+    // Evitar duplicar el code cuando ya forma parte del external
+    // (ej. code="AP" + external="AP - IC" → mostrar "AP - IC", no "AP - AP - IC").
+    const codeLower = code.toLowerCase();
+    const externalLower = external.toLowerCase();
+    if (
+      externalLower === codeLower ||
+      externalLower.startsWith(`${codeLower} `) ||
+      externalLower.startsWith(`${codeLower}-`)
+    ) {
+      return external;
     }
-    return code || external || 'Sin seccion';
+    return `${code} - ${external}`;
   }
 
   get savedRules(): Array<{ section: SectionSummary; row: ScheduleRow }> {

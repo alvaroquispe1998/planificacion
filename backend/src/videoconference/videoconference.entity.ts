@@ -369,6 +369,66 @@ export class PlanningSubsectionScheduleVcInheritanceEntity {
     updated_at!: Date;
 }
 
+export const PlanningInheritanceCopyLogStatusValues = [
+    'COPIED',
+    'ERROR',
+] as const;
+
+@Entity({ name: 'planning_inheritance_copy_logs' })
+@Index(['inheritance_id', 'parent_videoconference_id'], { unique: true })
+@Index(['parent_videoconference_id'])
+@Index(['inheritance_id'])
+@Index(['copied_at'])
+export class PlanningInheritanceCopyLogEntity {
+    @PrimaryColumn({ type: 'varchar', length: 36 })
+    id!: string;
+
+    // Herencia padre->hijo (planning_subsection_schedule_vc_inheritances.id).
+    @Column({ type: 'varchar', length: 36 })
+    inheritance_id!: string;
+
+    // Videoconferencia padre concreta (por fecha) que se intentó clonar.
+    // Una herencia puede tener N copias (una por cada sesión del padre).
+    @Column({ type: 'varchar', length: 36 })
+    parent_videoconference_id!: string;
+
+    // Fecha de la sesión clonada (denormalizada para reportes y filtros).
+    @Column({ type: 'date' })
+    conference_date!: string;
+
+    // Id de la conferencia en Akademic (la del padre que se duplicó).
+    @Column({ type: 'varchar', length: 80, nullable: true })
+    akademic_conference_id!: string | null;
+
+    // Sección destino real usada al copiar (ya con fallback aplicado si correspondió).
+    @Column({ type: 'varchar', length: 36, nullable: true })
+    child_destination_section_id!: string | null;
+
+    @Column({
+        type: 'enum',
+        enum: PlanningInheritanceCopyLogStatusValues,
+    })
+    status!: (typeof PlanningInheritanceCopyLogStatusValues)[number];
+
+    @Column({ type: 'json', nullable: true })
+    payload_json!: Record<string, unknown> | null;
+
+    @Column({ type: 'json', nullable: true })
+    response_json!: Record<string, unknown> | null;
+
+    @Column({ type: 'text', nullable: true })
+    error_message!: string | null;
+
+    @Column({ type: 'datetime' })
+    copied_at!: Date;
+
+    @Column({ type: 'datetime' })
+    created_at!: Date;
+
+    @Column({ type: 'datetime' })
+    updated_at!: Date;
+}
+
 @Entity({ name: 'planning_subsection_videoconferences' })
 @Index(['planning_subsection_schedule_id', 'conference_date'], { unique: true })
 @Index(['zoom_user_id', 'conference_date'])
