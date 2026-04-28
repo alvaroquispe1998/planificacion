@@ -53,6 +53,8 @@ type AppliedFilterSnapshot = {
   selectedCourses: string[];
   selectedModalities: string[];
   selectedDays: string[];
+  minStartTime: string;
+  maxEndTime: string;
 };
 
 @Component({
@@ -72,6 +74,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   selectedPeriod = '';
   selectedModalities: string[] = [];
   selectedDays: string[] = [];
+  /** Rango horario opcional (HH:mm) aplicado al backend al presionar Buscar horarios. */
+  minStartTime = '';
+  maxEndTime = '';
   selectedZoomGroupId = '';
   zoomGroups: ZoomGroupItem[] = [];
   hybridZoomUsers: { id: string; label: string }[] = [];
@@ -338,6 +343,8 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     this.selectedPeriod = '';
     this.selectedModalities = [];
     this.selectedDays = [];
+    this.minStartTime = '';
+    this.maxEndTime = '';
     this.closeOverrideEditor();
     this.resetPreviewState();
     this.closeFilterDropdowns();
@@ -1419,11 +1426,13 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       selectedCourses: [...this.selectedCourses],
       selectedModalities: [...this.selectedModalities],
       selectedDays: [...this.selectedDays],
+      minStartTime: this.minStartTime,
+      maxEndTime: this.maxEndTime,
     };
   }
 
   private buildFilterLabels(snapshot: AppliedFilterSnapshot) {
-    return [
+    const labels = [
       this.buildSingleSelectionLabel('Periodo', snapshot.selectedPeriod, this.periodOptions),
       this.buildSelectionLabel('Sedes', snapshot.selectedCampuses, this.campusOptions),
       this.buildSelectionLabel('Facultades', snapshot.selectedFaculties, this.facultyOptions),
@@ -1432,6 +1441,12 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       this.buildSelectionLabel('Modalidades', snapshot.selectedModalities, this.modalityOptions),
       this.buildSelectionLabel('Dias', snapshot.selectedDays, this.dayOptions),
     ].filter((label): label is string => Boolean(label));
+    const min = (snapshot.minStartTime || '').trim();
+    const max = (snapshot.maxEndTime || '').trim();
+    if (min || max) {
+      labels.push(`Hora: ${min || '--:--'} - ${max || '--:--'}`);
+    }
+    return labels;
   }
 
   private loadZoomGroups() {
@@ -1574,6 +1589,8 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       courseIds: this.selectedCourses.length ? this.selectedCourses : undefined,
       modalities: this.selectedModalities.length ? this.selectedModalities : undefined,
       days: this.selectedDays.length ? this.selectedDays : undefined,
+      minStartTime: this.minStartTime?.trim() ? this.minStartTime.trim() : undefined,
+      maxEndTime: this.maxEndTime?.trim() ? this.maxEndTime.trim() : undefined,
     };
   }
 

@@ -185,6 +185,39 @@ h1 {
   grid-column: span 3;
 }
 
+.filter-time-range {
+  grid-column: span 6;
+}
+
+.time-range-inputs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.time-range-inputs input[type='time'] {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #d9e6f2;
+  border-radius: 10px;
+  background: #ffffff;
+  font: inherit;
+  color: #1f2d3d;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-range-inputs input[type='time']:focus {
+  outline: none;
+  border-color: #4f86c6;
+  box-shadow: 0 0 0 3px rgba(79, 134, 198, 0.18);
+}
+
+.time-range-sep {
+  color: #6b7d92;
+  font-weight: 600;
+}
+
 .filter-group.is-disabled {
   background: linear-gradient(180deg, rgba(248, 251, 255, 0.96), rgba(244, 248, 252, 0.96));
 }

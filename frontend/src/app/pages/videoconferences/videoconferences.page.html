@@ -109,6 +109,16 @@
             placeholder="Todos los dias">
           </app-multi-select>
         </div>
+
+        <div class="filter-group filter-time-range">
+          <label>Rango horario</label>
+          <div class="time-range-inputs">
+            <input type="time" step="60" [(ngModel)]="minStartTime" aria-label="Hora desde" placeholder="Desde" />
+            <span class="time-range-sep">—</span>
+            <input type="time" step="60" [(ngModel)]="maxEndTime" aria-label="Hora hasta" placeholder="Hasta" />
+          </div>
+          <small class="filter-hint">Aplica al rango efectivo (incluye horarios unidos).</small>
+        </div>
       </div>
 
       <aside class="filters-action-card">
