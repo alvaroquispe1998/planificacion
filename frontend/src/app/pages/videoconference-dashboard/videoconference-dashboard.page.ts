@@ -11,6 +11,8 @@ import {
     DashboardCoverageMissingItem,
     DashboardCoverageOverrideRow,
     DashboardCoverageSummary,
+    DashboardHostOption,
+    DashboardHostSession,
     DashboardTodayErrorItem,
     DashboardTodayHostUtilizationResponse,
     DashboardTodaySummary,
@@ -22,7 +24,14 @@ import {
     VideoconferenceApiService,
 } from '../../services/videoconference-api.service';
 
-type TabKey = 'today' | 'period';
+type TabKey = 'today' | 'period' | 'host';
+
+export interface HostCalendarBlock {
+    session: DashboardHostSession;
+    /** Minutos desde 00:00 del día (en hora local). */
+    startMinutes: number;
+    endMinutes: number;
+}
 
 @Component({
     selector: 'app-videoconference-dashboard-page',
@@ -63,6 +72,20 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
     coverageDaily: DashboardCoverageDailyPoint[] = [];
     coverageConflicts: DashboardCoverageConflictRow[] = [];
 
+    // Host tab data
+    hostOptions: DashboardHostOption[] = [];
+    selectedHostId = '';
+    weekStart: string = this.getMondayIso(new Date());
+    hostLoading = false;
+    hostError = '';
+    hostSessions: DashboardHostSession[] = [];
+    private inFlightHost: Subscription | null = null;
+    /** 7 columnas: lunes -> domingo, cada una con sus bloques posicionados. */
+    hostWeekColumns: Array<{ date: string; label: string; blocks: HostCalendarBlock[] }> = [];
+    /** Hora inicial visible del calendario (default 7) y final (default 22). */
+    readonly calendarStartHour = 7;
+    readonly calendarEndHour = 22;
+
     constructor(
         private readonly api: VideoconferenceDashboardApiService,
         private readonly vcApi: VideoconferenceApiService,
@@ -78,6 +101,7 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
         this.stopAutoRefresh();
         this.inFlight?.unsubscribe();
         this.inFlightPeriod?.unsubscribe();
+        this.inFlightHost?.unsubscribe();
     }
 
     private loadPeriods() {
@@ -100,8 +124,10 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
         this.activeTab = tab;
         if (tab === 'today') {
             this.refreshTodayData();
-        } else {
+        } else if (tab === 'period') {
             this.refreshPeriodData();
+        } else if (tab === 'host') {
+            this.loadHostOptions();
         }
     }
 
@@ -340,5 +366,181 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
     formatDayShort(d: string): string {
         if (!d) return '';
         return d.slice(5); // MM-DD
+    }
+
+    // =========================================================
+    // HOST CALENDAR
+    // =========================================================
+
+    private getMondayIso(d: Date): string {
+        const day = d.getDay();
+        const diffToMonday = (day + 6) % 7;
+        const monday = new Date(d);
+        monday.setHours(0, 0, 0, 0);
+        monday.setDate(monday.getDate() - diffToMonday);
+        return this.dateToIso(monday);
+    }
+
+    private dateToIso(d: Date): string {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    }
+
+    get weekEnd(): string {
+        const start = new Date(`${this.weekStart}T00:00:00`);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        return this.dateToIso(end);
+    }
+
+    get weekRangeLabel(): string {
+        const start = new Date(`${this.weekStart}T00:00:00`);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        const fmt = (d: Date) => d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short' });
+        return `${fmt(start)} – ${fmt(end)} ${end.getFullYear()}`;
+    }
+
+    get calendarHours(): number[] {
+        const hours: number[] = [];
+        for (let h = this.calendarStartHour; h <= this.calendarEndHour; h++) hours.push(h);
+        return hours;
+    }
+
+    shiftWeek(deltaDays: number) {
+        const start = new Date(`${this.weekStart}T00:00:00`);
+        start.setDate(start.getDate() + deltaDays);
+        this.weekStart = this.getMondayIso(start);
+        this.loadHostOptions();
+    }
+
+    onHostChange() {
+        this.refreshHostCalendar();
+    }
+
+    loadHostOptions() {
+        if (this.activeTab !== 'host') return;
+        this.hostError = '';
+        this.api.getHostOptions(this.weekStart, this.weekEnd).subscribe({
+            next: (opts) => {
+                this.hostOptions = opts;
+                if (this.hostOptions.length === 0) {
+                    this.selectedHostId = '';
+                    this.hostSessions = [];
+                    this.hostWeekColumns = this.buildEmptyWeek();
+                } else {
+                    const stillExists = this.hostOptions.some((o) => o.zoomUserId === this.selectedHostId);
+                    if (!stillExists) {
+                        this.selectedHostId = this.hostOptions[0].zoomUserId;
+                    }
+                    this.refreshHostCalendar();
+                }
+                this.cdr.detectChanges();
+            },
+            error: (err) => {
+                this.hostError = err?.error?.message ?? 'No se pudieron cargar los hosts.';
+                this.cdr.detectChanges();
+            },
+        });
+    }
+
+    refreshHostCalendar() {
+        if (!this.selectedHostId) {
+            this.hostSessions = [];
+            this.hostWeekColumns = this.buildEmptyWeek();
+            return;
+        }
+        this.inFlightHost?.unsubscribe();
+        this.hostLoading = true;
+        this.hostError = '';
+        this.inFlightHost = this.api
+            .getHostCalendar(this.selectedHostId, this.weekStart, this.weekEnd)
+            .pipe(
+                finalize(() => {
+                    this.hostLoading = false;
+                    this.cdr.detectChanges();
+                }),
+            )
+            .subscribe({
+                next: (resp) => {
+                    this.hostSessions = resp.sessions;
+                    this.hostWeekColumns = this.buildWeekColumns(resp.sessions);
+                },
+                error: (err) => {
+                    this.hostError = err?.error?.message ?? 'No se pudo cargar el calendario.';
+                    this.hostWeekColumns = this.buildEmptyWeek();
+                },
+            });
+    }
+
+    private buildEmptyWeek(): Array<{ date: string; label: string; blocks: HostCalendarBlock[] }> {
+        const cols: Array<{ date: string; label: string; blocks: HostCalendarBlock[] }> = [];
+        const start = new Date(`${this.weekStart}T00:00:00`);
+        const dayNames = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(start);
+            d.setDate(start.getDate() + i);
+            cols.push({
+                date: this.dateToIso(d),
+                label: `${dayNames[i]} ${d.getDate()}/${d.getMonth() + 1}`,
+                blocks: [],
+            });
+        }
+        return cols;
+    }
+
+    private buildWeekColumns(
+        sessions: DashboardHostSession[],
+    ): Array<{ date: string; label: string; blocks: HostCalendarBlock[] }> {
+        const cols = this.buildEmptyWeek();
+        const indexByDate = new Map<string, number>();
+        cols.forEach((c, idx) => indexByDate.set(c.date, idx));
+        for (const s of sessions) {
+            const idx = indexByDate.get(s.conferenceDate);
+            if (idx === undefined) continue;
+            const start = new Date(s.scheduledStart);
+            const end = new Date(s.scheduledEnd);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
+            const startMinutes = start.getHours() * 60 + start.getMinutes();
+            const endMinutes = end.getHours() * 60 + end.getMinutes();
+            cols[idx].blocks.push({ session: s, startMinutes, endMinutes });
+        }
+        return cols;
+    }
+
+    blockTopPx(block: HostCalendarBlock): string {
+        const baseMin = this.calendarStartHour * 60;
+        const top = Math.max(0, block.startMinutes - baseMin);
+        return `${top}px`;
+    }
+
+    blockHeightPx(block: HostCalendarBlock): string {
+        const baseMin = this.calendarStartHour * 60;
+        const endCap = this.calendarEndHour * 60 + 60;
+        const start = Math.max(baseMin, block.startMinutes);
+        const end = Math.min(endCap, block.endMinutes);
+        const h = Math.max(20, end - start);
+        return `${h}px`;
+    }
+
+    formatRange(session: DashboardHostSession): string {
+        const a = new Date(session.scheduledStart);
+        const b = new Date(session.scheduledEnd);
+        const fmt = (d: Date) =>
+            d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
+        return `${fmt(a)}–${fmt(b)}`;
+    }
+
+    hostLabel(opt: DashboardHostOption): string {
+        const name = opt.name ?? '';
+        const email = opt.email ?? '';
+        if (name && email) return `${name} (${email})`;
+        return name || email || opt.zoomUserId;
+    }
+
+    get selectedHostMeta(): DashboardHostOption | null {
+        return this.hostOptions.find((o) => o.zoomUserId === this.selectedHostId) ?? null;
     }
 }
