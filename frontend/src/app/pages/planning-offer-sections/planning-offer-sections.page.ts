@@ -53,6 +53,12 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   activeSectionId = '';
   activeSubsectionId = '';
 
+  // Cambios pendientes de guardar para el grupo activo en el drawer.
+  // El backend solo recibe estos cambios cuando se pulsa "Guardar cambios"
+  // (antes cada modificación generaba un PATCH inmediato).
+  pendingSubsectionId = '';
+  pendingSubsectionPayload: Record<string, unknown> = {};
+
   createSectionForm = {
     mode: 'SINGLE' as CreateSectionMode,
     subsection_count: 2,
@@ -358,6 +364,15 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   }
 
   openSubsectionDrawer(section: any, subsection: any) {
+    if (
+      this.hasPendingSubsectionChanges &&
+      this.pendingSubsectionId !== subsection.id
+    ) {
+      // Cambiar de grupo descarta los cambios sin guardar del anterior.
+      this.pendingSubsectionId = '';
+      this.pendingSubsectionPayload = {};
+      this.message = 'Cambios sin guardar descartados al cambiar de grupo.';
+    }
     this.expandedSectionId = section.id;
     this.activeSectionId = section.id;
     this.activeSubsectionId = subsection.id;
@@ -369,6 +384,8 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     this.drawerOpen = false;
     this.activeSectionId = '';
     this.activeSubsectionId = '';
+    this.pendingSubsectionId = '';
+    this.pendingSubsectionPayload = {};
   }
 
   onCreateSectionModeChange() {
@@ -516,14 +533,13 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   selectSubsectionTeacher(subsection: any, teacher: any | null) {
     this.subsectionTeacherQueryById[subsection.id] = teacher ? this.teacherDisplay(teacher) : '';
     this.subsectionTeacherMenuOpenById[subsection.id] = false;
-    if ((subsection.responsible_teacher_id ?? '') === (teacher?.id ?? '')) {
+    const newId = teacher?.id ?? '';
+    if ((subsection.responsible_teacher_id ?? '') === newId) {
       return;
     }
-    this.updateSubsectionField(
-      subsection,
-      { responsible_teacher_id: teacher?.id ?? '' },
-      `Grupo ${subsection.code} actualizado.`,
-    );
+    // Reflejar el cambio localmente y diferir el PATCH hasta "Guardar cambios".
+    subsection.responsible_teacher_id = newId || null;
+    this.bufferSubsectionChange(subsection, { responsible_teacher_id: newId });
   }
 
   updateSectionTeacher(section: any, teacherId: string) {
@@ -643,11 +659,98 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
       return;
     }
     subsection.projected_vacancies = normalized;
-    this.updateSubsectionField(
-      subsection,
-      { projected_vacancies: normalized },
-      `Vacantes actualizadas para ${subsection.code}.`,
+    this.bufferSubsectionChange(subsection, { projected_vacancies: normalized });
+  }
+
+  /**
+   * Acumula cambios del grupo activo en el drawer. El PATCH se ejecuta solo
+   * al pulsar "Guardar cambios" (saveSubsectionDrawer).
+   */
+  private bufferSubsectionChange(subsection: any, payload: Record<string, unknown>) {
+    if (this.isWorkflowReadOnly) {
+      return;
+    }
+    if (!subsection?.id) {
+      return;
+    }
+    if (this.pendingSubsectionId && this.pendingSubsectionId !== subsection.id) {
+      // Si por algún motivo el buffer apuntaba a otro grupo, descartarlo:
+      // siempre representa al grupo abierto en el drawer.
+      this.pendingSubsectionPayload = {};
+    }
+    this.pendingSubsectionId = subsection.id;
+    this.pendingSubsectionPayload = { ...this.pendingSubsectionPayload, ...payload };
+    this.error = '';
+  }
+
+  get hasPendingSubsectionChanges(): boolean {
+    return (
+      !!this.pendingSubsectionId &&
+      this.pendingSubsectionId === this.activeSubsectionId &&
+      Object.keys(this.pendingSubsectionPayload).length > 0
     );
+  }
+
+  saveSubsectionDrawer() {
+    if (this.isWorkflowReadOnly || this.saving) {
+      return;
+    }
+    const subsection = this.activeSubsection;
+    if (!subsection || !this.hasPendingSubsectionChanges) {
+      return;
+    }
+    const payload = { ...this.pendingSubsectionPayload };
+    this.saving = true;
+    this.api.updatePlanningSubsection(subsection.id, payload).subscribe({
+      next: (updatedSubsection) => {
+        this.message = `Grupo ${subsection.code} actualizado.`;
+        this.error = '';
+        this.saving = false;
+        this.upsertSubsection(updatedSubsection);
+        this.pendingSubsectionPayload = {};
+        this.pendingSubsectionId = '';
+        this.cdr.detectChanges();
+      },
+      error: (err) => {
+        this.error = err?.error?.message ?? 'No se pudo guardar el grupo.';
+        this.saving = false;
+        // En caso de error mantenemos el buffer para que el usuario reintente
+        // sin perder lo que escribió.
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  discardSubsectionChanges() {
+    if (!this.hasPendingSubsectionChanges) {
+      return;
+    }
+    this.pendingSubsectionPayload = {};
+    this.pendingSubsectionId = '';
+    this.error = '';
+    this.message = 'Cambios descartados.';
+    // Recargar para revertir las modificaciones locales del modelo.
+    this.reloadOffer();
+  }
+
+  async requestCloseSubsectionDrawer() {
+    if (this.hasPendingSubsectionChanges) {
+      const ok = await this.dialog.confirm({
+        title: 'Descartar cambios?',
+        message:
+          'Tienes cambios sin guardar en este grupo. Si cierras el panel se perderan.',
+        confirmLabel: 'Descartar',
+        cancelLabel: 'Continuar editando',
+        tone: 'danger',
+      });
+      if (!ok) {
+        return;
+      }
+      this.pendingSubsectionPayload = {};
+      this.pendingSubsectionId = '';
+      this.reloadOffer();
+    }
+    this.closeSubsectionDrawer();
   }
 
   updateSubsectionField(subsection: any, payload: Record<string, unknown>, successMessage: string) {
@@ -673,18 +776,24 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
   }
 
   onSubsectionBuildingChange(subsection: any, value: string) {
-    this.updateSubsectionField(
-      subsection,
-      {
-        building_id: value,
-        classroom_id: '',
-      },
-      `Pabellon actualizado para ${subsection.code}.`,
-    );
+    // Reflejar en el modelo local: cambiar pabellón resetea el aula.
+    subsection.building_id = value || null;
+    subsection.classroom_id = null;
+    this.bufferSubsectionChange(subsection, {
+      building_id: value,
+      classroom_id: '',
+    });
   }
 
   onSubsectionClassroomChange(subsection: any, value: string) {
     const classroom = this.classrooms.find((item: any) => item.id === value) ?? null;
+    subsection.classroom_id = value || null;
+    if (classroom?.building_id) {
+      subsection.building_id = classroom.building_id;
+    }
+    if (classroom?.capacity !== null && classroom?.capacity !== undefined) {
+      subsection.capacity_snapshot = classroom.capacity;
+    }
     const payload: Record<string, unknown> = {
       building_id: classroom?.building_id ?? subsection.building_id ?? '',
       classroom_id: value,
@@ -692,25 +801,24 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
     if (classroom?.capacity !== null && classroom?.capacity !== undefined) {
       payload['capacity_snapshot'] = classroom.capacity;
     }
-    this.updateSubsectionField(subsection, payload, `Aula actualizada para ${subsection.code}.`);
+    this.bufferSubsectionChange(subsection, payload);
   }
 
   onSubsectionShiftChange(subsection: any, value: string) {
-    this.updateSubsectionField(subsection, { shift: value }, `Turno actualizado para ${subsection.code}.`);
+    // ngModel ya actualizó subsection.shift; solo bufferizamos el cambio.
+    this.bufferSubsectionChange(subsection, { shift: value });
   }
 
   onSubsectionModalityChange(subsection: any, value: string) {
-    this.updateSubsectionField(
-      subsection,
-      { course_modality_id: value },
-      `Modalidad actualizada para ${subsection.code}.`,
-    );
+    // ngModel ya actualizó subsection.course_modality_id.
+    this.bufferSubsectionChange(subsection, { course_modality_id: value });
   }
 
   onSubsectionKindChange(subsection: any, value: string) {
     if (!value || subsection.kind === value) {
       return;
     }
+    subsection.kind = value;
     const draft = this.scheduleDraftsBySubsectionId[subsection.id];
     if (draft) {
       const allowedTypes = this.scheduleSessionTypeOptionsForKind(value);
@@ -718,7 +826,7 @@ export class PlanningOfferSectionsPageComponent implements OnInit {
         draft.session_type = allowedTypes[0]?.value ?? this.defaultScheduleSessionType(value);
       }
     }
-    this.updateSubsectionField(subsection, { kind: value }, `Tipo actualizado para ${subsection.code}.`);
+    this.bufferSubsectionChange(subsection, { kind: value });
   }
 
   subsectionKindOptions(subsection: any) {

@@ -11,6 +11,7 @@ import {
 import {
     CourseModalityEntity,
     PlanningOfferEntity,
+    PlanningScheduleConflictV2Entity,
     PlanningSectionEntity,
     PlanningSubsectionEntity,
     PlanningSubsectionScheduleEntity,
@@ -37,6 +38,8 @@ import {
 } from './videoconference.entity';
 import { ZoomSettingsController } from './zoom-settings.controller';
 import { ZoomAccountService } from './zoom-account.service';
+import { VideoconferenceDashboardController } from './videoconference-dashboard.controller';
+import { VideoconferenceDashboardService } from './videoconference-dashboard.service';
 
 @Module({
     imports: [
@@ -67,11 +70,12 @@ import { ZoomAccountService } from './zoom-account.service';
             PlanningSectionEntity,
             PlanningSubsectionEntity,
             PlanningSubsectionScheduleEntity,
+            PlanningScheduleConflictV2Entity,
             VcScheduleHostRuleEntity,
         ]),
     ],
-    controllers: [VideoconferenceController, ZoomSettingsController],
-    providers: [VideoconferenceService, ZoomAccountService],
+    controllers: [VideoconferenceController, ZoomSettingsController, VideoconferenceDashboardController],
+    providers: [VideoconferenceService, ZoomAccountService, VideoconferenceDashboardService],
     exports: [VideoconferenceService, ZoomAccountService],
 })
 export class VideoconferenceModule { }

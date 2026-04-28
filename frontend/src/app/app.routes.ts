@@ -21,6 +21,7 @@ import { VideoconferenceZoomConfigPageComponent } from './pages/videoconference-
 import { VideoconferenceInheritancesPageComponent } from './pages/videoconference-inheritances/videoconference-inheritances.page';
 import { VideoconferenceAkademicCopyPageComponent } from './pages/videoconference-akademic-copy/videoconference-akademic-copy.page';
 import { VideoconferenceZoomUsersPageComponent } from './pages/videoconference-zoom-users/videoconference-zoom-users.page';
+import { VideoconferenceDashboardPageComponent } from './pages/videoconference-dashboard/videoconference-dashboard.page';
 import { VideoconferenceReschedulesPageComponent } from './pages/videoconference-reschedules/videoconference-reschedules.page';
 import { TranscriptAnalysisPageComponent } from './pages/transcript-analysis/transcript-analysis.page';
 
@@ -98,6 +99,12 @@ export const routes: Routes = [
     component: AuditPageComponent,
     canActivate: [windowGuard],
     data: { requiredWindow: 'window.audit' },
+  },
+  {
+    path: 'videoconferences/dashboard',
+    component: VideoconferenceDashboardPageComponent,
+    canActivate: [windowGuard],
+    data: { requiredWindow: 'window.videoconferences' },
   },
   {
     path: 'videoconferences/audit/course-section',
