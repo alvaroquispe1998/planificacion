@@ -147,6 +147,34 @@ export interface DashboardCoverageConflictRow {
     count: number;
 }
 
+export interface DashboardHostOption {
+    zoomUserId: string;
+    email: string | null;
+    name: string | null;
+    sessionCount: number;
+}
+
+export interface DashboardHostSession {
+    videoconferenceId: string;
+    scheduledStart: string;
+    scheduledEnd: string;
+    conferenceDate: string;
+    status: string;
+    topic: string | null;
+    courseCode: string | null;
+    courseName: string | null;
+    sectionLabel: string | null;
+    teacherName: string | null;
+    joinUrl: string | null;
+}
+
+export interface DashboardHostCalendarResponse {
+    zoomUserId: string;
+    from: string;
+    to: string;
+    sessions: DashboardHostSession[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class VideoconferenceDashboardApiService {
     private readonly base = `${API_BASE_URL}/videoconference/dashboard`;
@@ -233,5 +261,26 @@ export class VideoconferenceDashboardApiService {
             `${this.base}/coverage/conflicts`,
             { params },
         );
+    }
+
+    getHostOptions(from?: string, to?: string): Observable<DashboardHostOption[]> {
+        let params = new HttpParams();
+        if (from) params = params.set('from', from);
+        if (to) params = params.set('to', to);
+        return this.http.get<DashboardHostOption[]>(`${this.base}/host/options`, { params });
+    }
+
+    getHostCalendar(
+        zoomUserId: string,
+        from: string,
+        to: string,
+    ): Observable<DashboardHostCalendarResponse> {
+        const params = new HttpParams()
+            .set('zoomUserId', zoomUserId)
+            .set('from', from)
+            .set('to', to);
+        return this.http.get<DashboardHostCalendarResponse>(`${this.base}/host/calendar`, {
+            params,
+        });
     }
 }

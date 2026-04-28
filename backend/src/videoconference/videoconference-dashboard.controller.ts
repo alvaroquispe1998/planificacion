@@ -67,6 +67,25 @@ export class VideoconferenceDashboardController {
         return this.service.getCoverageOverrides(periodId);
     }
 
+    // ----- Host calendar -----
+
+    @Get('host/options')
+    async getHostOptions(
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+    ) {
+        return this.service.getHostOptions(from, to);
+    }
+
+    @Get('host/calendar')
+    async getHostCalendar(
+        @Query('zoomUserId') zoomUserId?: string,
+        @Query('from') from?: string,
+        @Query('to') to?: string,
+    ) {
+        return this.service.getHostCalendar(zoomUserId, from, to);
+    }
+
     @Get('coverage/daily')
     async getCoverageDaily(@Query('periodId') periodId?: string) {
         return this.service.getCoverageDailySeries(periodId);

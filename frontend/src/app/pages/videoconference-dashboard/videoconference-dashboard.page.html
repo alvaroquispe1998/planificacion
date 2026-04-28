@@ -21,9 +21,9 @@
                     (change)="onWithinMinutesChange()" />
             </label>
             <button type="button" class="btn btn-secondary"
-                (click)="activeTab === 'today' ? refreshTodayData() : refreshPeriodData()"
-                [disabled]="loading || periodLoading">
-                {{ (loading || periodLoading) ? 'Actualizando…' : 'Refrescar' }}
+                (click)="activeTab === 'today' ? refreshTodayData() : (activeTab === 'period' ? refreshPeriodData() : loadHostOptions())"
+                [disabled]="loading || periodLoading || hostLoading">
+                {{ (loading || periodLoading || hostLoading) ? 'Actualizando…' : 'Refrescar' }}
             </button>
             <label class="control control-toggle" *ngIf="activeTab === 'today'">
                 <input type="checkbox" [checked]="autoRefresh" (change)="toggleAutoRefresh()" />
@@ -38,6 +38,9 @@
         </button>
         <button type="button" role="tab" [class.active]="activeTab === 'period'" (click)="setTab('period')">
             Período
+        </button>
+        <button type="button" role="tab" [class.active]="activeTab === 'host'" (click)="setTab('host')">
+            Por host
         </button>
     </nav>
 
@@ -57,18 +60,6 @@
             <article class="kpi kpi-warning">
                 <span class="kpi__label">Creadas s/match</span>
                 <span class="kpi__value">{{ summary?.totals?.createdUnmatched ?? 0 }}</span>
-            </article>
-            <article class="kpi kpi-info">
-                <span class="kpi__label">Creando</span>
-                <span class="kpi__value">{{ summary?.totals?.creating ?? 0 }}</span>
-            </article>
-            <article class="kpi kpi-danger">
-                <span class="kpi__label">Errores</span>
-                <span class="kpi__value">{{ summary?.totals?.error ?? 0 }}</span>
-            </article>
-            <article class="kpi kpi-muted">
-                <span class="kpi__label">Canceladas (skip)</span>
-                <span class="kpi__value">{{ summary?.totals?.cancelled ?? 0 }}</span>
             </article>
             <article class="kpi kpi-muted">
                 <span class="kpi__label">Reprogramadas</span>
@@ -153,28 +144,7 @@
             </section>
 
             <!-- Errores -->
-            <section class="card">
-                <header class="card__header">
-                    <h2>Errores recientes</h2>
-                </header>
-                <div class="card__body card__body--scroll">
-                    <ul class="error-list" *ngIf="errors.length > 0; else noErrors">
-                        <li *ngFor="let err of errors" class="error-item">
-                            <div class="error-item__head">
-                                <span class="badge badge-danger">{{ errorScope(err) }}</span>
-                                <span class="error-item__time">{{ formatTime(err.scheduledStart) }}</span>
-                            </div>
-                            <div class="error-item__title">{{ err.courseCode || '-' }} · {{ err.courseName || ''
-                                }}</div>
-                            <div class="error-item__meta">{{ err.teacherName || 'Sin docente' }}</div>
-                            <div class="error-item__msg">{{ primaryErrorReason(err) }}</div>
-                        </li>
-                    </ul>
-                    <ng-template #noErrors>
-                        <p class="empty">Sin errores en la fecha seleccionada.</p>
-                    </ng-template>
-                </div>
-            </section>
+            <!-- (Removido por solicitud) -->
 
             <!-- Ocupación de hosts -->
             <section class="card">
@@ -401,5 +371,64 @@
                 </section>
             </div>
         </ng-container>
+    </ng-container>
+
+    <ng-container *ngIf="activeTab === 'host'">
+        <div *ngIf="hostError" class="vc-dashboard__error">{{ hostError }}</div>
+
+        <div class="host-toolbar">
+            <div class="host-toolbar__week">
+                <button type="button" class="btn btn-icon" (click)="shiftWeek(-7)" title="Semana anterior">‹</button>
+                <span class="host-toolbar__range">{{ weekRangeLabel }}</span>
+                <button type="button" class="btn btn-icon" (click)="shiftWeek(7)" title="Semana siguiente">›</button>
+            </div>
+            <label class="control control-host">
+                <span>Host</span>
+                <select [(ngModel)]="selectedHostId" (change)="onHostChange()" [disabled]="hostOptions.length === 0">
+                    <option *ngIf="hostOptions.length === 0" value="">Sin hosts en la semana</option>
+                    <option *ngFor="let h of hostOptions" [value]="h.zoomUserId">
+                        {{ hostLabel(h) }} · {{ h.sessionCount }} ses.
+                    </option>
+                </select>
+            </label>
+            <div class="host-toolbar__meta" *ngIf="selectedHostMeta">
+                <span class="badge badge-info">{{ hostSessions.length }} sesiones</span>
+            </div>
+        </div>
+
+        <section class="card card-wide host-calendar-card">
+            <div *ngIf="!selectedHostId" class="empty-tab">
+                <p>Selecciona un host para ver su calendario semanal.</p>
+            </div>
+
+            <div *ngIf="selectedHostId" class="host-cal">
+                <div class="host-cal__head">
+                    <div class="host-cal__head-cell host-cal__head-cell--time"></div>
+                    <div *ngFor="let col of hostWeekColumns" class="host-cal__head-cell">
+                        {{ col.label }}
+                    </div>
+                </div>
+                <div class="host-cal__body">
+                    <div class="host-cal__hours">
+                        <div *ngFor="let h of calendarHours" class="host-cal__hour-row">
+                            <span class="host-cal__hour-label">{{ h }}:00</span>
+                        </div>
+                    </div>
+                    <div *ngFor="let col of hostWeekColumns" class="host-cal__col">
+                        <div *ngFor="let h of calendarHours" class="host-cal__hour-row host-cal__hour-row--bg"></div>
+                        <a *ngFor="let block of col.blocks" class="host-cal__block"
+                            [class.host-cal__block--error]="block.session.status === 'ERROR'"
+                            [class.host-cal__block--unmatched]="block.session.status === 'CREATED_UNMATCHED'"
+                            [style.top]="blockTopPx(block)" [style.height]="blockHeightPx(block)"
+                            [href]="block.session.joinUrl || null" target="_blank" rel="noopener"
+                            [title]="(block.session.courseName || '') + ' · ' + (block.session.teacherName || '') + ' · ' + formatRange(block.session)">
+                            <span class="host-cal__block-time">{{ formatRange(block.session) }}</span>
+                            <span class="host-cal__block-title">{{ block.session.courseCode || block.session.topic || '—' }}</span>
+                            <span class="host-cal__block-meta" *ngIf="block.session.sectionLabel">{{ block.session.sectionLabel }}</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </section>
     </ng-container>
 </section>

@@ -27,6 +27,9 @@ import {
     DashboardCoverageMissingItem,
     DashboardCoverageOverrideRow,
     DashboardCoverageSummary,
+    DashboardHostCalendarResponse,
+    DashboardHostOption,
+    DashboardHostSession,
     DashboardTodayErrorItem,
     DashboardTodayHostUtilizationBucket,
     DashboardTodayHostUtilizationResponse,
@@ -831,5 +834,158 @@ export class VideoconferenceDashboardService {
             severity: r.severity,
             count: Number(r.cnt) || 0,
         }));
+    }
+
+    // =====================================================================
+    // HOST CALENDAR
+    // =====================================================================
+
+    /**
+     * Lista los hosts (zoom users) que tienen al menos una VC activa en el
+     * rango [from, to]. Si el rango no se pasa, usa la semana actual del
+     * servidor (lunes a domingo).
+     */
+    async getHostOptions(
+        rawFrom?: string,
+        rawTo?: string,
+    ): Promise<DashboardHostOption[]> {
+        const { from, to } = this.normalizeRange(rawFrom, rawTo);
+        const rows = await this.vcRepo
+            .createQueryBuilder('vc')
+            .select('vc.zoom_user_id', 'zoom_user_id')
+            .addSelect('MAX(vc.zoom_user_email)', 'zoom_user_email')
+            .addSelect('MAX(vc.zoom_user_name)', 'zoom_user_name')
+            .addSelect('COUNT(*)', 'cnt')
+            .where('vc.conference_date BETWEEN :from AND :to', { from, to })
+            .andWhere("(vc.delete_status IS NULL OR vc.delete_status <> 'DELETED')")
+            .andWhere('vc.zoom_user_id IS NOT NULL')
+            .groupBy('vc.zoom_user_id')
+            .orderBy('cnt', 'DESC')
+            .getRawMany<{
+                zoom_user_id: string;
+                zoom_user_email: string | null;
+                zoom_user_name: string | null;
+                cnt: string;
+            }>();
+        return rows.map((r) => ({
+            zoomUserId: r.zoom_user_id,
+            email: r.zoom_user_email,
+            name: r.zoom_user_name,
+            sessionCount: Number(r.cnt) || 0,
+        }));
+    }
+
+    /**
+     * Devuelve todas las VCs de un host en el rango [from, to] con metadata
+     * suficiente para pintarlas en una vista calendario.
+     */
+    async getHostCalendar(
+        rawZoomUserId: string | undefined,
+        rawFrom?: string,
+        rawTo?: string,
+    ): Promise<DashboardHostCalendarResponse> {
+        const zoomUserId = (rawZoomUserId ?? '').trim();
+        if (!zoomUserId) {
+            throw new Error('zoomUserId es requerido');
+        }
+        const { from, to } = this.normalizeRange(rawFrom, rawTo);
+        const rows = await this.vcRepo
+            .createQueryBuilder('vc')
+            .innerJoin(PlanningSectionEntity, 'sec', 'sec.id = vc.planning_section_id')
+            .innerJoin(PlanningOfferEntity, 'off', 'off.id = vc.planning_offer_id')
+            .innerJoin(PlanningSubsectionEntity, 'sub', 'sub.id = vc.planning_subsection_id')
+            .leftJoin(TeacherEntity, 'teacher', 'teacher.id = sub.responsible_teacher_id')
+            .where('vc.zoom_user_id = :zoomUserId', { zoomUserId })
+            .andWhere('vc.conference_date BETWEEN :from AND :to', { from, to })
+            .andWhere("(vc.delete_status IS NULL OR vc.delete_status <> 'DELETED')")
+            .select('vc.id', 'id')
+            .addSelect('vc.conference_date', 'conference_date')
+            .addSelect('vc.scheduled_start', 'scheduled_start')
+            .addSelect('vc.scheduled_end', 'scheduled_end')
+            .addSelect('vc.topic', 'topic')
+            .addSelect('vc.status', 'status')
+            .addSelect('vc.join_url', 'join_url')
+            .addSelect('off.course_code', 'course_code')
+            .addSelect('off.course_name', 'course_name')
+            .addSelect('sec.code', 'section_code')
+            .addSelect('sub.code', 'subsection_code')
+            .addSelect('teacher.full_name', 'teacher_full_name')
+            .addSelect('teacher.name', 'teacher_name')
+            .orderBy('vc.scheduled_start', 'ASC')
+            .getRawMany<{
+                id: string;
+                conference_date: string | Date;
+                scheduled_start: Date;
+                scheduled_end: Date;
+                topic: string | null;
+                status: string;
+                join_url: string | null;
+                course_code: string | null;
+                course_name: string | null;
+                section_code: string | null;
+                subsection_code: string | null;
+                teacher_full_name: string | null;
+                teacher_name: string | null;
+            }>();
+
+        const sessions: DashboardHostSession[] = rows.map((r) => ({
+            videoconferenceId: r.id,
+            scheduledStart: this.toIso(r.scheduled_start),
+            scheduledEnd: this.toIso(r.scheduled_end),
+            conferenceDate: typeof r.conference_date === 'string'
+                ? r.conference_date.slice(0, 10)
+                : this.toIso(r.conference_date as unknown as Date).slice(0, 10),
+            status: r.status,
+            topic: r.topic,
+            courseCode: r.course_code,
+            courseName: r.course_name,
+            sectionLabel: this.buildSectionLabel(r.section_code, r.subsection_code),
+            teacherName: r.teacher_full_name ?? r.teacher_name ?? null,
+            joinUrl: r.join_url,
+        }));
+
+        return { zoomUserId, from, to, sessions };
+    }
+
+    /**
+     * Normaliza un rango [from, to] a YYYY-MM-DD. Si ambos faltan, devuelve
+     * la semana actual del servidor (lunes a domingo). Acota max 60 días.
+     */
+    private normalizeRange(
+        rawFrom?: string,
+        rawTo?: string,
+    ): { from: string; to: string } {
+        const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+        if (rawFrom && rawTo && isoRe.test(rawFrom) && isoRe.test(rawTo)) {
+            const from = rawFrom <= rawTo ? rawFrom : rawTo;
+            const to = rawFrom <= rawTo ? rawTo : rawFrom;
+            // Acotar a 60 días por seguridad.
+            const fromDate = new Date(`${from}T00:00:00`);
+            const toDate = new Date(`${to}T00:00:00`);
+            const diffDays = Math.round(
+                (toDate.getTime() - fromDate.getTime()) / 86_400_000,
+            );
+            if (diffDays > 60) {
+                const capped = new Date(fromDate.getTime() + 60 * 86_400_000);
+                return { from, to: this.dateOnly(capped) };
+            }
+            return { from, to };
+        }
+        // Default: semana actual (lunes-domingo)
+        const today = new Date();
+        const day = today.getDay(); // 0=domingo, 1=lunes
+        const diffToMonday = (day + 6) % 7;
+        const monday = new Date(today);
+        monday.setDate(today.getDate() - diffToMonday);
+        const sunday = new Date(monday);
+        sunday.setDate(monday.getDate() + 6);
+        return { from: this.dateOnly(monday), to: this.dateOnly(sunday) };
+    }
+
+    private dateOnly(d: Date): string {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
     }
 }

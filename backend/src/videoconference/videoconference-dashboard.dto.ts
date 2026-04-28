@@ -137,6 +137,38 @@ export interface DashboardCoverageOverrideRow {
     count: number;
 }
 
+// =====================================================================
+// HOST CALENDAR
+// =====================================================================
+
+export interface DashboardHostOption {
+    zoomUserId: string;
+    email: string | null;
+    name: string | null;
+    sessionCount: number;
+}
+
+export interface DashboardHostSession {
+    videoconferenceId: string;
+    scheduledStart: string; // ISO
+    scheduledEnd: string;
+    conferenceDate: string; // YYYY-MM-DD
+    status: string;
+    topic: string | null;
+    courseCode: string | null;
+    courseName: string | null;
+    sectionLabel: string | null;
+    teacherName: string | null;
+    joinUrl: string | null;
+}
+
+export interface DashboardHostCalendarResponse {
+    zoomUserId: string;
+    from: string; // YYYY-MM-DD
+    to: string; // YYYY-MM-DD
+    sessions: DashboardHostSession[];
+}
+
 export interface DashboardCoverageDailyPoint {
     conferenceDate: string; // YYYY-MM-DD
     total: number;
