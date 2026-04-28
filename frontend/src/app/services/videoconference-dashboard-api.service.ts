@@ -212,6 +212,22 @@ export class VideoconferenceDashboardApiService {
         );
     }
 
+    getTodaySessions(date?: string): Observable<{
+        date: string;
+        ongoing: DashboardTodayUpcomingItem[];
+        upcoming: DashboardTodayUpcomingItem[];
+        past: DashboardTodayUpcomingItem[];
+    }> {
+        let params = new HttpParams();
+        if (date) params = params.set('date', date);
+        return this.http.get<{
+            date: string;
+            ongoing: DashboardTodayUpcomingItem[];
+            upcoming: DashboardTodayUpcomingItem[];
+            past: DashboardTodayUpcomingItem[];
+        }>(`${this.base}/today/sessions`, { params });
+    }
+
     getCoverageSummary(periodId: string): Observable<DashboardCoverageSummary> {
         const params = new HttpParams().set('periodId', periodId);
         return this.http.get<DashboardCoverageSummary>(`${this.base}/coverage/summary`, { params });
