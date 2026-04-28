@@ -8,6 +8,7 @@ import {
     IsNotEmpty,
     IsOptional,
     IsString,
+    Matches,
     Min,
     ValidateNested,
 } from 'class-validator';
@@ -50,6 +51,22 @@ export class FilterOptionsDto {
     @IsArray()
     @IsString({ each: true })
     days?: string[];
+
+    /**
+     * Filtro opcional de rango horario (HH:mm). Se aplica sobre el rango
+     * efectivo (consolidado por merge) de cada ocurrencia/horario base.
+     */
+    @IsOptional()
+    @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+        message: 'minStartTime debe tener formato HH:mm',
+    })
+    minStartTime?: string;
+
+    @IsOptional()
+    @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+        message: 'maxEndTime debe tener formato HH:mm',
+    })
+    maxEndTime?: string;
 }
 
 export class PreviewVideoconferenceDto extends FilterOptionsDto {

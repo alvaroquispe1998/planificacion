@@ -11,6 +11,9 @@ export interface FilterOptionsDto {
     modality?: string;
     modalities?: string[];
     days?: string[];
+    /** Filtro opcional rango horario en formato HH:mm (consolidado con merges). */
+    minStartTime?: string;
+    maxEndTime?: string;
 }
 
 export interface VideoconferencePreviewDto extends FilterOptionsDto {

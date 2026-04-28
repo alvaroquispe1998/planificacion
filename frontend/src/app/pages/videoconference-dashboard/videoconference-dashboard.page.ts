@@ -610,4 +610,52 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
     get selectedHostMeta(): DashboardHostOption | null {
         return this.hostOptions.find((o) => o.zoomUserId === this.selectedHostId) ?? null;
     }
+
+    // ── Modal de detalle de sesión ──
+    selectedSession: DashboardHostSession | null = null;
+
+    openSessionModal(session: DashboardHostSession) {
+        this.selectedSession = session;
+    }
+
+    closeSessionModal() {
+        this.selectedSession = null;
+    }
+
+    formatSessionDate(session: DashboardHostSession): string {
+        const d = new Date(session.scheduledStart);
+        if (Number.isNaN(d.getTime())) return session.conferenceDate ?? '';
+        return d.toLocaleDateString('es-PE', {
+            weekday: 'long',
+            day: '2-digit',
+            month: 'long',
+            year: 'numeric',
+        });
+    }
+
+    sessionStatusLabel(status: string | null | undefined): string {
+        switch ((status ?? '').toUpperCase()) {
+            case 'MATCHED':
+                return 'Vinculada';
+            case 'CREATED_UNMATCHED':
+                return 'Creada sin match';
+            case 'CREATING':
+                return 'Creando…';
+            case 'ERROR':
+                return 'Error';
+            case 'PENDING':
+                return 'Pendiente';
+            default:
+                return status || '—';
+        }
+    }
+
+    sessionStatusClass(status: string | null | undefined): string {
+        const s = (status ?? '').toUpperCase();
+        if (s === 'MATCHED') return 'is-success';
+        if (s === 'CREATED_UNMATCHED') return 'is-warning';
+        if (s === 'ERROR') return 'is-danger';
+        if (s === 'CREATING') return 'is-info';
+        return 'is-muted';
+    }
 }

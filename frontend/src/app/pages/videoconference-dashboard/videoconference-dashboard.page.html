@@ -409,9 +409,9 @@
 
         <div class="host-toolbar">
             <div class="host-toolbar__week">
-                <button type="button" class="btn btn-icon" (click)="shiftWeek(-7)" title="Semana anterior">‹</button>
+                <button type="button" class="btn-icon" (click)="shiftWeek(-7)" title="Semana anterior" aria-label="Semana anterior">‹</button>
                 <span class="host-toolbar__range">{{ weekRangeLabel }}</span>
-                <button type="button" class="btn btn-icon" (click)="shiftWeek(7)" title="Semana siguiente">›</button>
+                <button type="button" class="btn-icon" (click)="shiftWeek(7)" title="Semana siguiente" aria-label="Semana siguiente">›</button>
             </div>
             <label class="control control-host">
                 <span>Host</span>
@@ -422,8 +422,8 @@
                     </option>
                 </select>
             </label>
-            <div class="host-toolbar__meta" *ngIf="selectedHostMeta">
-                <span class="badge badge-info">{{ hostSessions.length }} sesiones</span>
+            <div class="host-toolbar__meta" *ngIf="selectedHostId">
+                <span class="chip chip--primary">{{ hostSessions.length }} sesiones</span>
             </div>
         </div>
 
@@ -447,21 +447,69 @@
                     </div>
                     <div *ngFor="let col of hostWeekColumns" class="host-cal__col">
                         <div *ngFor="let h of calendarHours" class="host-cal__hour-row host-cal__hour-row--bg"></div>
-                        <a *ngFor="let block of col.blocks" class="host-cal__block"
+                        <button *ngFor="let block of col.blocks" type="button" class="host-cal__block"
                             [class.host-cal__block--error]="block.session.status === 'ERROR'"
                             [class.host-cal__block--unmatched]="block.session.status === 'CREATED_UNMATCHED'"
                             [class.host-cal__block--narrow]="block.laneCount > 1"
                             [style.top]="blockTopPx(block)" [style.height]="blockHeightPx(block)"
                             [style.left]="blockLeftPct(block)" [style.width]="blockWidthPct(block)"
-                            [href]="block.session.joinUrl || null" target="_blank" rel="noopener"
+                            (click)="openSessionModal(block.session)"
                             [title]="formatRange(block.session) + ' · ' + (block.session.courseCode || '') + ' ' + (block.session.courseName || '') + ' · ' + (block.session.sectionLabel || '') + ' · ' + (block.session.teacherName || '')">
                             <span class="host-cal__block-time">{{ formatRange(block.session) }}</span>
                             <span class="host-cal__block-title">{{ block.session.courseCode || block.session.topic || '—' }}</span>
                             <span class="host-cal__block-meta" *ngIf="block.session.sectionLabel">{{ block.session.sectionLabel }}</span>
-                        </a>
+                        </button>
                     </div>
                 </div>
             </div>
         </section>
     </ng-container>
+
+    <!-- Modal detalle de sesión -->
+    <div class="vc-modal" *ngIf="selectedSession" (click)="closeSessionModal()">
+        <div class="vc-modal__dialog" role="dialog" aria-modal="true" (click)="$event.stopPropagation()">
+            <header class="vc-modal__header">
+                <div class="vc-modal__title">
+                    <span class="vc-modal__eyebrow">{{ formatSessionDate(selectedSession) }}</span>
+                    <h3>{{ selectedSession.courseCode || selectedSession.topic || 'Sesión' }}</h3>
+                    <p *ngIf="selectedSession.courseName" class="vc-modal__subtitle">{{ selectedSession.courseName }}</p>
+                </div>
+                <button type="button" class="vc-modal__close" (click)="closeSessionModal()" aria-label="Cerrar">×</button>
+            </header>
+            <div class="vc-modal__body">
+                <div class="vc-modal__row">
+                    <span class="vc-modal__label">Horario</span>
+                    <span class="vc-modal__value vc-modal__value--strong">{{ formatRange(selectedSession) }}</span>
+                </div>
+                <div class="vc-modal__row" *ngIf="selectedSession.sectionLabel">
+                    <span class="vc-modal__label">Sección</span>
+                    <span class="vc-modal__value">{{ selectedSession.sectionLabel }}</span>
+                </div>
+                <div class="vc-modal__row" *ngIf="selectedSession.teacherName">
+                    <span class="vc-modal__label">Docente</span>
+                    <span class="vc-modal__value">{{ selectedSession.teacherName }}</span>
+                </div>
+                <div class="vc-modal__row">
+                    <span class="vc-modal__label">Estado</span>
+                    <span class="vc-modal__status" [ngClass]="sessionStatusClass(selectedSession.status)">
+                        {{ sessionStatusLabel(selectedSession.status) }}
+                    </span>
+                </div>
+                <div class="vc-modal__row" *ngIf="selectedSession.topic">
+                    <span class="vc-modal__label">Tema Zoom</span>
+                    <span class="vc-modal__value">{{ selectedSession.topic }}</span>
+                </div>
+                <div class="vc-modal__row" *ngIf="selectedSession.videoconferenceId">
+                    <span class="vc-modal__label">ID interno</span>
+                    <span class="vc-modal__value vc-modal__value--mono">{{ selectedSession.videoconferenceId }}</span>
+                </div>
+            </div>
+            <footer class="vc-modal__footer">
+                <button type="button" class="btn-flat" (click)="closeSessionModal()">Cerrar</button>
+                <a *ngIf="selectedSession.joinUrl" class="btn-primary" [href]="selectedSession.joinUrl" target="_blank" rel="noopener">
+                    Abrir en Zoom
+                </a>
+            </footer>
+        </div>
+    </div>
 </section>

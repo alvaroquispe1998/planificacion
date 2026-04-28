@@ -1161,7 +1161,7 @@ export class VideoconferenceService implements OnModuleInit {
                     },
                 );
             }
-            return mappedBaseRows;
+            return this.applyTimeRangeFilter(mappedBaseRows, filters.minStartTime, filters.maxEndTime);
         }
 
         const startDate = normalizeIsoDate(filters.startDate ?? '');
@@ -1213,7 +1213,38 @@ export class VideoconferenceService implements OnModuleInit {
                 },
             );
         }
-        return mappedOccurrences;
+        return this.applyTimeRangeFilter(mappedOccurrences, filters.minStartTime, filters.maxEndTime);
+    }
+
+    /**
+     * Filtra los items del preview por rango horario (HH:mm) sobre los campos
+     * effective_start_time / effective_end_time, que ya están consolidados con
+     * el merge de bloques continuos. Inclusivo en ambos extremos. Si el rango
+     * está invertido (min > max) se ignora silenciosamente para no romper la UI
+     * mientras el usuario edita los inputs.
+     */
+    private applyTimeRangeFilter<T extends { effective_start_time: string; effective_end_time: string; start_time: string; end_time: string; }>(
+        items: T[],
+        rawMin?: string,
+        rawMax?: string,
+    ): T[] {
+        const min = compactTime(rawMin ?? '');
+        const max = compactTime(rawMax ?? '');
+        if (!min && !max) return items;
+        const toMin = (hhmm: string) => {
+            const [h, m] = hhmm.split(':').map((v) => parseInt(v, 10));
+            return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);
+        };
+        const minMin = min ? toMin(min) : Number.NEGATIVE_INFINITY;
+        const maxMin = max ? toMin(max) : Number.POSITIVE_INFINITY;
+        if (min && max && minMin > maxMin) return items;
+        return items.filter((it) => {
+            const startSrc = it.effective_start_time || it.start_time;
+            const endSrc = it.effective_end_time || it.end_time;
+            const s = toMin(compactTime(startSrc));
+            const e = toMin(compactTime(endSrc));
+            return s >= minMin && e <= maxMin;
+        });
     }
 
     /**
