@@ -439,6 +439,98 @@ export class VideoconferenceDashboardService {
         return parts.length > 0 ? parts.join(' / ') : null;
     }
 
+    /**
+     * Devuelve las sesiones del día agrupadas en 3 fases respecto al "ahora":
+     * - ongoing: scheduled_start <= now <= scheduled_end
+     * - upcoming: scheduled_start > now
+     * - past: scheduled_end < now
+     * Solo VC owner (link_mode='OWNED') y no eliminadas.
+     */
+    async getTodaySessions(rawDate?: string): Promise<{
+        date: string;
+        ongoing: DashboardTodayUpcomingItem[];
+        upcoming: DashboardTodayUpcomingItem[];
+        past: DashboardTodayUpcomingItem[];
+    }> {
+        const date = this.normalizeDate(rawDate);
+        const rows = await this.vcRepo
+            .createQueryBuilder('vc')
+            .innerJoin(PlanningSectionEntity, 'sec', 'sec.id = vc.planning_section_id')
+            .innerJoin(PlanningOfferEntity, 'off', 'off.id = vc.planning_offer_id')
+            .innerJoin(PlanningSubsectionEntity, 'sub', 'sub.id = vc.planning_subsection_id')
+            .leftJoin(TeacherEntity, 'teacher', 'teacher.id = sub.responsible_teacher_id')
+            .where('vc.conference_date = :date', { date })
+            .andWhere("(vc.delete_status IS NULL OR vc.delete_status <> 'DELETED')")
+            .andWhere("vc.link_mode = 'OWNED'")
+            .select('vc.id', 'id')
+            .addSelect('vc.scheduled_start', 'scheduled_start')
+            .addSelect('vc.scheduled_end', 'scheduled_end')
+            .addSelect('vc.topic', 'topic')
+            .addSelect('vc.status', 'status')
+            .addSelect('vc.zoom_user_email', 'zoom_user_email')
+            .addSelect('vc.zoom_user_name', 'zoom_user_name')
+            .addSelect('vc.join_url', 'join_url')
+            .addSelect('off.course_code', 'course_code')
+            .addSelect('off.course_name', 'course_name')
+            .addSelect('sec.code', 'section_code')
+            .addSelect('sub.code', 'subsection_code')
+            .addSelect('teacher.full_name', 'teacher_full_name')
+            .addSelect('teacher.name', 'teacher_name')
+            .orderBy('vc.scheduled_start', 'ASC')
+            .getRawMany<{
+                id: string;
+                scheduled_start: Date;
+                scheduled_end: Date;
+                topic: string | null;
+                status: string;
+                zoom_user_email: string | null;
+                zoom_user_name: string | null;
+                join_url: string | null;
+                course_code: string | null;
+                course_name: string | null;
+                section_code: string | null;
+                subsection_code: string | null;
+                teacher_full_name: string | null;
+                teacher_name: string | null;
+            }>();
+
+        const items: DashboardTodayUpcomingItem[] = rows.map((r) => ({
+            videoconferenceId: r.id,
+            scheduledStart: this.toIso(r.scheduled_start),
+            scheduledEnd: this.toIso(r.scheduled_end),
+            topic: r.topic,
+            status: r.status,
+            courseCode: r.course_code,
+            courseName: r.course_name,
+            sectionLabel: this.buildSectionLabel(r.section_code, r.subsection_code),
+            teacherName: r.teacher_full_name ?? r.teacher_name ?? null,
+            zoomUserEmail: r.zoom_user_email,
+            zoomUserName: r.zoom_user_name,
+            joinUrl: r.join_url,
+        }));
+
+        const now = Date.now();
+        const ongoing: DashboardTodayUpcomingItem[] = [];
+        const upcoming: DashboardTodayUpcomingItem[] = [];
+        const past: DashboardTodayUpcomingItem[] = [];
+        for (const it of items) {
+            const start = new Date(it.scheduledStart).getTime();
+            const end = new Date(it.scheduledEnd).getTime();
+            if (Number.isFinite(start) && Number.isFinite(end)) {
+                if (start <= now && end >= now) {
+                    ongoing.push(it);
+                } else if (start > now) {
+                    upcoming.push(it);
+                } else {
+                    past.push(it);
+                }
+            }
+        }
+        // Past: ordenar descendente (las más recientes primero)
+        past.sort((a, b) => (a.scheduledStart < b.scheduledStart ? 1 : -1));
+        return { date, ongoing, upcoming, past };
+    }
+
     // =====================================================================
     // PERIOD COVERAGE
     // =====================================================================
@@ -858,6 +950,7 @@ export class VideoconferenceDashboardService {
             .addSelect('COUNT(*)', 'cnt')
             .where('vc.conference_date BETWEEN :from AND :to', { from, to })
             .andWhere("(vc.delete_status IS NULL OR vc.delete_status <> 'DELETED')")
+            .andWhere("vc.link_mode = 'OWNED'")
             .andWhere('vc.zoom_user_id IS NOT NULL')
             .groupBy('vc.zoom_user_id')
             .orderBy('cnt', 'DESC')
@@ -898,6 +991,7 @@ export class VideoconferenceDashboardService {
             .where('vc.zoom_user_id = :zoomUserId', { zoomUserId })
             .andWhere('vc.conference_date BETWEEN :from AND :to', { from, to })
             .andWhere("(vc.delete_status IS NULL OR vc.delete_status <> 'DELETED')")
+            .andWhere("vc.link_mode = 'OWNED'")
             .select('vc.id', 'id')
             .addSelect('vc.conference_date', 'conference_date')
             .addSelect('vc.scheduled_start', 'scheduled_start')

@@ -31,6 +31,10 @@ export interface HostCalendarBlock {
     /** Minutos desde 00:00 del día (en hora local). */
     startMinutes: number;
     endMinutes: number;
+    /** Carril asignado para layout horizontal (0..laneCount-1). */
+    lane: number;
+    /** Total de carriles del grupo de solapamiento al que pertenece. */
+    laneCount: number;
 }
 
 @Component({
@@ -56,6 +60,8 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
     // Today tab data
     summary: DashboardTodaySummary | null = null;
     upcoming: DashboardTodayUpcomingItem[] = [];
+    ongoing: DashboardTodayUpcomingItem[] = [];
+    past: DashboardTodayUpcomingItem[] = [];
     errors: DashboardTodayErrorItem[] = [];
     hostUtilization: DashboardTodayHostUtilizationResponse | null = null;
 
@@ -177,8 +183,7 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
         this.error = '';
         this.inFlight = forkJoin({
             summary: this.api.getTodaySummary(this.selectedDate),
-            upcoming: this.api.getTodayUpcoming(this.selectedDate, this.withinMinutes),
-            errors: this.api.getTodayErrors(this.selectedDate, 20),
+            sessions: this.api.getTodaySessions(this.selectedDate),
             host: this.api.getTodayHostUtilization(this.selectedDate),
         })
             .pipe(finalize(() => {
@@ -188,8 +193,9 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
             .subscribe({
                 next: (data) => {
                     this.summary = data.summary;
-                    this.upcoming = data.upcoming;
-                    this.errors = data.errors;
+                    this.ongoing = data.sessions.ongoing;
+                    this.upcoming = data.sessions.upcoming;
+                    this.past = data.sessions.past;
                     this.hostUtilization = data.host;
                 },
                 error: (err) => {
@@ -199,9 +205,11 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
     }
 
     private refreshUpcoming() {
-        this.api.getTodayUpcoming(this.selectedDate, this.withinMinutes).subscribe({
+        this.api.getTodaySessions(this.selectedDate).subscribe({
             next: (data) => {
-                this.upcoming = data;
+                this.ongoing = data.ongoing;
+                this.upcoming = data.upcoming;
+                this.past = data.past;
                 this.cdr.detectChanges();
             },
             error: () => {
@@ -505,9 +513,68 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
             if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) continue;
             const startMinutes = start.getHours() * 60 + start.getMinutes();
             const endMinutes = end.getHours() * 60 + end.getMinutes();
-            cols[idx].blocks.push({ session: s, startMinutes, endMinutes });
+            cols[idx].blocks.push({ session: s, startMinutes, endMinutes, lane: 0, laneCount: 1 });
+        }
+        for (const c of cols) {
+            this.assignLanes(c.blocks);
         }
         return cols;
+    }
+
+    /**
+     * Asigna carriles (lane) a bloques solapados dentro de un día usando
+     * agrupación por componentes conexos de solapamiento. Todos los bloques
+     * de un mismo grupo comparten laneCount = ancho del grupo.
+     */
+    private assignLanes(blocks: HostCalendarBlock[]): void {
+        if (blocks.length === 0) return;
+        const sorted = [...blocks].sort(
+            (a, b) => a.startMinutes - b.startMinutes || a.endMinutes - b.endMinutes,
+        );
+        let group: HostCalendarBlock[] = [];
+        let groupEnd = -1;
+        const flush = () => {
+            if (group.length === 0) return;
+            const lanesEnd: number[] = [];
+            for (const blk of group) {
+                let placed = false;
+                for (let i = 0; i < lanesEnd.length; i++) {
+                    if (lanesEnd[i] <= blk.startMinutes) {
+                        blk.lane = i;
+                        lanesEnd[i] = blk.endMinutes;
+                        placed = true;
+                        break;
+                    }
+                }
+                if (!placed) {
+                    blk.lane = lanesEnd.length;
+                    lanesEnd.push(blk.endMinutes);
+                }
+            }
+            const count = lanesEnd.length;
+            for (const blk of group) blk.laneCount = count;
+            group = [];
+            groupEnd = -1;
+        };
+        for (const blk of sorted) {
+            if (group.length === 0 || blk.startMinutes < groupEnd) {
+                group.push(blk);
+                groupEnd = Math.max(groupEnd, blk.endMinutes);
+            } else {
+                flush();
+                group.push(blk);
+                groupEnd = blk.endMinutes;
+            }
+        }
+        flush();
+    }
+
+    blockLeftPct(block: HostCalendarBlock): string {
+        return `${(block.lane / block.laneCount) * 100}%`;
+    }
+
+    blockWidthPct(block: HostCalendarBlock): string {
+        return `${100 / block.laneCount}%`;
     }
 
     blockTopPx(block: HostCalendarBlock): string {

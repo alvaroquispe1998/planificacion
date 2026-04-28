@@ -675,14 +675,15 @@
 
 .host-cal__block {
     position: absolute;
-    left: 4px;
-    right: 4px;
+    box-sizing: border-box;
+    /* left/width se aplican via [style] en porcentaje según el carril */
+    border: 2px solid #ffffff;
     border-radius: 6px;
     background: linear-gradient(135deg, #2563eb, #1d4ed8);
     color: #ffffff;
-    padding: 4px 6px;
+    padding: 5px 7px;
     text-decoration: none;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -694,8 +695,13 @@
 
 .host-cal__block:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.35);
+    box-shadow: 0 6px 14px rgba(29, 78, 216, 0.4);
     z-index: 2;
+}
+
+.host-cal__block--narrow {
+    padding: 3px 5px;
+    gap: 1px;
 }
 
 .host-cal__block--unmatched {
@@ -709,25 +715,260 @@
 }
 
 .host-cal__block-time {
-    font-size: 0.7rem;
-    font-weight: 600;
-    opacity: 0.95;
+    font-size: 0.72rem;
+    font-weight: 700;
     line-height: 1.1;
+    letter-spacing: 0.2px;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
 }
 
 .host-cal__block-title {
-    font-size: 0.8rem;
+    font-size: 0.82rem;
     font-weight: 700;
     line-height: 1.15;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    word-break: break-word;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
 }
 
 .host-cal__block-meta {
     font-size: 0.7rem;
-    opacity: 0.85;
+    font-weight: 600;
+    opacity: 0.92;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.host-cal__block--narrow .host-cal__block-time {
+    font-size: 0.65rem;
+}
+
+.host-cal__block--narrow .host-cal__block-title {
+    font-size: 0.72rem;
+    -webkit-line-clamp: 1;
+}
+
+.host-cal__block--narrow .host-cal__block-meta {
+    font-size: 0.62rem;
+}
+
+/* =========================================================
+   SESIONES DEL DIA (En curso / Pendientes / Pasadas)
+   ========================================================= */
+.sessions-card {
+    grid-column: 1 / -1;
+    padding: 0;
+}
+
+.sessions-card .card__header {
+    padding: 14px 18px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.sessions-card .card__header .card__hint {
+    display: inline-flex;
+    gap: 6px;
+}
+
+.sessions-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+}
+
+.sessions-col {
+    border-right: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    min-height: 360px;
+}
+
+.sessions-col:last-child {
+    border-right: none;
+}
+
+.sessions-col__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #111827;
+    background: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.sessions-col__count {
+    margin-left: auto;
+    background: #e5e7eb;
+    color: #374151;
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 700;
+}
+
+.sessions-col--ongoing .sessions-col__count {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.sessions-col--upcoming .sessions-col__count {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.sessions-col--past .sessions-col__count {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.sessions-col__dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #9ca3af;
+}
+
+.sessions-col__dot--ongoing {
+    background: #22c55e;
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.18);
+    animation: vc-pulse 1.6s ease-out infinite;
+}
+
+.sessions-col__dot--upcoming {
+    background: #2563eb;
+}
+
+.sessions-col__dot--past {
+    background: #9ca3af;
+}
+
+.sessions-col__body {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 480px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.session-item {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-left: 4px solid #3b82f6;
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: box-shadow 0.12s ease, transform 0.12s ease;
+}
+
+.session-item:hover {
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+    transform: translateY(-1px);
+}
+
+.session-item--ongoing {
+    border-left-color: #22c55e;
+    background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
+}
+
+.session-item--past {
+    border-left-color: #9ca3af;
+    opacity: 0.85;
+}
+
+.session-item--past .session-item__title {
+    color: #6b7280;
+}
+
+.session-item__time {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #111827;
+    font-variant-numeric: tabular-nums;
+}
+
+.session-item__pulse {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    animation: vc-pulse 1.4s ease-out infinite;
+}
+
+.session-item__title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #111827;
+    line-height: 1.25;
+}
+
+.session-item__name {
+    font-weight: 500;
+    color: #374151;
+}
+
+.session-item__meta {
+    font-size: 0.75rem;
+    color: #6b7280;
+}
+
+.session-item__host {
+    font-size: 0.7rem;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.session-item__cta {
+    align-self: flex-start;
+    margin-top: 4px;
+    padding: 4px 10px;
+    background: #2563eb;
+    color: #ffffff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 6px;
+    text-decoration: none;
+}
+
+.session-item__cta:hover {
+    background: #1d4ed8;
+}
+
+.session-item--ongoing .session-item__cta {
+    background: #16a34a;
+}
+
+.session-item--ongoing .session-item__cta:hover {
+    background: #15803d;
+}
+
+@keyframes vc-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+    70% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+
+@media (max-width: 1024px) {
+    .sessions-grid { grid-template-columns: 1fr; }
+    .sessions-col { border-right: none; border-bottom: 1px solid #e5e7eb; }
 }

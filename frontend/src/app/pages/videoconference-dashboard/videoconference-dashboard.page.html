@@ -15,11 +15,6 @@
                 <span>Fecha</span>
                 <input type="date" [(ngModel)]="selectedDate" (change)="onDateChange()" />
             </label>
-            <label class="control" *ngIf="activeTab === 'today'">
-                <span>Próximas (min)</span>
-                <input type="number" min="15" max="720" step="15" [(ngModel)]="withinMinutes"
-                    (change)="onWithinMinutesChange()" />
-            </label>
             <button type="button" class="btn btn-secondary"
                 (click)="activeTab === 'today' ? refreshTodayData() : (activeTab === 'period' ? refreshPeriodData() : loadHostOptions())"
                 [disabled]="loading || periodLoading || hostLoading">
@@ -35,9 +30,6 @@
     <nav class="vc-dashboard__tabs" role="tablist">
         <button type="button" role="tab" [class.active]="activeTab === 'today'" (click)="setTab('today')">
             Hoy
-        </button>
-        <button type="button" role="tab" [class.active]="activeTab === 'period'" (click)="setTab('period')">
-            Período
         </button>
         <button type="button" role="tab" [class.active]="activeTab === 'host'" (click)="setTab('host')">
             Por host
@@ -95,51 +87,87 @@
                 </footer>
             </section>
 
-            <!-- Próximas -->
-            <section class="card">
+            <!-- Sesiones del día: En curso / Pendientes / Pasadas -->
+            <section class="card card-wide sessions-card">
                 <header class="card__header">
-                    <h2>Próximas {{ withinMinutes }} min</h2>
+                    <h2>Sesiones del día</h2>
+                    <span class="card__hint">
+                        <span class="badge badge-success">{{ ongoing.length }} en curso</span>
+                        <span class="badge badge-info">{{ upcoming.length }} pendientes</span>
+                        <span class="badge badge-muted">{{ past.length }} pasadas</span>
+                    </span>
                 </header>
-                <div class="card__body card__body--scroll">
-                    <table class="table" *ngIf="upcoming.length > 0; else noUpcoming">
-                        <thead>
-                            <tr>
-                                <th>Inicio</th>
-                                <th>Curso</th>
-                                <th>Sección</th>
-                                <th>Docente</th>
-                                <th>Host</th>
-                                <th>Estado</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr *ngFor="let item of upcoming">
-                                <td>{{ formatTime(item.scheduledStart) }}</td>
-                                <td>
-                                    <div class="cell-strong">{{ item.courseCode || '-' }}</div>
-                                    <div class="cell-muted">{{ item.courseName }}</div>
-                                </td>
-                                <td>{{ item.sectionLabel || '-' }}</td>
-                                <td>{{ item.teacherName || '-' }}</td>
-                                <td>
-                                    <div class="cell-strong">{{ item.zoomUserName || '-' }}</div>
-                                    <div class="cell-muted">{{ item.zoomUserEmail }}</div>
-                                </td>
-                                <td>
-                                    <span class="badge" [ngClass]="statusClass(item.status)">{{
-                                        statusLabel(item.status) }}</span>
-                                </td>
-                                <td>
-                                    <a *ngIf="item.joinUrl" [href]="item.joinUrl" target="_blank" rel="noopener"
-                                        class="link-action">Abrir</a>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <ng-template #noUpcoming>
-                        <p class="empty">No hay sesiones próximas en el rango.</p>
-                    </ng-template>
+                <div class="sessions-grid">
+                    <!-- En curso -->
+                    <div class="sessions-col sessions-col--ongoing">
+                        <div class="sessions-col__head">
+                            <span class="sessions-col__dot sessions-col__dot--ongoing"></span>
+                            En curso
+                            <span class="sessions-col__count">{{ ongoing.length }}</span>
+                        </div>
+                        <div class="sessions-col__body">
+                            <ng-container *ngIf="ongoing.length > 0; else noOngoing">
+                                <article *ngFor="let it of ongoing" class="session-item session-item--ongoing">
+                                    <div class="session-item__time">
+                                        <span class="session-item__pulse"></span>
+                                        {{ formatTime(it.scheduledStart) }} – {{ formatTime(it.scheduledEnd) }}
+                                    </div>
+                                    <div class="session-item__title">{{ it.courseCode || '—' }} · <span class="session-item__name">{{ it.courseName }}</span></div>
+                                    <div class="session-item__meta">{{ it.sectionLabel || '—' }} · {{ it.teacherName || 'Sin docente' }}</div>
+                                    <div class="session-item__host">{{ it.zoomUserName || it.zoomUserEmail || '—' }}</div>
+                                    <a *ngIf="it.joinUrl" [href]="it.joinUrl" target="_blank" rel="noopener" class="session-item__cta">Unirse</a>
+                                </article>
+                            </ng-container>
+                            <ng-template #noOngoing>
+                                <p class="empty">Ninguna sesión en curso.</p>
+                            </ng-template>
+                        </div>
+                    </div>
+
+                    <!-- Pendientes -->
+                    <div class="sessions-col sessions-col--upcoming">
+                        <div class="sessions-col__head">
+                            <span class="sessions-col__dot sessions-col__dot--upcoming"></span>
+                            Pendientes
+                            <span class="sessions-col__count">{{ upcoming.length }}</span>
+                        </div>
+                        <div class="sessions-col__body">
+                            <ng-container *ngIf="upcoming.length > 0; else noUpcomingP">
+                                <article *ngFor="let it of upcoming" class="session-item">
+                                    <div class="session-item__time">{{ formatTime(it.scheduledStart) }} – {{ formatTime(it.scheduledEnd) }}</div>
+                                    <div class="session-item__title">{{ it.courseCode || '—' }} · <span class="session-item__name">{{ it.courseName }}</span></div>
+                                    <div class="session-item__meta">{{ it.sectionLabel || '—' }} · {{ it.teacherName || 'Sin docente' }}</div>
+                                    <div class="session-item__host">{{ it.zoomUserName || it.zoomUserEmail || '—' }}</div>
+                                    <a *ngIf="it.joinUrl" [href]="it.joinUrl" target="_blank" rel="noopener" class="session-item__cta">Abrir</a>
+                                </article>
+                            </ng-container>
+                            <ng-template #noUpcomingP>
+                                <p class="empty">No quedan sesiones pendientes hoy.</p>
+                            </ng-template>
+                        </div>
+                    </div>
+
+                    <!-- Pasadas -->
+                    <div class="sessions-col sessions-col--past">
+                        <div class="sessions-col__head">
+                            <span class="sessions-col__dot sessions-col__dot--past"></span>
+                            Pasadas
+                            <span class="sessions-col__count">{{ past.length }}</span>
+                        </div>
+                        <div class="sessions-col__body">
+                            <ng-container *ngIf="past.length > 0; else noPast">
+                                <article *ngFor="let it of past" class="session-item session-item--past">
+                                    <div class="session-item__time">{{ formatTime(it.scheduledStart) }} – {{ formatTime(it.scheduledEnd) }}</div>
+                                    <div class="session-item__title">{{ it.courseCode || '—' }} · <span class="session-item__name">{{ it.courseName }}</span></div>
+                                    <div class="session-item__meta">{{ it.sectionLabel || '—' }} · {{ it.teacherName || 'Sin docente' }}</div>
+                                    <div class="session-item__host">{{ it.zoomUserName || it.zoomUserEmail || '—' }}</div>
+                                </article>
+                            </ng-container>
+                            <ng-template #noPast>
+                                <p class="empty">Aún no hay sesiones finalizadas.</p>
+                            </ng-template>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -419,9 +447,11 @@
                         <a *ngFor="let block of col.blocks" class="host-cal__block"
                             [class.host-cal__block--error]="block.session.status === 'ERROR'"
                             [class.host-cal__block--unmatched]="block.session.status === 'CREATED_UNMATCHED'"
+                            [class.host-cal__block--narrow]="block.laneCount > 1"
                             [style.top]="blockTopPx(block)" [style.height]="blockHeightPx(block)"
+                            [style.left]="blockLeftPct(block)" [style.width]="blockWidthPct(block)"
                             [href]="block.session.joinUrl || null" target="_blank" rel="noopener"
-                            [title]="(block.session.courseName || '') + ' · ' + (block.session.teacherName || '') + ' · ' + formatRange(block.session)">
+                            [title]="formatRange(block.session) + ' · ' + (block.session.courseCode || '') + ' ' + (block.session.courseName || '') + ' · ' + (block.session.sectionLabel || '') + ' · ' + (block.session.teacherName || '')">
                             <span class="host-cal__block-time">{{ formatRange(block.session) }}</span>
                             <span class="host-cal__block-title">{{ block.session.courseCode || block.session.topic || '—' }}</span>
                             <span class="host-cal__block-meta" *ngIf="block.session.sectionLabel">{{ block.session.sectionLabel }}</span>

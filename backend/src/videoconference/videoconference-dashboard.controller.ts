@@ -37,6 +37,11 @@ export class VideoconferenceDashboardController {
         return this.service.getTodayHostUtilization(date);
     }
 
+    @Get('today/sessions')
+    async getTodaySessions(@Query('date') date?: string) {
+        return this.service.getTodaySessions(date);
+    }
+
     // ----- Period coverage -----
 
     @Get('coverage/summary')
