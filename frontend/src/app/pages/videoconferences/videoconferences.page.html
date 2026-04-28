@@ -110,14 +110,23 @@
           </app-multi-select>
         </div>
 
-        <div class="filter-group filter-time-range">
-          <label>Rango horario</label>
+        <div class="filter-group filter-time-range" [class.is-disabled]="!timeRangeEnabled">
+          <label class="time-range-toggle">
+            <input type="checkbox" [(ngModel)]="timeRangeEnabled" />
+            <span>Rango horario</span>
+          </label>
           <div class="time-range-inputs">
-            <input type="time" step="60" [(ngModel)]="minStartTime" aria-label="Hora desde" placeholder="Desde" />
+            <input type="time" step="60" [(ngModel)]="minStartTime" [disabled]="!timeRangeEnabled"
+              aria-label="Hora desde" placeholder="Desde" />
             <span class="time-range-sep">—</span>
-            <input type="time" step="60" [(ngModel)]="maxEndTime" aria-label="Hora hasta" placeholder="Hasta" />
+            <input type="time" step="60" [(ngModel)]="maxEndTime" [disabled]="!timeRangeEnabled"
+              aria-label="Hora hasta" placeholder="Hasta" />
           </div>
-          <small class="filter-hint">Aplica al rango efectivo (incluye horarios unidos).</small>
+          <small class="filter-hint">
+            {{ timeRangeEnabled
+              ? 'Aplica al rango efectivo (incluye horarios unidos).'
+              : 'Activa la casilla para filtrar por rango horario.' }}
+          </small>
         </div>
       </div>
 

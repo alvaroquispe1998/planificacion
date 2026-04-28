@@ -77,6 +77,8 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   /** Rango horario opcional (HH:mm) aplicado al backend al presionar Buscar horarios. */
   minStartTime = '';
   maxEndTime = '';
+  /** Cuando está desactivado, no se aplica el filtro por rango horario. */
+  timeRangeEnabled = false;
   selectedZoomGroupId = '';
   zoomGroups: ZoomGroupItem[] = [];
   hybridZoomUsers: { id: string; label: string }[] = [];
@@ -345,6 +347,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     this.selectedDays = [];
     this.minStartTime = '';
     this.maxEndTime = '';
+    this.timeRangeEnabled = false;
     this.closeOverrideEditor();
     this.resetPreviewState();
     this.closeFilterDropdowns();
@@ -1426,8 +1429,8 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       selectedCourses: [...this.selectedCourses],
       selectedModalities: [...this.selectedModalities],
       selectedDays: [...this.selectedDays],
-      minStartTime: this.minStartTime,
-      maxEndTime: this.maxEndTime,
+      minStartTime: this.timeRangeEnabled ? this.minStartTime : '',
+      maxEndTime: this.timeRangeEnabled ? this.maxEndTime : '',
     };
   }
 
@@ -1589,8 +1592,8 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       courseIds: this.selectedCourses.length ? this.selectedCourses : undefined,
       modalities: this.selectedModalities.length ? this.selectedModalities : undefined,
       days: this.selectedDays.length ? this.selectedDays : undefined,
-      minStartTime: this.minStartTime?.trim() ? this.minStartTime.trim() : undefined,
-      maxEndTime: this.maxEndTime?.trim() ? this.maxEndTime.trim() : undefined,
+      minStartTime: this.timeRangeEnabled && this.minStartTime?.trim() ? this.minStartTime.trim() : undefined,
+      maxEndTime: this.timeRangeEnabled && this.maxEndTime?.trim() ? this.maxEndTime.trim() : undefined,
     };
   }
 
