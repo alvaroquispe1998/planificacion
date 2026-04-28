@@ -1,0 +1,405 @@
+<section class="vc-dashboard">
+    <header class="vc-dashboard__header">
+        <div class="vc-dashboard__title">
+            <h1>Dashboard de videoconferencias</h1>
+            <p class="vc-dashboard__subtitle">Estado operativo y cobertura de Zoom para el día seleccionado.</p>
+        </div>
+        <div class="vc-dashboard__controls">
+            <label class="control" *ngIf="activeTab === 'period'">
+                <span>Período</span>
+                <select [(ngModel)]="selectedPeriod" (change)="onPeriodChange()">
+                    <option *ngFor="let p of periodOptions" [value]="p.id">{{ p.label }}</option>
+                </select>
+            </label>
+            <label class="control" *ngIf="activeTab === 'today'">
+                <span>Fecha</span>
+                <input type="date" [(ngModel)]="selectedDate" (change)="onDateChange()" />
+            </label>
+            <label class="control" *ngIf="activeTab === 'today'">
+                <span>Próximas (min)</span>
+                <input type="number" min="15" max="720" step="15" [(ngModel)]="withinMinutes"
+                    (change)="onWithinMinutesChange()" />
+            </label>
+            <button type="button" class="btn btn-secondary"
+                (click)="activeTab === 'today' ? refreshTodayData() : refreshPeriodData()"
+                [disabled]="loading || periodLoading">
+                {{ (loading || periodLoading) ? 'Actualizando…' : 'Refrescar' }}
+            </button>
+            <label class="control control-toggle" *ngIf="activeTab === 'today'">
+                <input type="checkbox" [checked]="autoRefresh" (change)="toggleAutoRefresh()" />
+                <span>Auto-refresh 60s</span>
+            </label>
+        </div>
+    </header>
+
+    <nav class="vc-dashboard__tabs" role="tablist">
+        <button type="button" role="tab" [class.active]="activeTab === 'today'" (click)="setTab('today')">
+            Hoy
+        </button>
+        <button type="button" role="tab" [class.active]="activeTab === 'period'" (click)="setTab('period')">
+            Período
+        </button>
+    </nav>
+
+    <div *ngIf="error" class="vc-dashboard__error">{{ error }}</div>
+
+    <ng-container *ngIf="activeTab === 'today'">
+        <!-- KPI cards -->
+        <div class="vc-dashboard__kpis">
+            <article class="kpi">
+                <span class="kpi__label">Total VCs</span>
+                <span class="kpi__value">{{ summary?.totals?.total ?? 0 }}</span>
+            </article>
+            <article class="kpi kpi-success">
+                <span class="kpi__label">Vinculadas</span>
+                <span class="kpi__value">{{ summary?.totals?.matched ?? 0 }}</span>
+            </article>
+            <article class="kpi kpi-warning">
+                <span class="kpi__label">Creadas s/match</span>
+                <span class="kpi__value">{{ summary?.totals?.createdUnmatched ?? 0 }}</span>
+            </article>
+            <article class="kpi kpi-info">
+                <span class="kpi__label">Creando</span>
+                <span class="kpi__value">{{ summary?.totals?.creating ?? 0 }}</span>
+            </article>
+            <article class="kpi kpi-danger">
+                <span class="kpi__label">Errores</span>
+                <span class="kpi__value">{{ summary?.totals?.error ?? 0 }}</span>
+            </article>
+            <article class="kpi kpi-muted">
+                <span class="kpi__label">Canceladas (skip)</span>
+                <span class="kpi__value">{{ summary?.totals?.cancelled ?? 0 }}</span>
+            </article>
+            <article class="kpi kpi-muted">
+                <span class="kpi__label">Reprogramadas</span>
+                <span class="kpi__value">{{ summary?.totals?.rescheduled ?? 0 }}</span>
+            </article>
+        </div>
+
+        <div class="vc-dashboard__grid">
+            <!-- Cobertura -->
+            <section class="card">
+                <header class="card__header">
+                    <h2>Cobertura del día</h2>
+                </header>
+                <div class="coverage">
+                    <div class="coverage__row">
+                        <span>Schedules afectados</span>
+                        <strong>{{ summary?.coverage?.expectedSchedules ?? 0 }}</strong>
+                    </div>
+                    <div class="coverage__row">
+                        <span>VCs generadas</span>
+                        <strong>{{ summary?.coverage?.generatedVideoconferences ?? 0 }}</strong>
+                    </div>
+                    <div class="coverage__bar">
+                        <div class="coverage__bar-fill" [style.width.%]="summary?.coverage?.coveragePercent ?? 0">
+                        </div>
+                    </div>
+                    <div class="coverage__pct">{{ summary?.coverage?.coveragePercent ?? 0 }}%</div>
+                </div>
+                <footer class="card__footer">
+                    <span class="badge badge-info">Auditoría pendiente: {{ summary?.audit?.pending ?? 0 }}</span>
+                    <span class="badge badge-success">Sincronizadas: {{ summary?.audit?.synced ?? 0 }}</span>
+                    <span class="badge badge-danger">Auditoría error: {{ summary?.audit?.error ?? 0 }}</span>
+                </footer>
+            </section>
+
+            <!-- Próximas -->
+            <section class="card">
+                <header class="card__header">
+                    <h2>Próximas {{ withinMinutes }} min</h2>
+                </header>
+                <div class="card__body card__body--scroll">
+                    <table class="table" *ngIf="upcoming.length > 0; else noUpcoming">
+                        <thead>
+                            <tr>
+                                <th>Inicio</th>
+                                <th>Curso</th>
+                                <th>Sección</th>
+                                <th>Docente</th>
+                                <th>Host</th>
+                                <th>Estado</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr *ngFor="let item of upcoming">
+                                <td>{{ formatTime(item.scheduledStart) }}</td>
+                                <td>
+                                    <div class="cell-strong">{{ item.courseCode || '-' }}</div>
+                                    <div class="cell-muted">{{ item.courseName }}</div>
+                                </td>
+                                <td>{{ item.sectionLabel || '-' }}</td>
+                                <td>{{ item.teacherName || '-' }}</td>
+                                <td>
+                                    <div class="cell-strong">{{ item.zoomUserName || '-' }}</div>
+                                    <div class="cell-muted">{{ item.zoomUserEmail }}</div>
+                                </td>
+                                <td>
+                                    <span class="badge" [ngClass]="statusClass(item.status)">{{
+                                        statusLabel(item.status) }}</span>
+                                </td>
+                                <td>
+                                    <a *ngIf="item.joinUrl" [href]="item.joinUrl" target="_blank" rel="noopener"
+                                        class="link-action">Abrir</a>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <ng-template #noUpcoming>
+                        <p class="empty">No hay sesiones próximas en el rango.</p>
+                    </ng-template>
+                </div>
+            </section>
+
+            <!-- Errores -->
+            <section class="card">
+                <header class="card__header">
+                    <h2>Errores recientes</h2>
+                </header>
+                <div class="card__body card__body--scroll">
+                    <ul class="error-list" *ngIf="errors.length > 0; else noErrors">
+                        <li *ngFor="let err of errors" class="error-item">
+                            <div class="error-item__head">
+                                <span class="badge badge-danger">{{ errorScope(err) }}</span>
+                                <span class="error-item__time">{{ formatTime(err.scheduledStart) }}</span>
+                            </div>
+                            <div class="error-item__title">{{ err.courseCode || '-' }} · {{ err.courseName || ''
+                                }}</div>
+                            <div class="error-item__meta">{{ err.teacherName || 'Sin docente' }}</div>
+                            <div class="error-item__msg">{{ primaryErrorReason(err) }}</div>
+                        </li>
+                    </ul>
+                    <ng-template #noErrors>
+                        <p class="empty">Sin errores en la fecha seleccionada.</p>
+                    </ng-template>
+                </div>
+            </section>
+
+            <!-- Ocupación de hosts -->
+            <section class="card">
+                <header class="card__header">
+                    <h2>Ocupación de hosts</h2>
+                    <span class="card__hint">
+                        Pico: {{ hostUtilization?.peakActiveMeetings ?? 0 }}
+                        <ng-container *ngIf="hostUtilization?.peakHour !== null && hostUtilization?.peakHour !== undefined">
+                            @ {{ hostUtilization?.peakHour }}h
+                        </ng-container>
+                        · Pool: {{ hostUtilization?.poolSize ?? 0 }}
+                    </span>
+                </header>
+                <div class="hosts">
+                    <div class="hosts__bars">
+                        <div *ngFor="let b of hostUtilization?.buckets ?? []" class="hosts__bar"
+                            [title]="b.hour + 'h · ' + b.activeMeetings + ' activas · ' + b.distinctZoomUsers + ' hosts'">
+                            <div class="hosts__bar-fill" [style.height]="bucketBarHeight(b.activeMeetings, peakBucketsMax)">
+                            </div>
+                            <span class="hosts__bar-label">{{ b.hour }}</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </ng-container>
+
+    <ng-container *ngIf="activeTab === 'period'">
+        <div *ngIf="periodError" class="vc-dashboard__error">{{ periodError }}</div>
+        <div *ngIf="!selectedPeriod" class="empty-tab">
+            <p>Selecciona un período para ver la cobertura.</p>
+        </div>
+
+        <ng-container *ngIf="selectedPeriod">
+            <!-- KPI cards período -->
+            <div class="vc-dashboard__kpis">
+                <article class="kpi">
+                    <span class="kpi__label">Schedules</span>
+                    <span class="kpi__value">{{ coverageSummary?.totals?.schedules ?? 0 }}</span>
+                </article>
+                <article class="kpi kpi-success">
+                    <span class="kpi__label">VCs generadas</span>
+                    <span class="kpi__value">{{ coverageSummary?.videoconferences?.total ?? 0 }}</span>
+                </article>
+                <article class="kpi kpi-info">
+                    <span class="kpi__label">Cubiertos</span>
+                    <span class="kpi__value">{{ coverageSummary?.coverage?.schedulesCovered ?? 0 }}</span>
+                </article>
+                <article class="kpi kpi-warning">
+                    <span class="kpi__label">Sin cubrir</span>
+                    <span class="kpi__value">{{ coverageSummary?.coverage?.schedulesMissing ?? 0 }}</span>
+                </article>
+                <article class="kpi kpi-danger">
+                    <span class="kpi__label">VCs en error</span>
+                    <span class="kpi__value">{{ coverageSummary?.videoconferences?.error ?? 0 }}</span>
+                </article>
+                <article class="kpi kpi-muted">
+                    <span class="kpi__label">Cobertura</span>
+                    <span class="kpi__value">{{ coverageSummary?.coverage?.coveragePercent ?? 0 }}%</span>
+                </article>
+            </div>
+
+            <div class="vc-dashboard__grid">
+                <!-- Cobertura por dimensión -->
+                <section class="card card-wide">
+                    <header class="card__header">
+                        <h2>Cobertura por dimensión</h2>
+                        <div class="seg-control">
+                            <button type="button" [class.active]="coverageDimension === 'faculty'"
+                                (click)="onDimensionChange('faculty')">Facultad</button>
+                            <button type="button" [class.active]="coverageDimension === 'campus'"
+                                (click)="onDimensionChange('campus')">Sede</button>
+                            <button type="button" [class.active]="coverageDimension === 'program'"
+                                (click)="onDimensionChange('program')">Programa</button>
+                        </div>
+                    </header>
+                    <div class="card__body card__body--scroll">
+                        <table class="table" *ngIf="coverageRows.length > 0; else noDimRows">
+                            <thead>
+                                <tr>
+                                    <th>{{ coverageDimension === 'faculty' ? 'Facultad' : (coverageDimension === 'campus' ? 'Sede' : 'Programa') }}</th>
+                                    <th class="num">Schedules</th>
+                                    <th class="num">Con VC</th>
+                                    <th>Cobertura</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr *ngFor="let row of coverageRows">
+                                    <td>{{ row.label }}</td>
+                                    <td class="num">{{ row.totalSchedules }}</td>
+                                    <td class="num">{{ row.schedulesWithVideoconference }}</td>
+                                    <td>
+                                        <div class="row-bar">
+                                            <div class="row-bar__fill" [style.width.%]="row.coveragePercent"></div>
+                                            <span class="row-bar__pct">{{ row.coveragePercent }}%</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <ng-template #noDimRows>
+                            <p class="empty">Sin datos para esta dimensión.</p>
+                        </ng-template>
+                    </div>
+                </section>
+
+                <!-- Schedules sin VC -->
+                <section class="card card-wide">
+                    <header class="card__header">
+                        <h2>Schedules sin videoconferencia</h2>
+                        <span class="card__hint">{{ coverageMissing.length }} mostrados (máx 200)</span>
+                    </header>
+                    <div class="card__body card__body--scroll">
+                        <table class="table" *ngIf="coverageMissing.length > 0; else noMissing">
+                            <thead>
+                                <tr>
+                                    <th>Curso</th>
+                                    <th>Sección</th>
+                                    <th>Día</th>
+                                    <th>Horario</th>
+                                    <th>Docente</th>
+                                    <th>Facultad</th>
+                                    <th>Motivo</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr *ngFor="let item of coverageMissing">
+                                    <td>
+                                        <div class="cell-strong">{{ item.courseCode }}</div>
+                                        <div class="cell-muted">{{ item.courseName }}</div>
+                                    </td>
+                                    <td>{{ item.sectionCode }} / {{ item.subsectionCode }}</td>
+                                    <td>{{ item.dayOfWeek }}</td>
+                                    <td>{{ item.startTime }}–{{ item.endTime }}</td>
+                                    <td>{{ item.teacherName || '-' }}</td>
+                                    <td>{{ item.facultyName || '-' }}</td>
+                                    <td>
+                                        <span class="badge badge-warning">{{ item.reason }}</span>
+                                    </td>
+                                    <td>
+                                        <a [routerLink]="['/planning/offers', item.planningOfferId, 'sections']"
+                                            target="_blank" rel="noopener" class="link-action">Ir</a>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <ng-template #noMissing>
+                            <p class="empty">Todos los schedules tienen VC u override.</p>
+                        </ng-template>
+                    </div>
+                </section>
+
+                <!-- Overrides -->
+                <section class="card">
+                    <header class="card__header">
+                        <h2>Overrides</h2>
+                    </header>
+                    <div class="card__body">
+                        <ul class="kv-list" *ngIf="coverageOverrides.length > 0; else noOvr">
+                            <li *ngFor="let row of coverageOverrides">
+                                <span>{{ overrideLabel(row.action) }}</span>
+                                <strong>{{ row.count }}</strong>
+                            </li>
+                        </ul>
+                        <ng-template #noOvr>
+                            <p class="empty">Sin overrides registrados.</p>
+                        </ng-template>
+                    </div>
+                </section>
+
+                <!-- Conflictos -->
+                <section class="card">
+                    <header class="card__header">
+                        <h2>Conflictos del período</h2>
+                    </header>
+                    <div class="card__body card__body--scroll">
+                        <table class="table" *ngIf="coverageConflicts.length > 0; else noConf">
+                            <thead>
+                                <tr>
+                                    <th>Tipo</th>
+                                    <th>Severidad</th>
+                                    <th class="num">Cantidad</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr *ngFor="let row of coverageConflicts">
+                                    <td>{{ row.conflictType }}</td>
+                                    <td>
+                                        <span class="badge" [ngClass]="severityClass(row.severity)">{{
+                                            severityLabel(row.severity) }}</span>
+                                    </td>
+                                    <td class="num">{{ row.count }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <ng-template #noConf>
+                            <p class="empty">Sin conflictos detectados.</p>
+                        </ng-template>
+                    </div>
+                </section>
+
+                <!-- Serie diaria -->
+                <section class="card card-wide">
+                    <header class="card__header">
+                        <h2>Sesiones por día</h2>
+                        <span class="card__hint">Total y errores</span>
+                    </header>
+                    <div class="hosts">
+                        <div class="hosts__bars hosts__bars--scroll" *ngIf="coverageDaily.length > 0; else noDaily">
+                            <div *ngFor="let p of coverageDaily" class="hosts__bar"
+                                [title]="p.conferenceDate + ' · ' + p.total + ' total · ' + p.error + ' errores'">
+                                <div class="hosts__bar-fill"
+                                    [style.height]="bucketBarHeight(p.total, coverageDailyMax)"></div>
+                                <div *ngIf="p.error > 0" class="hosts__bar-error"
+                                    [style.height]="bucketBarHeight(p.error, coverageDailyMax)"></div>
+                                <span class="hosts__bar-label">{{ formatDayShort(p.conferenceDate) }}</span>
+                            </div>
+                        </div>
+                        <ng-template #noDaily>
+                            <p class="empty">Sin VCs en el período.</p>
+                        </ng-template>
+                    </div>
+                </section>
+            </div>
+        </ng-container>
+    </ng-container>
+</section>

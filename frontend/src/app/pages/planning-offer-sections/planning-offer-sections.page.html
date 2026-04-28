@@ -310,7 +310,7 @@
           {{ sectionPrimaryCode(activeSection) || 'Seccion' }} | {{ sectionSecondaryCode(activeSection) || 'Interna base' }} | {{ subsectionStatusLabel(activeSubsection) }}
         </p>
       </div>
-      <button class="btn btn-ghost" (click)="closeSubsectionDrawer()">Cerrar</button>
+      <button class="btn btn-ghost" (click)="requestCloseSubsectionDrawer()">Cerrar</button>
     </div>
 
     <div class="drawer-content">
@@ -580,6 +580,28 @@
           </div>
         </div>
       </section>
+    </div>
+
+    <div class="drawer-footer">
+      <span class="drawer-footer-status" *ngIf="hasPendingSubsectionChanges">
+        Tienes cambios sin guardar.
+      </span>
+      <div class="drawer-footer-actions">
+        <button
+          type="button"
+          class="btn btn-ghost"
+          (click)="discardSubsectionChanges()"
+          [disabled]="saving || isWorkflowReadOnly || !hasPendingSubsectionChanges">
+          Descartar
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          (click)="saveSubsectionDrawer()"
+          [disabled]="saving || isWorkflowReadOnly || !hasPendingSubsectionChanges">
+          {{ saving ? 'Guardando...' : 'Guardar cambios' }}
+        </button>
+      </div>
     </div>
   </aside>
 </div>

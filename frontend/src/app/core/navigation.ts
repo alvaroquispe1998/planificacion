@@ -105,6 +105,15 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         icon: 'camera',
         children: [
           {
+            label: 'Dashboard',
+            path: '/videoconferences/dashboard',
+            icon: 'spark',
+            window: 'window.videoconferences',
+            match: {
+              exact: ['/videoconferences/dashboard'],
+            },
+          },
+          {
             label: 'Configuracion Zoom',
             path: '/videoconferences/zoom-config',
             icon: 'key',
