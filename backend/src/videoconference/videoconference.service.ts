@@ -1228,9 +1228,11 @@ export class VideoconferenceService implements OnModuleInit {
         rawMin?: string,
         rawMax?: string,
     ): T[] {
-        const min = compactTime(rawMin ?? '');
-        const max = compactTime(rawMax ?? '');
-        if (!min && !max) return items;
+        const minStr = (rawMin ?? '').trim();
+        const maxStr = (rawMax ?? '').trim();
+        if (!minStr && !maxStr) return items;
+        const min = minStr ? compactTime(minStr) : '';
+        const max = maxStr ? compactTime(maxStr) : '';
         const toMin = (hhmm: string) => {
             const [h, m] = hhmm.split(':').map((v) => parseInt(v, 10));
             return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0);

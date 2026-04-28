@@ -112,7 +112,7 @@
 
         <div class="filter-group filter-time-range" [class.is-disabled]="!timeRangeEnabled">
           <label class="time-range-toggle">
-            <input type="checkbox" [(ngModel)]="timeRangeEnabled" />
+            <input type="checkbox" [(ngModel)]="timeRangeEnabled" (change)="onTimeRangeToggle()" />
             <span>Rango horario</span>
           </label>
           <div class="time-range-inputs">

@@ -355,6 +355,14 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     this.refreshFilterOptions();
   }
 
+  onTimeRangeToggle() {
+    if (!this.timeRangeEnabled) {
+      // Al desactivar el check, limpiamos los valores para que sea evidente que no se aplican.
+      this.minStartTime = '';
+      this.maxEndTime = '';
+    }
+  }
+
   onLoadBase() {
     this.closeFilterDropdowns();
     this.blurActiveElement();
