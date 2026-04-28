@@ -34,6 +34,9 @@
         <button type="button" role="tab" [class.active]="activeTab === 'host'" (click)="setTab('host')">
             Por host
         </button>
+        <button type="button" role="tab" [class.active]="activeTab === 'host'" (click)="setTab('host')">
+            Por host
+        </button>
     </nav>
 
     <div *ngIf="error" class="vc-dashboard__error">{{ error }}</div>
