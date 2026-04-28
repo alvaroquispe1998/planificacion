@@ -34,9 +34,6 @@
         <button type="button" role="tab" [class.active]="activeTab === 'host'" (click)="setTab('host')">
             Por host
         </button>
-        <button type="button" role="tab" [class.active]="activeTab === 'host'" (click)="setTab('host')">
-            Por host
-        </button>
     </nav>
 
     <div *ngIf="error" class="vc-dashboard__error">{{ error }}</div>
@@ -425,6 +422,23 @@
             <div class="host-toolbar__meta" *ngIf="selectedHostId">
                 <span class="chip chip--primary">{{ hostSessions.length }} sesiones</span>
             </div>
+        </div>
+
+        <div class="host-legend" *ngIf="selectedHostId">
+            <span class="host-legend__label">Leyenda:</span>
+            <span class="host-legend__item">
+                <span class="host-legend__swatch host-legend__swatch--matched"></span>
+                Vinculada
+            </span>
+            <span class="host-legend__item">
+                <span class="host-legend__swatch host-legend__swatch--unmatched"></span>
+                Creada sin match
+            </span>
+            <span class="host-legend__item">
+                <span class="host-legend__swatch host-legend__swatch--error"></span>
+                Error
+            </span>
+            <span class="host-legend__hint">Haz clic en un bloque para ver el detalle.</span>
         </div>
 
         <section class="card card-wide host-calendar-card">

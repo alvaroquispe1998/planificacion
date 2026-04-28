@@ -218,6 +218,44 @@ h1 {
   font-weight: 600;
 }
 
+.time-range-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.time-range-toggle input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: #2563eb;
+}
+
+.time-range-toggle span {
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #1f2d3d;
+}
+
+.filter-time-range.is-disabled .time-range-inputs input[type='time'] {
+  background: #f3f6fa;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.filter-time-range.is-disabled .time-range-sep {
+  color: #c5cdd9;
+}
+
+.filter-time-range.is-disabled .filter-hint {
+  color: #94a3b8;
+}
+
 .filter-group.is-disabled {
   background: linear-gradient(180deg, rgba(248, 251, 255, 0.96), rgba(244, 248, 252, 0.96));
 }
