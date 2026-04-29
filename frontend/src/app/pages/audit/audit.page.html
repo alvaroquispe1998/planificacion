@@ -11,7 +11,7 @@
     <div class="hero-actions">
       <button type="button" class="btn btn-primary" (click)="syncPending()"
         [disabled]="loading || syncing || totals.pending_audit === 0"
-        [title]="totals.pending_audit === 0 ? 'No hay sesiones pendientes' : ('Sincroniza hasta ' + syncBatchSize + ' VCs pendientes')">
+        [title]="totals.pending_audit === 0 ? 'No hay sesiones pendientes' : ('Sincroniza automaticamente en lotes de ' + syncBatchSize + ' VCs')">
         {{ syncing
           ? ('Sincronizando ' + (syncProgress.processed || 0) + '/' + (syncProgress.total || 0) + '…')
           : ('Sincronizar pendientes' + (totals.pending_audit ? ' (' + totals.pending_audit + ')' : '')) }}

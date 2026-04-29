@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../../core/api.service';
 
 type AuditFilters = {
@@ -42,9 +43,9 @@ export class AuditPageComponent implements OnInit {
   rows: any[] = [];
   hideInherited = true;
   showDeleted = false;
-  // Sincronización masiva
+  // SincronizaciÃ³n masiva
   syncing = false;
-  readonly syncBatchSize = 50;
+  readonly syncBatchSize = 10;
   syncProgress: { processed: number; total: number } = { processed: 0, total: 0 };
   syncResultMessage = '';
   syncHadErrors = false;
@@ -390,16 +391,17 @@ export class AuditPageComponent implements OnInit {
     };
   }
 
-  syncPending() {
+  async syncPending() {
     if (this.syncing || this.totals.pending_audit === 0) return;
+
+    const initialPending = Math.max(0, Number(this.totals.pending_audit ?? 0));
     this.syncing = true;
     this.syncResultMessage = '';
     this.syncHadErrors = false;
-    this.syncProgress = { processed: 0, total: Math.min(this.syncBatchSize, this.totals.pending_audit) };
+    this.syncProgress = { processed: 0, total: initialPending };
     this.cdr.detectChanges();
 
     const payload: Record<string, string | number | boolean | undefined> = {
-      limit: this.syncBatchSize,
       semester_id: this.filters.semester_id || undefined,
       campus_id: this.filters.campus_id || undefined,
       faculty_id: this.filters.faculty_id || undefined,
@@ -412,33 +414,85 @@ export class AuditPageComponent implements OnInit {
       show_deleted: this.showDeleted,
     };
 
-    this.api.syncPendingPlanningVideoconferences(payload).subscribe({
-      next: (res) => {
-        this.syncing = false;
-        this.syncProgress = { processed: res.processed, total: res.processed };
-        this.syncHadErrors = (res.errors ?? 0) > 0;
-        const remaining = Math.max(0, (res.total_pending ?? 0) - res.processed);
-        const parts = [
-          `${res.synced ?? 0} sincronizadas`,
-          `${res.reconciled ?? 0} reconciliadas`,
-        ];
-        if ((res.errors ?? 0) > 0) parts.push(`${res.errors} con error`);
-        if (remaining > 0) parts.push(`quedan ${remaining} pendientes — vuelve a presionar para continuar`);
-        this.syncResultMessage = `Lote procesado: ${res.processed} VC. ${parts.join(' · ')}.`;
-        this.loadRows();
-      },
-      error: (err) => {
-        this.syncing = false;
-        this.syncHadErrors = true;
-        this.syncResultMessage = err?.error?.message ?? 'No se pudo ejecutar la sincronización masiva.';
+    let processed = 0;
+    let synced = 0;
+    let reconciled = 0;
+    let errors = 0;
+    let remaining = initialPending;
+
+    try {
+      while (remaining > 0) {
+        const res = await firstValueFrom(
+          this.api.syncPendingPlanningVideoconferences({
+            ...payload,
+            limit: this.syncBatchSize,
+          }),
+        );
+
+        const batchProcessed = Math.max(0, Number(res?.processed ?? 0));
+        processed += batchProcessed;
+        synced += Math.max(0, Number(res?.synced ?? 0));
+        reconciled += Math.max(0, Number(res?.reconciled ?? 0));
+        errors += Math.max(0, Number(res?.errors ?? 0));
+        remaining = Math.max(0, Number(res?.total_pending ?? remaining) - batchProcessed);
+        this.syncProgress = {
+          processed: Math.min(initialPending, processed),
+          total: initialPending,
+        };
         this.cdr.detectChanges();
-      },
-    });
+
+        if (batchProcessed === 0) {
+          break;
+        }
+      }
+
+      this.syncing = false;
+      this.syncHadErrors = errors > 0;
+      const parts = [
+        `${synced} sincronizadas`,
+        `${reconciled} reconciliadas`,
+      ];
+      if (errors > 0) parts.push(`${errors} con error`);
+      if (remaining > 0) {
+        parts.push(`quedan ${remaining} pendientes`);
+      } else {
+        parts.push('sin pendientes restantes');
+      }
+      this.syncResultMessage = `Proceso completado: ${processed} VC. ${parts.join(' | ')}.`;
+      this.loadRows();
+    } catch (err: any) {
+      this.syncing = false;
+      this.syncHadErrors = true;
+      this.syncProgress = {
+        processed: Math.min(initialPending, processed),
+        total: initialPending,
+      };
+      if (this.isGatewaySyncError(err)) {
+        this.syncResultMessage = processed > 0
+          ? `La conexion se corto despues de procesar ${processed} VC. Recargando la lista para reflejar el avance real.`
+          : 'La conexion se corto durante la sincronizacion. Recargando la lista para reflejar cualquier avance aplicado en el servidor.';
+        this.loadRows();
+        return;
+      }
+      this.syncResultMessage = err?.error?.message ?? 'No se pudo ejecutar la sincronización masiva.';
+      this.cdr.detectChanges();
+    }
   }
 
   dismissSyncResult() {
     this.syncResultMessage = '';
     this.syncHadErrors = false;
     this.cdr.detectChanges();
+  }
+
+  private isGatewaySyncError(err: any) {
+    const message = err?.error?.message ?? err?.message ?? '';
+    return (
+      err?.status === 0 ||
+      err?.status === 502 ||
+      err?.status === 503 ||
+      err?.status === 504 ||
+      (typeof message === 'string' && /Cannot GET \//i.test(message))
+    );
   }
 }

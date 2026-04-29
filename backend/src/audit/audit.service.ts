@@ -844,14 +844,12 @@ export class AuditService {
   ): Promise<{ processed: number; synced: number; reconciled: number; errors: number; total_pending: number; details: Array<{ id: string; ok: boolean; error?: string }> }> {
     const limit = Math.max(1, Math.min(500, Number(filters.limit ?? 100) || 100));
 
-    // Selecciona IDs candidatos: link_mode OWNED, no eliminados,
-    // con audit_sync_status PENDING/NULL o sin zoom_meeting_id (sin matchear).
+    // Selecciona IDs candidatos: link_mode OWNED, no eliminados
+    // y todavia pendientes de sincronizacion.
     const baseQuery = this.buildPlanningAuditBaseQuery(filters)
       .select('vc.id', 'id')
       .andWhere("vc.link_mode = 'OWNED'")
-      .andWhere(
-        "(COALESCE(vc.audit_sync_status, 'PENDING') = 'PENDING' OR vc.zoom_meeting_id IS NULL)",
-      )
+      .andWhere("COALESCE(vc.audit_sync_status, 'PENDING') = 'PENDING'")
       .andWhere("(vc.delete_status IS NULL OR vc.delete_status <> 'DELETED')")
       .orderBy('vc.conference_date', 'ASC')
       .addOrderBy('vc.start_time', 'ASC');
