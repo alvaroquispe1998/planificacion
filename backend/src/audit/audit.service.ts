@@ -833,6 +833,64 @@ export class AuditService {
     }
   }
 
+  /**
+   * Sincronización masiva: ejecuta `syncPlanningVideoconference` para cada VC
+   * pendiente (audit_sync_status PENDING/null o status MATCHED sin sync) que
+   * coincida con los filtros recibidos. Procesa de a lotes pequeños para no
+   * saturar la API de Zoom.
+   */
+  async syncPendingPlanningVideoconferences(
+    filters: PlanningAuditFilters & { limit?: number } = {},
+  ): Promise<{ processed: number; synced: number; reconciled: number; errors: number; total_pending: number; details: Array<{ id: string; ok: boolean; error?: string }> }> {
+    const limit = Math.max(1, Math.min(500, Number(filters.limit ?? 100) || 100));
+
+    // Selecciona IDs candidatos: link_mode OWNED, no eliminados,
+    // con audit_sync_status PENDING/NULL o sin zoom_meeting_id (sin matchear).
+    const baseQuery = this.buildPlanningAuditBaseQuery(filters)
+      .select('vc.id', 'id')
+      .andWhere("vc.link_mode = 'OWNED'")
+      .andWhere(
+        "(COALESCE(vc.audit_sync_status, 'PENDING') = 'PENDING' OR vc.zoom_meeting_id IS NULL)",
+      )
+      .andWhere("(vc.delete_status IS NULL OR vc.delete_status <> 'DELETED')")
+      .orderBy('vc.conference_date', 'ASC')
+      .addOrderBy('vc.start_time', 'ASC');
+
+    const totalPending = await baseQuery.clone().getCount();
+    const rows = await baseQuery.limit(limit).getRawMany<{ id: string }>();
+
+    const result = {
+      processed: 0,
+      synced: 0,
+      reconciled: 0,
+      errors: 0,
+      total_pending: totalPending,
+      details: [] as Array<{ id: string; ok: boolean; error?: string }>,
+    };
+
+    for (const row of rows) {
+      result.processed += 1;
+      try {
+        // Re-fetch to know if reconcile or sync ran; sync method handles both.
+        const before = await this.planningVideoconferencesRepo.findOne({ where: { id: row.id } });
+        await this.syncPlanningVideoconference(row.id);
+        const after = await this.planningVideoconferencesRepo.findOne({ where: { id: row.id } });
+        if (before && !before.zoom_meeting_id && after?.zoom_meeting_id) {
+          result.reconciled += 1;
+        }
+        if (after?.audit_sync_status === 'SYNCED') {
+          result.synced += 1;
+        }
+        result.details.push({ id: row.id, ok: true });
+      } catch (error) {
+        result.errors += 1;
+        result.details.push({ id: row.id, ok: false, error: this.toErrorMessage(error) });
+      }
+    }
+
+    return result;
+  }
+
   private buildPlanningAuditQuery(filters: PlanningAuditFilters = {}) {
     const query = this.buildPlanningAuditBaseQuery(filters)
       .select('vc.id', 'id')
