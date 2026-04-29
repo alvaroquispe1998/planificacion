@@ -844,6 +844,33 @@ export class AuditService {
   ): Promise<{ processed: number; synced: number; reconciled: number; errors: number; total_pending: number; details: Array<{ id: string; ok: boolean; error?: string }> }> {
     const limit = Math.max(1, Math.min(500, Number(filters.limit ?? 100) || 100));
 
+    // Fix inherited VCs that point to an already synced/error owner
+    try {
+      await this.planningVideoconferencesRepo.manager.query(`
+        UPDATE planning_subsection_videoconferences child
+        INNER JOIN planning_subsection_videoconferences owner 
+          ON child.owner_videoconference_id = owner.id
+        SET 
+          child.zoom_user_id = owner.zoom_user_id,
+          child.zoom_user_email = owner.zoom_user_email,
+          child.zoom_user_name = owner.zoom_user_name,
+          child.zoom_meeting_id = owner.zoom_meeting_id,
+          child.topic = owner.topic,
+          child.join_url = owner.join_url,
+          child.start_url = owner.start_url,
+          child.status = owner.status,
+          child.audit_sync_status = owner.audit_sync_status,
+          child.audit_synced_at = owner.audit_synced_at,
+          child.audit_sync_error = owner.audit_sync_error,
+          child.updated_at = NOW()
+        WHERE child.link_mode = 'INHERITED' 
+          AND COALESCE(child.audit_sync_status, 'PENDING') = 'PENDING'
+          AND owner.audit_sync_status IN ('SYNCED', 'ERROR')
+      `);
+    } catch (e) {
+      // no-op
+    }
+
     // Selecciona IDs candidatos: link_mode OWNED, no eliminados
     // y todavia pendientes de sincronizacion.
     const baseQuery = this.buildPlanningAuditBaseQuery(filters)
