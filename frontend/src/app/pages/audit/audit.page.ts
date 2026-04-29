@@ -42,6 +42,12 @@ export class AuditPageComponent implements OnInit {
   rows: any[] = [];
   hideInherited = true;
   showDeleted = false;
+  // Sincronización masiva
+  syncing = false;
+  readonly syncBatchSize = 50;
+  syncProgress: { processed: number; total: number } = { processed: 0, total: 0 };
+  syncResultMessage = '';
+  syncHadErrors = false;
   totals = {
     total: 0,
     sessions: 0,
@@ -382,5 +388,57 @@ export class AuditPageComponent implements OnInit {
       page: this.page,
       page_size: this.pageSize,
     };
+  }
+
+  syncPending() {
+    if (this.syncing || this.totals.pending_audit === 0) return;
+    this.syncing = true;
+    this.syncResultMessage = '';
+    this.syncHadErrors = false;
+    this.syncProgress = { processed: 0, total: Math.min(this.syncBatchSize, this.totals.pending_audit) };
+    this.cdr.detectChanges();
+
+    const payload: Record<string, string | number | boolean | undefined> = {
+      limit: this.syncBatchSize,
+      semester_id: this.filters.semester_id || undefined,
+      campus_id: this.filters.campus_id || undefined,
+      faculty_id: this.filters.faculty_id || undefined,
+      academic_program_id: this.filters.academic_program_id || undefined,
+      status: this.filters.status || undefined,
+      audit_sync_status: this.filters.audit_sync_status || undefined,
+      course_code: this.filters.course_code || undefined,
+      search: this.filters.search || undefined,
+      hide_inherited: this.hideInherited,
+      show_deleted: this.showDeleted,
+    };
+
+    this.api.syncPendingPlanningVideoconferences(payload).subscribe({
+      next: (res) => {
+        this.syncing = false;
+        this.syncProgress = { processed: res.processed, total: res.processed };
+        this.syncHadErrors = (res.errors ?? 0) > 0;
+        const remaining = Math.max(0, (res.total_pending ?? 0) - res.processed);
+        const parts = [
+          `${res.synced ?? 0} sincronizadas`,
+          `${res.reconciled ?? 0} reconciliadas`,
+        ];
+        if ((res.errors ?? 0) > 0) parts.push(`${res.errors} con error`);
+        if (remaining > 0) parts.push(`quedan ${remaining} pendientes — vuelve a presionar para continuar`);
+        this.syncResultMessage = `Lote procesado: ${res.processed} VC. ${parts.join(' · ')}.`;
+        this.loadRows();
+      },
+      error: (err) => {
+        this.syncing = false;
+        this.syncHadErrors = true;
+        this.syncResultMessage = err?.error?.message ?? 'No se pudo ejecutar la sincronización masiva.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  dismissSyncResult() {
+    this.syncResultMessage = '';
+    this.syncHadErrors = false;
+    this.cdr.detectChanges();
   }
 }

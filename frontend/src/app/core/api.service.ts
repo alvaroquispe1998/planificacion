@@ -513,6 +513,17 @@ export class ApiService {
     return this.http.post<any>(`${this.baseUrl}/audit/planning-videoconferences/${id}/sync`, {});
   }
 
+  syncPendingPlanningVideoconferences(payload: Record<string, string | number | boolean | undefined> = {}) {
+    return this.http.post<{
+      processed: number;
+      synced: number;
+      reconciled: number;
+      errors: number;
+      total_pending: number;
+      details: Array<{ id: string; ok: boolean; error?: string }>;
+    }>(`${this.baseUrl}/audit/planning-videoconferences/sync-pending`, payload);
+  }
+
   getZoomPool() {
     return this.http.get<any>(`${this.baseUrl}/settings/zoom/pool`);
   }

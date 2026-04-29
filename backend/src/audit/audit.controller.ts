@@ -242,4 +242,36 @@ export class AuditController {
   syncPlanningVideoconference(@Param('id') id: string) {
     return this.auditService.syncPlanningVideoconference(id);
   }
+
+  @Post('planning-videoconferences/sync-pending')
+  syncPendingPlanningVideoconferences(
+    @Body()
+    body: {
+      limit?: number;
+      semester_id?: string;
+      campus_id?: string;
+      faculty_id?: string;
+      academic_program_id?: string;
+      status?: string;
+      audit_sync_status?: string;
+      course_code?: string;
+      search?: string;
+      hide_inherited?: boolean;
+      show_deleted?: boolean;
+    } = {},
+  ) {
+    return this.auditService.syncPendingPlanningVideoconferences({
+      limit: body.limit,
+      semester_id: body.semester_id,
+      campus_id: body.campus_id,
+      faculty_id: body.faculty_id,
+      academic_program_id: body.academic_program_id,
+      status: body.status,
+      audit_sync_status: body.audit_sync_status,
+      course_code: body.course_code,
+      search: body.search,
+      hide_inherited: body.hide_inherited,
+      show_deleted: body.show_deleted,
+    });
+  }
 }
