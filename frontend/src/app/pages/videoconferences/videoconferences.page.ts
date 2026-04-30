@@ -55,6 +55,7 @@ type AppliedFilterSnapshot = {
   selectedDays: string[];
   minStartTime: string;
   maxEndTime: string;
+  mergeTheoryPracticeBlocks: boolean;
 };
 
 @Component({
@@ -79,6 +80,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   maxEndTime = '';
   /** Cuando está desactivado, no se aplica el filtro por rango horario. */
   timeRangeEnabled = false;
+  mergeTheoryPracticeBlocks = false;
   selectedZoomGroupId = '';
   zoomGroups: ZoomGroupItem[] = [];
   hybridZoomUsers: { id: string; label: string }[] = [];
@@ -348,6 +350,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     this.minStartTime = '';
     this.maxEndTime = '';
     this.timeRangeEnabled = false;
+    this.mergeTheoryPracticeBlocks = false;
     this.closeOverrideEditor();
     this.resetPreviewState();
     this.closeFilterDropdowns();
@@ -361,6 +364,11 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       this.minStartTime = '';
       this.maxEndTime = '';
     }
+  }
+
+  onMergeTheoryPracticeToggle() {
+    this.closeOverrideEditor();
+    this.resetPreviewState();
   }
 
   onLoadBase() {
@@ -831,6 +839,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       occurrenceKeys: [draft.occurrenceKey],
       startDate: draft.startDate,
       endDate: draft.endDate,
+      mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
       temporaryOverrides: [draft.override],
     }).subscribe({
       next: (response) => {
@@ -869,6 +878,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       startDate: draft.startDate,
       endDate: draft.endDate,
       allowPoolWarnings: allowPoolWarnings || undefined,
+      mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
       preferredHosts: this.overrideHostPreview?.zoom_user_id
         ? [{
             scheduleId: draft.override.scheduleId,
@@ -1023,6 +1033,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
           occurrenceKeys: this.buildOwnerOccurrenceKeysForGeneration(selected),
           startDate: this.startDate,
           endDate: this.endDate,
+          mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
           preferredHosts,
         }
       : {
@@ -1038,6 +1049,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
           ),
           startDate: this.startDate,
           endDate: this.endDate,
+          mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
           preferredHosts,
         };
     this.executeGeneration(payload, false);
@@ -1099,12 +1111,14 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
             occurrenceKeys: selected.map((item) => item.occurrence_key),
             startDate: this.startDate,
             endDate: this.endDate,
+            mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
           }
       : {
             zoomGroupId: this.selectedZoomGroupId,
             scheduleIds: selected.map((item) => item.schedule_id),
             startDate: this.startDate || undefined,
             endDate: this.endDate || undefined,
+            mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
           };
 
     this.api.assignmentPreview(payload).subscribe({
@@ -1439,6 +1453,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       selectedDays: [...this.selectedDays],
       minStartTime: this.timeRangeEnabled ? this.minStartTime : '',
       maxEndTime: this.timeRangeEnabled ? this.maxEndTime : '',
+      mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks,
     };
   }
 
@@ -1456,6 +1471,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     const max = (snapshot.maxEndTime || '').trim();
     if (min || max) {
       labels.push(`Hora: ${min || '--:--'} - ${max || '--:--'}`);
+    }
+    if (snapshot.mergeTheoryPracticeBlocks) {
+      labels.push('Mezclar teoria/practica');
     }
     return labels;
   }
@@ -1611,9 +1629,11 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
           ...this.buildCatalogFilters(),
           startDate: this.startDate || undefined,
           endDate: this.endDate || undefined,
+          mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
         }
       : {
           ...this.buildCatalogFilters(),
+          mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
         };
   }
 
@@ -1859,6 +1879,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       occurrenceKeys,
       startDate: this.startDate,
       endDate: this.endDate,
+      mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
       preferredHosts,
     }, false);
   }
@@ -2091,6 +2112,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       startDate: string;
       endDate: string;
       allowPoolWarnings?: boolean;
+      mergeTheoryPracticeBlocks?: boolean;
       preferredHosts?: Array<{
         scheduleId: string;
         conferenceDate?: string;
@@ -2206,6 +2228,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       startDate: string;
       endDate: string;
       allowPoolWarnings?: boolean;
+      mergeTheoryPracticeBlocks?: boolean;
       preferredHosts?: Array<{ scheduleId: string; conferenceDate?: string; zoomUserId: string }>;
     },
     hasConfirmedWarnings: boolean,

@@ -142,6 +142,8 @@ type ScheduleContextRow = {
     day_of_week: string;
     start_time: string;
     end_time: string;
+    session_type: 'THEORY' | 'PRACTICE' | 'LAB' | 'OTHER';
+    source_session_type_code: string | null;
     duration_minutes: number;
 };
 
@@ -337,6 +339,10 @@ type ContinuousBlockInfo = {
     family_schedule_ids: string[];
     grouped_subsection_codes: string[];
     grouped_subsection_labels: string[];
+};
+
+type OperationalInheritanceOptions = {
+    mergeTheoryPracticeBlocks?: boolean;
 };
 
 type InheritanceCandidateBlock = {
@@ -1064,6 +1070,9 @@ export class VideoconferenceService implements OnModuleInit {
         const includeAll = filters.includeAll === true;
         const includeSplit = filters.includeSplit === true;
         const expandGroups = filters.expandGroups === true;
+        const inheritanceOptions: OperationalInheritanceOptions = {
+            mergeTheoryPracticeBlocks: filters.mergeTheoryPracticeBlocks === true,
+        };
 
         let requestedRows = await this.getScheduleRows(filters);
         // includeAll bypasses split filtering (used by the Cursos Especiales admin page)
@@ -1104,7 +1113,7 @@ export class VideoconferenceService implements OnModuleInit {
 
         const requestedScheduleIds = requestedRows.map((row) => row.schedule_id);
         const requestedScheduleIdSet = new Set<string>(requestedScheduleIds);
-        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(requestedRows);
+        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(requestedRows, inheritanceOptions);
         const expandedScheduleIds = new Set<string>(requestedScheduleIds);
         for (const scheduleId of requestedScheduleIds) {
             const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
@@ -1117,7 +1126,7 @@ export class VideoconferenceService implements OnModuleInit {
             }
         }
         const allRows = await this.getScheduleRows(undefined, Array.from(expandedScheduleIds));
-        const inheritanceIndex = await this.buildOperationalInheritanceIndex(allRows);
+        const inheritanceIndex = await this.buildOperationalInheritanceIndex(allRows, inheritanceOptions);
         const hasStartDate = Boolean(filters.startDate?.trim());
         const hasEndDate = Boolean(filters.endDate?.trim());
         if (hasStartDate !== hasEndDate) {
@@ -1409,9 +1418,12 @@ export class VideoconferenceService implements OnModuleInit {
             ? scheduleIds
             : uniqueIds(occurrenceKeys.map((item) => parseOccurrenceKey(item).schedule_id).filter(Boolean));
         const selectedFilters = this.extractAssignmentPreviewFilters(payload);
+        const inheritanceOptions: OperationalInheritanceOptions = {
+            mergeTheoryPracticeBlocks: payload.mergeTheoryPracticeBlocks === true,
+        };
         const expanded = useCurrentFilters
-            ? await this.buildExpandedScheduleContextFromFilters(selectedFilters)
-            : await this.buildExpandedScheduleContext(requestedScheduleIds);
+            ? await this.buildExpandedScheduleContextFromFilters(selectedFilters, inheritanceOptions)
+            : await this.buildExpandedScheduleContext(requestedScheduleIds, inheritanceOptions);
         const hostRuleMap = await this.getActiveHostRuleMap();
 
         if (!hasStartDate || !hasEndDate) {
@@ -1482,20 +1494,29 @@ export class VideoconferenceService implements OnModuleInit {
         };
     }
 
-    private async buildExpandedScheduleContext(requestedScheduleIds: string[]) {
+    private async buildExpandedScheduleContext(
+        requestedScheduleIds: string[],
+        inheritanceOptions: OperationalInheritanceOptions = {},
+    ) {
         const requestedRows = await this.getScheduleRows(undefined, requestedScheduleIds);
-        return this.buildExpandedScheduleContextFromRequestedRows(requestedRows);
+        return this.buildExpandedScheduleContextFromRequestedRows(requestedRows, inheritanceOptions);
     }
 
-    private async buildExpandedScheduleContextFromFilters(filters?: FilterOptionsDto) {
+    private async buildExpandedScheduleContextFromFilters(
+        filters?: FilterOptionsDto,
+        inheritanceOptions: OperationalInheritanceOptions = {},
+    ) {
         const requestedRows = await this.getScheduleRows(filters);
-        return this.buildExpandedScheduleContextFromRequestedRows(requestedRows);
+        return this.buildExpandedScheduleContextFromRequestedRows(requestedRows, inheritanceOptions);
     }
 
-    private async buildExpandedScheduleContextFromRequestedRows(requestedRows: ScheduleContextRow[]) {
+    private async buildExpandedScheduleContextFromRequestedRows(
+        requestedRows: ScheduleContextRow[],
+        inheritanceOptions: OperationalInheritanceOptions = {},
+    ) {
         const requestedScheduleIds = uniqueIds(requestedRows.map((row) => row.schedule_id));
         const scopedRows = await this.getRowsForRequestedScope(requestedRows);
-        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(scopedRows);
+        const requestedInheritanceIndex = await this.buildOperationalInheritanceIndex(scopedRows, inheritanceOptions);
         const expandedScheduleIds = new Set<string>(requestedScheduleIds);
         for (const scheduleId of requestedScheduleIds) {
             const inherited = requestedInheritanceIndex.byChild.get(scheduleId);
@@ -1508,7 +1529,7 @@ export class VideoconferenceService implements OnModuleInit {
             }
         }
         const rows = scopedRows.filter((row) => expandedScheduleIds.has(row.schedule_id));
-        const inheritanceIndex = await this.buildOperationalInheritanceIndex(rows);
+        const inheritanceIndex = await this.buildOperationalInheritanceIndex(rows, inheritanceOptions);
         return {
             requestedRows,
             rows,
@@ -3139,14 +3160,17 @@ export class VideoconferenceService implements OnModuleInit {
         const requestedScheduleIds = scheduleIds.length
             ? scheduleIds
             : Array.from(new Set(occurrenceKeys.map((item) => parseOccurrenceKey(item).schedule_id).filter(Boolean)));
-        const expanded = await this.buildExpandedScheduleContext(requestedScheduleIds);
+        const inheritanceOptions: OperationalInheritanceOptions = {
+            mergeTheoryPracticeBlocks: payload.mergeTheoryPracticeBlocks === true,
+        };
+        const expanded = await this.buildExpandedScheduleContext(requestedScheduleIds, inheritanceOptions);
         const requestedRows = expanded.requestedRows;
         const missingScheduleIds = requestedScheduleIds.filter(
             (scheduleId) => !requestedRows.some((row) => row.schedule_id === scheduleId),
         );
         const rows = expanded.rows;
         const rowMap = new Map(rows.map((row) => [row.schedule_id, row] as const));
-        const inheritanceIndex = await this.buildOperationalInheritanceIndex(Array.from(rowMap.values()));
+        const inheritanceIndex = expanded.inheritanceIndex;
         const preferredHosts = this.normalizePreferredHosts(payload.preferredHosts);
         const temporaryOverrides = this.normalizeTemporaryOverrides(payload.temporaryOverrides, rowMap);
 
@@ -4285,6 +4309,8 @@ export class VideoconferenceService implements OnModuleInit {
             .addSelect('schedule.day_of_week', 'day_of_week')
             .addSelect('schedule.start_time', 'start_time')
             .addSelect('schedule.end_time', 'end_time')
+            .addSelect('schedule.session_type', 'session_type')
+            .addSelect('schedule.source_session_type_code', 'source_session_type_code')
             .addSelect('schedule.duration_minutes', 'duration_minutes');
 
         this.applyScheduleFilters(qb, filters, scheduleIds);
@@ -4353,6 +4379,8 @@ export class VideoconferenceService implements OnModuleInit {
             day_of_week: readString(row.day_of_week),
             start_time: compactTime(readString(row.start_time)),
             end_time: compactTime(readString(row.end_time)),
+            session_type: normalizePlanningSessionType(row.session_type),
+            source_session_type_code: readNullableString(row.source_session_type_code),
             duration_minutes: readNumber(row.duration_minutes) || calculateDurationMinutes(
                 readString(row.start_time),
                 readString(row.end_time),
@@ -5346,7 +5374,10 @@ export class VideoconferenceService implements OnModuleInit {
         return { byChild, childrenByParent };
     }
 
-    private async buildOperationalInheritanceIndex(rows: ScheduleContextRow[]): Promise<InheritanceIndex> {
+    private async buildOperationalInheritanceIndex(
+        rows: ScheduleContextRow[],
+        options: OperationalInheritanceOptions = {},
+    ): Promise<InheritanceIndex> {
         const baseIndex = await this.buildInheritanceIndex(rows.map((row) => row.schedule_id));
         const byChild = new Map(baseIndex.byChild);
         const childrenByParent = new Map<string, ScheduleInheritanceMapping[]>();
@@ -5360,7 +5391,7 @@ export class VideoconferenceService implements OnModuleInit {
         // the remaining rows should still be merged together.
         const hostRuleMap = await this.getActiveHostRuleMap();
 
-        const continuousMappings = this.buildContinuousBlockMappings(rows, baseIndex, hostRuleMap);
+        const continuousMappings = this.buildContinuousBlockMappings(rows, baseIndex, hostRuleMap, options);
         for (const mapping of continuousMappings) {
             byChild.set(mapping.child_schedule_id, mapping);
             const siblings = childrenByParent.get(mapping.parent_schedule_id) ?? [];
@@ -5375,6 +5406,7 @@ export class VideoconferenceService implements OnModuleInit {
         rows: ScheduleContextRow[],
         inheritanceIndex: InheritanceIndex,
         hostRuleMap: Map<string, { zoom_user_id: string | null; zoom_group_id: string | null; skip_zoom: boolean }> = new Map(),
+        options: OperationalInheritanceOptions = {},
     ) {
         const explicitChildIds = new Set(inheritanceIndex.byChild.keys());
         const groups = new Map<string, ScheduleContextRow[]>();
@@ -5452,7 +5484,8 @@ export class VideoconferenceService implements OnModuleInit {
                 return compactTime(right.end_time).localeCompare(compactTime(left.end_time)); // Mas largo primero si empiezan igual
             });
 
-            let owner = ordered[0];
+            const continuousChains: ScheduleContextRow[][] = [];
+            let currentChain: ScheduleContextRow[] = [ordered[0]];
             let blockMaxEndTime = compactTime(ordered[0].end_time);
 
             for (let index = 1; index < ordered.length; index += 1) {
@@ -5461,6 +5494,35 @@ export class VideoconferenceService implements OnModuleInit {
 
                 // Si el siguiente empieza antes o justo cuando termina el bloque actual, es continuo/traslapado
                 if (currentStartTime <= blockMaxEndTime) {
+                    currentChain.push(current);
+
+                    const currentEndTime = compactTime(current.end_time);
+                    if (currentEndTime > blockMaxEndTime) {
+                        blockMaxEndTime = currentEndTime;
+                    }
+                    continue;
+                }
+
+                continuousChains.push(currentChain);
+                currentChain = [current];
+                blockMaxEndTime = compactTime(current.end_time);
+            }
+            continuousChains.push(currentChain);
+
+            for (const chain of continuousChains) {
+                if (chain.length < 2) {
+                    continue;
+                }
+                const shouldKeepIndependent =
+                    options.mergeTheoryPracticeBlocks !== true &&
+                    !chain.some((row) => hostRuleMap.has(row.schedule_id)) &&
+                    isMixedTheoryPracticeChain(chain);
+                if (shouldKeepIndependent) {
+                    continue;
+                }
+
+                const owner = chain[0];
+                for (const current of chain.slice(1)) {
                     mappings.push({
                         id: null,
                         parent_schedule_id: owner.schedule_id,
@@ -5470,16 +5532,7 @@ export class VideoconferenceService implements OnModuleInit {
                         created_at: new Date(0),
                         updated_at: new Date(0),
                     });
-
-                    const currentEndTime = compactTime(current.end_time);
-                    if (currentEndTime > blockMaxEndTime) {
-                        blockMaxEndTime = currentEndTime;
-                    }
-                    continue;
                 }
-
-                owner = current;
-                blockMaxEndTime = compactTime(current.end_time);
             }
         }
 
@@ -7037,6 +7090,22 @@ function buildSectionDisplayCode(sectionCode: string | null | undefined, section
 
 function buildScheduleLabel(row: Pick<ScheduleContextRow, 'day_of_week' | 'start_time' | 'end_time'>) {
     return `${displayDay(row.day_of_week)} ${compactTime(row.start_time)}-${compactTime(row.end_time)}`;
+}
+
+function normalizePlanningSessionType(value: unknown): ScheduleContextRow['session_type'] {
+    const normalized = String(value ?? '').trim().toUpperCase();
+    if (normalized === 'THEORY' || normalized === 'PRACTICE' || normalized === 'LAB') {
+        return normalized;
+    }
+    return 'OTHER';
+}
+
+function isMixedTheoryPracticeChain(rows: ScheduleContextRow[]) {
+    if (rows.length < 3) {
+        return false;
+    }
+    const types = new Set(rows.map((row) => row.session_type));
+    return types.has('THEORY') && (types.has('PRACTICE') || types.has('LAB'));
 }
 
 function buildVacancyLabel(

@@ -23,6 +23,8 @@ export interface VideoconferencePreviewDto extends FilterOptionsDto {
     includeAll?: boolean;
     /** Return each schedule as its own independent row (no continuous-block grouping) */
     expandGroups?: boolean;
+    /** Merge regular 3+ mixed theory/practice continuous blocks instead of keeping them independent. */
+    mergeTheoryPracticeBlocks?: boolean;
 }
 
 export interface FilterCatalogOption {
@@ -687,6 +689,7 @@ export class VideoconferenceApiService {
         occurrenceKeys?: string[];
         startDate?: string;
         endDate?: string;
+        mergeTheoryPracticeBlocks?: boolean;
         temporaryOverrides?: VideoconferenceTemporaryOverridePayload[];
     }) {
         return this.http.post<VideoconferenceAssignmentPreviewResponse>(`${this.baseUrl}/assignment-preview`, payload);
@@ -699,6 +702,7 @@ export class VideoconferenceApiService {
         startDate: string;
         endDate: string;
         allowPoolWarnings?: boolean;
+        mergeTheoryPracticeBlocks?: boolean;
         preferredHosts?: Array<{
             scheduleId: string;
             conferenceDate?: string;

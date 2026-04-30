@@ -128,6 +128,21 @@
               : 'Activa la casilla para filtrar por rango horario.' }}
           </small>
         </div>
+
+        <div class="filter-group filter-merge-mode">
+          <label class="time-range-toggle">
+            <input
+              type="checkbox"
+              [(ngModel)]="mergeTheoryPracticeBlocks"
+              (change)="onMergeTheoryPracticeToggle()" />
+            <span>Mezclar teoria/practica</span>
+          </label>
+          <small class="filter-hint">
+            {{ mergeTheoryPracticeBlocks
+              ? 'Une bloques continuos mixtos como antes.'
+              : 'Separa cadenas mixtas de 3 o mas bloques.' }}
+          </small>
+        </div>
       </div>
 
       <aside class="filters-action-card">
