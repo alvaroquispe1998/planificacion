@@ -97,6 +97,15 @@ export class PreviewVideoconferenceDto extends FilterOptionsDto {
     @Type(() => Boolean)
     @IsBoolean()
     expandGroups?: boolean;
+
+    /**
+     * When enabled, regular courses keep merging continuous theory/practice blocks.
+     * Default is false so 3+ mixed theory/practice blocks stay independent.
+     */
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    mergeTheoryPracticeBlocks?: boolean;
 }
 
 export class AssignmentPreviewVideoconferenceDto extends FilterOptionsDto {
@@ -134,6 +143,11 @@ export class AssignmentPreviewVideoconferenceDto extends FilterOptionsDto {
     @ValidateNested({ each: true })
     @Type(() => TemporaryVideoconferenceOverrideDto)
     temporaryOverrides?: TemporaryVideoconferenceOverrideDto[];
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    mergeTheoryPracticeBlocks?: boolean;
 }
 
 export class GenerateVideoconferenceDto {
@@ -175,6 +189,11 @@ export class GenerateVideoconferenceDto {
     @ValidateNested({ each: true })
     @Type(() => TemporaryVideoconferenceOverrideDto)
     temporaryOverrides?: TemporaryVideoconferenceOverrideDto[];
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    mergeTheoryPracticeBlocks?: boolean;
 }
 
 export class GeneratePreferredHostDto {
