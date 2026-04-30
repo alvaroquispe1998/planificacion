@@ -135,12 +135,12 @@
               type="checkbox"
               [(ngModel)]="mergeTheoryPracticeBlocks"
               (change)="onMergeTheoryPracticeToggle()" />
-            <span>Mezclar teoria/practica</span>
+            <span>Mezclar bloques 3+</span>
           </label>
           <small class="filter-hint">
             {{ mergeTheoryPracticeBlocks
-              ? 'Une bloques continuos mixtos como antes.'
-              : 'Separa cadenas mixtas de 3 o mas bloques.' }}
+              ? 'Une cadenas continuas de 3 o mas bloques.'
+              : 'Separa cadenas continuas de 3 o mas bloques.' }}
           </small>
         </div>
       </div>

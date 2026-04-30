@@ -1472,9 +1472,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     if (min || max) {
       labels.push(`Hora: ${min || '--:--'} - ${max || '--:--'}`);
     }
-    if (snapshot.mergeTheoryPracticeBlocks) {
-      labels.push('Mezclar teoria/practica');
-    }
+  if (snapshot.mergeTheoryPracticeBlocks) {
+      labels.push('Mezclar bloques 3+');
+  }
     return labels;
   }
 
