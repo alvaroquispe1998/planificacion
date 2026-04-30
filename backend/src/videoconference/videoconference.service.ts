@@ -5516,7 +5516,7 @@ export class VideoconferenceService implements OnModuleInit {
                 const shouldKeepIndependent =
                     options.mergeTheoryPracticeBlocks !== true &&
                     !chain.some((row) => hostRuleMap.has(row.schedule_id)) &&
-                    isMixedTheoryPracticeChain(chain);
+                    isLongContinuousChain(chain);
                 if (shouldKeepIndependent) {
                     continue;
                 }
@@ -7100,12 +7100,8 @@ function normalizePlanningSessionType(value: unknown): ScheduleContextRow['sessi
     return 'OTHER';
 }
 
-function isMixedTheoryPracticeChain(rows: ScheduleContextRow[]) {
-    if (rows.length < 3) {
-        return false;
-    }
-    const types = new Set(rows.map((row) => row.session_type));
-    return types.has('THEORY') && (types.has('PRACTICE') || types.has('LAB'));
+function isLongContinuousChain(rows: ScheduleContextRow[]) {
+    return rows.length >= 3;
 }
 
 function buildVacancyLabel(

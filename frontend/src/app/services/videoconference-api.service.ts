@@ -23,7 +23,7 @@ export interface VideoconferencePreviewDto extends FilterOptionsDto {
     includeAll?: boolean;
     /** Return each schedule as its own independent row (no continuous-block grouping) */
     expandGroups?: boolean;
-    /** Merge regular 3+ mixed theory/practice continuous blocks instead of keeping them independent. */
+    /** Merge regular 3+ continuous blocks instead of keeping them independent. */
     mergeTheoryPracticeBlocks?: boolean;
 }
 

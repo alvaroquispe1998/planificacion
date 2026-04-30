@@ -99,8 +99,8 @@ export class PreviewVideoconferenceDto extends FilterOptionsDto {
     expandGroups?: boolean;
 
     /**
-     * When enabled, regular courses keep merging continuous theory/practice blocks.
-     * Default is false so 3+ mixed theory/practice blocks stay independent.
+     * When enabled, regular courses keep merging 3+ continuous blocks.
+     * Default is false so long continuous blocks stay independent.
      */
     @IsOptional()
     @Type(() => Boolean)
