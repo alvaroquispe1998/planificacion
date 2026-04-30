@@ -5441,7 +5441,6 @@ export class VideoconferenceService implements OnModuleInit {
             if (groupRows.length < 2) {
                 continue;
             }
-
             // Decide, per group, which rows are mergeable.
             // - If ALL rows have a host_rule AND all rule configs are identical
             //   → "Asignación unificada" → merge all rows normally.
