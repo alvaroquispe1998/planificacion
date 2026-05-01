@@ -2284,9 +2284,17 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
           if (allResults.length) {
             this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
           }
-          this.startGatewayPolling({ startDate: payload.startDate, endDate: payload.endDate });
+          const recovered = await this.reconcileInterruptedChunk(
+            chunk,
+            useOccurrences,
+            payload.startDate,
+            payload.endDate,
+            'El lote no devolvio respuesta a tiempo. Se verifico lo ya creado y se continuara con los siguientes.',
+          );
+          allResults.push(...recovered);
+          this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
           this.cdr.detectChanges();
-          return;
+          continue;
         }
 
         // Pool warning on first chunk — prompt and retry from beginning
@@ -2310,16 +2318,17 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         if (allResults.length) {
           this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
         }
-        this.finishGenerationProgress();
-        this.loading = false;
-        await this.dialog.alert({
-          title: allResults.length
-            ? `Error en lote ${i + 1} de ${chunks.length} — revisa los resultados parciales`
-            : 'No se pudieron generar las videoconferencias',
-          message: message || 'Error generando videoconferencias.',
-          tone: 'danger',
-        });
-        return;
+        const recovered = await this.reconcileInterruptedChunk(
+          chunk,
+          useOccurrences,
+          payload.startDate,
+          payload.endDate,
+          message || `Error en lote ${i + 1} de ${chunks.length}. Se continuara con los siguientes.`,
+        );
+        allResults.push(...recovered);
+        this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
+        this.cdr.detectChanges();
+        continue;
       }
 
       // Advance progress based on completed items
@@ -2342,6 +2351,143 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       message: this.buildGenerationCompletionMessage(allResults),
       tone: errors > 0 && created === 0 ? 'danger' : 'success',
     });
+  }
+
+  private async reconcileInterruptedChunk(
+    chunk: string[],
+    useOccurrences: boolean,
+    startDate: string,
+    endDate: string,
+    fallbackMessage: string,
+  ): Promise<VideoconferenceGenerationResultItem[]> {
+    try {
+      const res = await firstValueFrom(this.api.checkExisting(
+        useOccurrences
+          ? { occurrenceKeys: chunk }
+          : { scheduleIds: chunk, startDate, endDate },
+      ));
+      return this.buildInterruptedChunkResults(chunk, useOccurrences, res.existing, fallbackMessage);
+    } catch {
+      return this.buildInterruptedChunkResults(chunk, useOccurrences, [], fallbackMessage);
+    }
+  }
+
+  private buildInterruptedChunkResults(
+    chunk: string[],
+    useOccurrences: boolean,
+    existing: Array<{
+      occurrence_key: string;
+      schedule_id: string;
+      conference_date: string;
+      status: string;
+      zoom_meeting_id: string | null;
+      zoom_user_email: string | null;
+      record_id: string;
+    }>,
+    fallbackMessage: string,
+  ): VideoconferenceGenerationResultItem[] {
+    const results: VideoconferenceGenerationResultItem[] = [];
+    const existingByKey = new Map(existing.map((item) => [item.occurrence_key, item]));
+
+    for (const item of existing) {
+      const preview = this.previewData.find((row) => row.occurrence_key === item.occurrence_key)
+        ?? this.previewData.find((row) => row.schedule_id === item.schedule_id)
+        ?? null;
+      results.push({
+        schedule_id: item.schedule_id,
+        occurrence_key: item.occurrence_key,
+        conference_date: item.conference_date,
+        status: this.normalizeGeneratedStatus(item.status),
+        message: 'Registro encontrado despues de una interrupcion del lote. Revisa Auditoria para confirmar.',
+        record_id: item.record_id,
+        zoom_user_id: null,
+        zoom_user_email: item.zoom_user_email,
+        zoom_meeting_id: item.zoom_meeting_id,
+        link_mode: 'OWNED',
+        owner_videoconference_id: null,
+        inheritance: preview?.inheritance ?? this.buildFallbackInheritance(item.schedule_id),
+      });
+    }
+
+    if (useOccurrences) {
+      for (const key of chunk) {
+        if (existingByKey.has(key)) {
+          continue;
+        }
+        const preview = this.previewData.find((row) => row.occurrence_key === key) ?? null;
+        const scheduleId = preview?.schedule_id ?? this.readScheduleIdFromOccurrenceKey(key);
+        results.push({
+          schedule_id: scheduleId,
+          occurrence_key: key,
+          conference_date: preview?.effective_conference_date ?? this.readOccurrenceDate(key),
+          status: 'ERROR',
+          message: fallbackMessage,
+          record_id: null,
+          zoom_user_id: null,
+          zoom_user_email: null,
+          zoom_meeting_id: null,
+          link_mode: 'OWNED',
+          owner_videoconference_id: null,
+          inheritance: preview?.inheritance ?? this.buildFallbackInheritance(scheduleId),
+        });
+      }
+      return results;
+    }
+
+    const schedulesWithExisting = new Set(existing.map((item) => item.schedule_id));
+    for (const scheduleId of chunk) {
+      if (schedulesWithExisting.has(scheduleId)) {
+        continue;
+      }
+      const preview = this.previewData.find((row) => row.schedule_id === scheduleId) ?? null;
+      results.push({
+        schedule_id: scheduleId,
+        occurrence_key: null,
+        conference_date: null,
+        status: 'ERROR',
+        message: fallbackMessage,
+        record_id: null,
+        zoom_user_id: null,
+        zoom_user_email: null,
+        zoom_meeting_id: null,
+        link_mode: 'OWNED',
+        owner_videoconference_id: null,
+        inheritance: preview?.inheritance ?? this.buildFallbackInheritance(scheduleId),
+      });
+    }
+
+    return results;
+  }
+
+  private normalizeGeneratedStatus(status: string): VideoconferenceGenerationResultItem['status'] {
+    if (
+      status === 'MATCHED' ||
+      status === 'CREATED_UNMATCHED' ||
+      status === 'BLOCKED_EXISTING' ||
+      status === 'NO_AVAILABLE_ZOOM_USER' ||
+      status === 'VALIDATION_ERROR' ||
+      status === 'ERROR'
+    ) {
+      return status;
+    }
+    return 'BLOCKED_EXISTING';
+  }
+
+  private readScheduleIdFromOccurrenceKey(occurrenceKey: string | null | undefined) {
+    const raw = String(occurrenceKey ?? '');
+    const sep = raw.lastIndexOf('::');
+    return sep >= 0 ? raw.slice(0, sep) : raw;
+  }
+
+  private buildFallbackInheritance(scheduleId: string): PreviewSelectionItem['inheritance'] {
+    return {
+      is_inherited: false,
+      mapping_id: null,
+      parent_schedule_id: null,
+      parent_occurrence_key: null,
+      parent_label: null,
+      family_owner_schedule_id: scheduleId,
+    };
   }
 
   private startGenerationProgress(total = 0, displayTotal?: number) {
