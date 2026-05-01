@@ -275,6 +275,12 @@ export async function buildTypeOrmConfig(configService: ConfigService): Promise<
   const configuredHost = readConfig(configService, 'DB_HOST', 'localhost');
   const configuredPort = parsePort(readConfig(configService, 'DB_PORT', '3306'), 3306);
   const resolvedEndpoint = await resolveDatabaseEndpoint(configService);
+  const nodeEnv = readConfig(configService, 'NODE_ENV', '').toLowerCase();
+  const isProduction = nodeEnv === 'production';
+  const dbSynchronizeEnabled =
+    !isProduction &&
+    readConfig(configService, 'DB_SYNCHRONIZE', 'false') === 'true' &&
+    readConfig(configService, 'DB_SYNC_ALLOWED', 'false') === 'true';
 
   if (
     resolvedEndpoint.host !== configuredHost ||
@@ -294,7 +300,7 @@ export async function buildTypeOrmConfig(configService: ConfigService): Promise<
     password: readConfig(configService, 'DB_PASSWORD', 'root'),
     database: readConfig(configService, 'DB_NAME', 'uai_planning'),
     entities: appEntities,
-    synchronize: readConfig(configService, 'DB_SYNCHRONIZE', 'true') === 'true',
+    synchronize: dbSynchronizeEnabled,
     timezone: 'Z',
     // Connection pool — prevents pool exhaustion from long-running generation jobs
     extra: {
