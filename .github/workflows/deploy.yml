@@ -42,9 +42,12 @@ jobs:
             echo "OK: no localhost references found in dist"
           fi
 
-      - name: Add .htaccess to built frontend
+      - name: Add production frontend runtime files
         run: |
           cp frontend/deploy/.htaccess frontend/dist/frontend/browser/.htaccess
+          cat > frontend/dist/frontend/browser/runtime-config.js <<'EOF'
+          window.__UAI_API_BASE_URL__ = "https://planificacion-academica-api.autonomadeica.edu.pe";
+          EOF
 
       - name: Preparar clave SSH
         run: |
@@ -99,16 +102,49 @@ jobs:
 
             APP_NAME="api-planificacion-academica"
             APP_ENTRY="$API_DIR/dist/main.js"
+            APP_PORT=$(grep -E '^PORT=' .env 2>/dev/null | tail -n 1 | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || true)
+            APP_PORT=${APP_PORT:-3000}
 
             # Siempre eliminar y re-registrar para que pm2 use el entry point actualizado
             pm2 delete $APP_NAME 2>/dev/null || true
-            pm2 start $APP_ENTRY \
+            NODE_ENV=production pm2 start $APP_ENTRY \
               --name $APP_NAME \
               --cwd $API_DIR \
-              --env production
+              --update-env
 
             pm2 save
+            pm2 status
+
+            echo "Verificando backend en http://127.0.0.1:${APP_PORT}/health"
+            for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+              if curl -fsS "http://127.0.0.1:${APP_PORT}/health"; then
+                echo "Backend operativo"
+                break
+              fi
+
+              if [ "$attempt" = "12" ]; then
+                echo "El backend no respondio despues del reinicio. Ultimos logs:"
+                pm2 logs $APP_NAME --lines 120 --nostream || true
+                exit 1
+              fi
+
+              sleep 5
+            done
             echo "✅ Deploy completado como autonomadeica"
             echo "ℹ️  Si DB_SYNCHRONIZE=true en el .env del servidor, TypeORM correrá ALTER TABLEs al arrancar."
             echo "ℹ️  Verifica que DB_SYNCHRONIZE=false en producción para evitar bloqueos de DB al reiniciar."
+
+      - name: Verify public API health
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsS "https://planificacion-academica-api.autonomadeica.edu.pe/health"; then
+              echo "Public API operativo"
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "El API publico no responde correctamente despues del deploy."
+          exit 1
             
