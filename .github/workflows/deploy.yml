@@ -104,10 +104,12 @@ jobs:
             APP_ENTRY="$API_DIR/dist/main.js"
             APP_PORT=$(grep -E '^PORT=' .env 2>/dev/null | tail -n 1 | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || true)
             APP_PORT=${APP_PORT:-3000}
+            export NODE_ENV=production
+            export DB_SYNCHRONIZE=false
 
             # Siempre eliminar y re-registrar para que pm2 use el entry point actualizado
             pm2 delete $APP_NAME 2>/dev/null || true
-            NODE_ENV=production pm2 start $APP_ENTRY \
+            pm2 start $APP_ENTRY \
               --name $APP_NAME \
               --cwd $API_DIR \
               --update-env
@@ -131,8 +133,7 @@ jobs:
               sleep 5
             done
             echo "✅ Deploy completado como autonomadeica"
-            echo "ℹ️  Si DB_SYNCHRONIZE=true en el .env del servidor, TypeORM correrá ALTER TABLEs al arrancar."
-            echo "ℹ️  Verifica que DB_SYNCHRONIZE=false en producción para evitar bloqueos de DB al reiniciar."
+            echo "ℹ️  DB_SYNCHRONIZE=false fue forzado al registrar PM2 para evitar ALTER TABLEs en producción."
 
       - name: Verify public API health
         run: |
