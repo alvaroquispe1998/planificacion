@@ -1302,12 +1302,10 @@ export class VideoconferenceService implements OnModuleInit {
             }
 
             const uniqueScheduleIds = [...new Set(pairs.map((p) => p.schedule_id))];
-            const conferenceDates = [...new Set(pairs.map((p) => p.conference_date))];
 
             const rows = await this.planningVideoconferencesRepo
                 .createQueryBuilder('vc')
                 .where('vc.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds: uniqueScheduleIds })
-                .andWhere('DATE(vc.conference_date) IN (:...conferenceDates)', { conferenceDates })
                 .andWhere("vc.status != 'ERROR'")
                 .andWhere("(vc.delete_status IS NULL OR vc.delete_status != 'DELETED')")
                 .select([
@@ -1317,6 +1315,7 @@ export class VideoconferenceService implements OnModuleInit {
                     'vc.status',
                     'vc.zoom_meeting_id',
                     'vc.zoom_user_email',
+                    'vc.payload_json',
                 ])
                 .getMany();
 
@@ -1324,7 +1323,14 @@ export class VideoconferenceService implements OnModuleInit {
 
             const existing = pairs
                 .map((p) => {
-                    const record = rowMap.get(`${p.schedule_id}::${p.conference_date}`);
+                    const record =
+                        rowMap.get(`${p.schedule_id}::${p.conference_date}`) ??
+                        rows.find(
+                            (row) =>
+                                row.planning_subsection_schedule_id === p.schedule_id &&
+                                isDateWithinStoredRecurrence(p.conference_date, row.payload_json),
+                        ) ??
+                        null;
                     if (!record) return null;
                     return {
                         occurrence_key: p.occurrence_key,
@@ -1355,8 +1361,6 @@ export class VideoconferenceService implements OnModuleInit {
         const rows = await this.planningVideoconferencesRepo
             .createQueryBuilder('vc')
             .where('vc.planning_subsection_schedule_id IN (:...scheduleIds)', { scheduleIds })
-            .andWhere('DATE(vc.conference_date) >= DATE(:startDate)', { startDate })
-            .andWhere('DATE(vc.conference_date) <= DATE(:endDate)', { endDate })
             .andWhere("vc.status != 'ERROR'")
             .andWhere("(vc.delete_status IS NULL OR vc.delete_status != 'DELETED')")
             .select([
@@ -1366,19 +1370,35 @@ export class VideoconferenceService implements OnModuleInit {
                 'vc.status',
                 'vc.zoom_meeting_id',
                 'vc.zoom_user_email',
+                'vc.payload_json',
             ])
             .orderBy('vc.conference_date', 'ASC')
             .getMany();
 
-        const existing = rows.map((r) => ({
-            occurrence_key: `${r.planning_subsection_schedule_id}::${toDateOnly(r.conference_date)}`,
-            schedule_id: r.planning_subsection_schedule_id,
-            conference_date: toDateOnly(r.conference_date),
-            status: r.status,
-            zoom_meeting_id: r.zoom_meeting_id,
-            zoom_user_email: r.zoom_user_email,
-            record_id: r.id,
-        }));
+        const existing = rows
+            .filter((r) => {
+                const conferenceDate = toDateOnly(r.conference_date);
+                return (
+                    (conferenceDate >= startDate && conferenceDate <= endDate) ||
+                    doesStoredRecurrenceOverlapRange(r.payload_json, startDate, endDate)
+                );
+            })
+            .map((r) => {
+                const recurrence = readStoredRecurrenceRange(r.payload_json);
+                const conferenceDate =
+                    recurrence && recurrence.startDate <= endDate && recurrence.endDate >= startDate
+                        ? maxIsoDate(recurrence.startDate, startDate)
+                        : toDateOnly(r.conference_date);
+                return {
+                    occurrence_key: `${r.planning_subsection_schedule_id}::${conferenceDate}`,
+                    schedule_id: r.planning_subsection_schedule_id,
+                    conference_date: conferenceDate,
+                    status: r.status,
+                    zoom_meeting_id: r.zoom_meeting_id,
+                    zoom_user_email: r.zoom_user_email,
+                    record_id: r.id,
+                };
+            });
 
         return { existing };
     }
@@ -1479,6 +1499,7 @@ export class VideoconferenceService implements OnModuleInit {
             maxConcurrent: zoomConfig.maxConcurrent,
             licenseSnapshot,
             hostRuleMap,
+            recurrentRange: { startDate, endDate },
         });
         return {
             mode: 'OCCURRENCE' as const,
@@ -1901,6 +1922,47 @@ export class VideoconferenceService implements OnModuleInit {
         };
     }
 
+    private buildOccurrenceFamilyKey(occurrence: ExpandedOccurrence, recurrentBySchedule: boolean) {
+        return recurrentBySchedule
+            ? `schedule:${occurrence.inheritance.family_owner_schedule_id}`
+            : buildOccurrenceKey(occurrence.inheritance.family_owner_schedule_id, occurrence.base_conference_date);
+    }
+
+    private selectFamilyItemsForProcessing(familyItems: ExpandedOccurrence[], recurrentBySchedule: boolean) {
+        if (!recurrentBySchedule) {
+            return familyItems;
+        }
+        const firstDate = familyItems
+            .map((item) => item.base_conference_date)
+            .filter(Boolean)
+            .sort((left, right) => left.localeCompare(right))[0];
+        if (!firstDate) {
+            return familyItems;
+        }
+        return familyItems.filter((item) => item.base_conference_date === firstDate);
+    }
+
+    private hydrateRecurrentExistingLookupForRepresentative(
+        familyItemsInRange: ExpandedOccurrence[],
+        representativeItems: ExpandedOccurrence[],
+        existingLookup: ExistingConferenceLookup,
+    ) {
+        for (const occurrence of representativeItems) {
+            const representativeKey = `${occurrence.row.schedule_id}::${toDateOnly(occurrence.effective_conference_date)}`;
+            if (existingLookup.has(representativeKey)) {
+                continue;
+            }
+            const existing = familyItemsInRange
+                .map((item) => `${item.row.schedule_id}::${toDateOnly(item.effective_conference_date)}`)
+                .filter((key) => key.startsWith(`${occurrence.row.schedule_id}::`))
+                .map((key) => existingLookup.get(key) ?? null)
+                .find((item): item is PlanningSubsectionVideoconferenceEntity => item !== null);
+            if (existing) {
+                existingLookup.set(representativeKey, existing);
+            }
+        }
+    }
+
     private async simulateOccurrenceAssignmentPreview(input: {
         selectedOccurrenceKeys: Set<string>;
         requestedScheduleIds: Set<string>;
@@ -1909,7 +1971,9 @@ export class VideoconferenceService implements OnModuleInit {
         maxConcurrent: number;
         licenseSnapshot: ZoomPoolLicenseSnapshot;
         hostRuleMap?: Map<string, { rule_id: string; zoom_user_id: string | null; zoom_user_email: string | null; zoom_user_name: string | null; zoom_group_id: string | null; zoom_group_name: string | null; lock_host: boolean; skip_zoom: boolean }>;
+        recurrentRange?: { startDate: string; endDate: string } | null;
     }) {
+        const recurrentBySchedule = input.selectedOccurrenceKeys.size === 0 && Boolean(input.recurrentRange);
         const selectedOccurrences = input.selectedOccurrenceKeys.size
             ? input.occurrences.filter((item) => input.selectedOccurrenceKeys.has(item.occurrence_key))
             : input.occurrences.filter(
@@ -1919,15 +1983,13 @@ export class VideoconferenceService implements OnModuleInit {
         const selectedOccurrenceKeys = new Set(selectedOccurrences.map((item) => item.occurrence_key));
         const familyKeys = Array.from(
             new Set(
-                selectedOccurrences.map((item) =>
-                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date),
-                ),
+                selectedOccurrences.map((item) => this.buildOccurrenceFamilyKey(item, recurrentBySchedule)),
             ),
         );
         const familyOccurrences = familyKeys.flatMap((familyKey) =>
             input.occurrences.filter(
                 (item) =>
-                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date) === familyKey &&
+                    this.buildOccurrenceFamilyKey(item, recurrentBySchedule) === familyKey &&
                     item.occurrence_type !== 'SKIPPED',
             ),
         );
@@ -1939,13 +2001,20 @@ export class VideoconferenceService implements OnModuleInit {
         let virtualHostCounter = 0;
 
         for (const familyKey of familyKeys) {
-            const familyItems = familyOccurrences.filter(
-                (item) =>
-                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date) === familyKey,
+            const familyItemsInRange = familyOccurrences.filter(
+                (item) => this.buildOccurrenceFamilyKey(item, recurrentBySchedule) === familyKey,
             );
+            const familyItems = this.selectFamilyItemsForProcessing(familyItemsInRange, recurrentBySchedule);
             const ownerOccurrence = familyItems.find((item) => !item.inheritance.is_inherited) ?? null;
             if (!ownerOccurrence) {
                 continue;
+            }
+            if (recurrentBySchedule) {
+                this.hydrateRecurrentExistingLookupForRepresentative(
+                    familyItemsInRange,
+                    familyItems,
+                    existingLookup,
+                );
             }
 
             const maxEndTime = familyItems.reduce(
@@ -1984,7 +2053,10 @@ export class VideoconferenceService implements OnModuleInit {
                 );
             }
 
-            for (const occurrence of familyItems.filter((item) => selectedOccurrenceKeys.has(item.occurrence_key))) {
+            const visibleFamilyItems = recurrentBySchedule
+                ? familyItems
+                : familyItems.filter((item) => selectedOccurrenceKeys.has(item.occurrence_key));
+            for (const occurrence of visibleFamilyItems) {
                 if (!occurrence.inheritance.is_inherited) {
                     items.push(ownerResult);
                     continue;
@@ -3232,17 +3304,17 @@ export class VideoconferenceService implements OnModuleInit {
                 (item) =>
                     requestedScheduleIds.includes(item.row.schedule_id) && item.occurrence_type !== 'SKIPPED',
             );
+        const recurrentBySchedule = occurrenceKeys.length === 0;
+        const recurrentRange = recurrentBySchedule ? { startDate, endDate } : null;
         const familyKeys = Array.from(
             new Set(
-                selectedOccurrences.map((item) =>
-                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date),
-                ),
+                selectedOccurrences.map((item) => this.buildOccurrenceFamilyKey(item, recurrentBySchedule)),
             ),
         );
         const familyOccurrences = familyKeys.flatMap((familyKey) =>
             resolvedOccurrences.filter(
                 (item) =>
-                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date) === familyKey &&
+                    this.buildOccurrenceFamilyKey(item, recurrentBySchedule) === familyKey &&
                     item.occurrence_type !== 'SKIPPED',
             ),
         );
@@ -3267,10 +3339,10 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         for (const familyKey of familyKeys) {
-            const familyItems = familyOccurrences.filter(
-                (item) =>
-                    buildOccurrenceKey(item.inheritance.family_owner_schedule_id, item.base_conference_date) === familyKey,
+            const familyItemsInRange = familyOccurrences.filter(
+                (item) => this.buildOccurrenceFamilyKey(item, recurrentBySchedule) === familyKey,
             );
+            const familyItems = this.selectFamilyItemsForProcessing(familyItemsInRange, recurrentBySchedule);
             const ownerOccurrence =
                 familyItems.find((item) => !item.inheritance.is_inherited) ?? null;
             if (!ownerOccurrence) {
@@ -3354,6 +3426,7 @@ export class VideoconferenceService implements OnModuleInit {
                 remoteMeetingsCache,
                 effectivePreferredUserId,
                 effectiveGroupName,
+                recurrentRange,
             );
             results.push(ownerResult);
 
@@ -3388,7 +3461,7 @@ export class VideoconferenceService implements OnModuleInit {
 
         const summary = {
             requestedSchedules: requestedScheduleIds.length,
-            requestedOccurrences: familyOccurrences.length,
+            requestedOccurrences: recurrentBySchedule ? results.length : familyOccurrences.length,
             matched: results.filter((item) => item.status === 'MATCHED').length,
             createdUnmatched: results.filter((item) => item.status === 'CREATED_UNMATCHED').length,
             blockedExisting: results.filter((item) => item.status === 'BLOCKED_EXISTING').length,
@@ -3884,6 +3957,7 @@ export class VideoconferenceService implements OnModuleInit {
         remoteMeetingsCache: Map<string, ZoomMeetingSummary[] | null>,
         preferredZoomUserId: string | null,
         zoomGroupName: string,
+        recurrentRange: { startDate: string; endDate: string } | null = null,
     ): Promise<GenerateResultItem> {
         const validationError = this.validateScheduleForGeneration(occurrence.row);
         if (validationError) {
@@ -3903,12 +3977,29 @@ export class VideoconferenceService implements OnModuleInit {
             };
         }
 
-        const existing = await this.planningVideoconferencesRepo
+        const existingRows = await this.planningVideoconferencesRepo
             .createQueryBuilder('conference')
             .where('conference.planning_subsection_schedule_id = :scheduleId', { scheduleId: occurrence.row.schedule_id })
-            .andWhere('DATE(conference.conference_date) = DATE(:conferenceDate)', { conferenceDate: occurrence.effective_conference_date })
             .andWhere('(conference.delete_status IS NULL OR conference.delete_status != :deletedStatus)', { deletedStatus: 'DELETED' })
-            .getOne();
+            .getMany();
+        const existing =
+            existingRows.find((conference) => {
+                if (conference.status === 'ERROR') {
+                    return false;
+                }
+                const conferenceDate = toDateOnly(conference.conference_date);
+                if (recurrentRange) {
+                    return (
+                        (conferenceDate >= recurrentRange.startDate && conferenceDate <= recurrentRange.endDate) ||
+                        doesStoredRecurrenceOverlapRange(
+                            conference.payload_json,
+                            recurrentRange.startDate,
+                            recurrentRange.endDate,
+                        )
+                    );
+                }
+                return conferenceDate === occurrence.effective_conference_date;
+            }) ?? null;
         if (existing) {
             // If the record was auto-created as INHERITED (when the parent was processed in a
             // previous chunk) but this occurrence is now being processed as an owner, do NOT
@@ -4008,6 +4099,7 @@ export class VideoconferenceService implements OnModuleInit {
             selectedZoomUser.zoom_user_id,
             teacher,
             topic,
+            recurrentRange,
         );
 
         const now = new Date();
@@ -4048,6 +4140,13 @@ export class VideoconferenceService implements OnModuleInit {
                 override_reason_code: occurrence.override_reason_code,
                 override_notes: occurrence.override_notes,
                 override_topic: occurrence.override_topic,
+                recurrence_range: recurrentRange
+                    ? {
+                        mode: 'AULA_VIRTUAL_RANGE',
+                        start_date: recurrentRange.startDate,
+                        end_date: recurrentRange.endDate,
+                    }
+                    : null,
             },
             response_json: null,
             created_at: now,
@@ -5912,10 +6011,13 @@ export class VideoconferenceService implements OnModuleInit {
         zoomUserId: string,
         teacher: ResolvedTeacher,
         topic: string,
+        recurrentRange: { startDate: string; endDate: string } | null = null,
     ): AulaVirtualPayload {
         const startTime = compactTime(occurrence.effective_start_time);
         const endTime = compactTime(occurrence.effective_end_time);
         const dayOfWeek = dayCodeForDate(occurrence.effective_conference_date);
+        const payloadStartDate = recurrentRange?.startDate ?? occurrence.effective_conference_date;
+        const payloadEndDate = recurrentRange?.endDate ?? occurrence.effective_conference_date;
         const minutes = calculateDurationMinutes(
             occurrence.effective_start_time,
             occurrence.effective_end_time,
@@ -5935,8 +6037,8 @@ export class VideoconferenceService implements OnModuleInit {
             courseId: occurrence.row.vc_course_id?.trim() ?? '',
             name: topic,
             sectionId: occurrence.row.vc_section_id?.trim() ?? '',
-            start: `${formatDateForAulaVirtual(occurrence.effective_conference_date)} ${startTime}`,
-            end: `${formatDateForAulaVirtual(occurrence.effective_conference_date)} ${endTime}`,
+            start: `${formatDateForAulaVirtual(payloadStartDate)} ${startTime}`,
+            end: `${formatDateForAulaVirtual(payloadEndDate)} ${endTime}`,
             minutes: String(minutes),
             'daysOfWeek[0]': String(DAY_TO_AULA_VIRTUAL_NUMBER[dayOfWeek]),
             credentialId: zoomUserId,
@@ -7558,6 +7660,38 @@ function normalizeIsoDate(value: string) {
         throw new BadRequestException(`Fecha invalida: ${value}`);
     }
     return normalized;
+}
+
+function maxIsoDate(left: string, right: string) {
+    return left >= right ? left : right;
+}
+
+function readStoredRecurrenceRange(payload: Record<string, unknown> | null | undefined) {
+    const range = readNullableRecord(payload?.recurrence_range);
+    const startDate = readNullableString(range?.start_date);
+    const endDate = readNullableString(range?.end_date);
+    if (!startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+        return null;
+    }
+    return {
+        startDate: startDate <= endDate ? startDate : endDate,
+        endDate: startDate <= endDate ? endDate : startDate,
+    };
+}
+
+function isDateWithinStoredRecurrence(date: string, payload: Record<string, unknown> | null | undefined) {
+    const normalizedDate = String(date ?? '').trim();
+    const range = readStoredRecurrenceRange(payload);
+    return Boolean(range && normalizedDate >= range.startDate && normalizedDate <= range.endDate);
+}
+
+function doesStoredRecurrenceOverlapRange(
+    payload: Record<string, unknown> | null | undefined,
+    startDate: string,
+    endDate: string,
+) {
+    const range = readStoredRecurrenceRange(payload);
+    return Boolean(range && range.startDate <= endDate && range.endDate >= startDate);
 }
 
 function normalizeAkademicDate(value: string | null | undefined) {

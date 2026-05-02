@@ -2663,13 +2663,16 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
 
   private buildCreationPayloadPreview(item: PreviewSelectionItem) {
     const assignment = this.getAssignmentPreview(item);
-    const dayCode = this.resolveDayCode(item);
-    const startTime = (item.effective_start_time || item.start_time || '').trim();
-    const endTime = (item.effective_end_time || item.end_time || '').trim();
-    const conferenceDate = (item.effective_conference_date || item.base_conference_date || '').trim();
+    const dayCode = (assignment?.day_of_week || this.resolveDayCode(item)).trim();
+    const startTime = (assignment?.start_time || item.effective_start_time || item.start_time || '').trim();
+    const endTime = (assignment?.end_time || item.effective_end_time || item.end_time || '').trim();
+    const conferenceDate = (assignment?.conference_date || item.effective_conference_date || item.base_conference_date || '').trim();
+    const payloadStartDate = this.usesOccurrenceRows ? conferenceDate : (this.startDate || conferenceDate);
+    const payloadEndDate = this.usesOccurrenceRows ? conferenceDate : (this.endDate || conferenceDate);
     const topic = this.buildTopicPreview(item, dayCode, startTime, endTime);
     const minutes = this.calculateDurationMinutes(startTime, endTime);
-    const formattedDate = conferenceDate ? this.formatDateForAulaVirtual(conferenceDate) : '';
+    const formattedStartDate = payloadStartDate ? this.formatDateForAulaVirtual(payloadStartDate) : '';
+    const formattedEndDate = payloadEndDate ? this.formatDateForAulaVirtual(payloadEndDate) : '';
 
     return {
       courseCode: item.course_code?.trim() || '',
@@ -2686,20 +2689,11 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       courseId: item.vc_course_id?.trim() || '',
       name: topic,
       sectionId: item.vc_section_id?.trim() || '',
-      start: formattedDate ? `${formattedDate} ${startTime}` : '',
-      end: formattedDate ? `${formattedDate} ${endTime}` : '',
+      start: formattedStartDate ? `${formattedStartDate} ${startTime}` : '',
+      end: formattedEndDate ? `${formattedEndDate} ${endTime}` : '',
       minutes: String(minutes),
       'daysOfWeek[0]': String(this.dayToAulaVirtual(dayCode)),
       credentialId: assignment?.zoom_user_id || '',
-      _meta: {
-        scheduleId: item.schedule_id,
-        occurrenceKey: item.occurrence_key,
-        inherited: item.inheritance?.is_inherited ?? false,
-        zoomGroupId: this.selectedZoomGroupId || null,
-        zoomGroupLabel: this.selectedZoomGroupLabel,
-        hostPreview: assignment?.zoom_user_email || assignment?.zoom_user_name || assignment?.zoom_user_id || null,
-        hostFixedFromPreview: Boolean(assignment?.zoom_user_id),
-      },
     };
   }
 
