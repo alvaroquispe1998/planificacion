@@ -3494,77 +3494,38 @@ export class VideoconferenceService implements OnModuleInit {
         if (!record) {
             throw new BadRequestException('No se encontro la videoconferencia.');
         }
+        if (record.link_mode === 'INHERITED' && record.owner_videoconference_id) {
+            throw new BadRequestException(
+                'Esta videoconferencia es heredada. Elimina la videoconferencia padre para borrar el conjunto en Aula Virtual y Zoom.',
+            );
+        }
 
         const now = new Date();
         let zoomDeleted = false;
         let akademicDeleted = false;
+        let deletedAulaVirtualCount = 0;
+        let affectedLocalChildren = 0;
 
         // 1. Delete from Aula Virtual FIRST.
         // If the record exists in AV but cannot be deleted → abort entirely (don't touch Zoom or DB).
         // If the record is not found in AV → treat as already deleted and continue.
         try {
             const aulaVirtualContext = await this.getAulaVirtualRequestContext();
-            let avId = this.extractAulaVirtualId(record.response_json);
+            const avMatches = await this.findAulaVirtualConferencesForDeletion(aulaVirtualContext, record);
 
-            if (!avId && record.topic) {
-                // Look up AV id by courseCode + section (parsed from topic) and match by topic name.
-                // Topic format: "{period}-{semester}-{courseCode}|{courseName}|{section} - {branch}|..."
-                const meta = this.parseTopicMetadata(record.topic);
-                const topic = record.topic;
-                if (meta.courseCode) {
-                    console.log(
-                        `[deleteVideoconference] Looking up AV id for local=${record.id} by courseCode=${meta.courseCode} section=${meta.section ?? '-'} topic="${topic}"`,
-                    );
-                    const listings = await this.listAulaVirtualConferences(
-                        aulaVirtualContext,
-                        null,
-                        null,
-                        topic,
-                        100,
-                        0,
-                        meta.courseCode,
-                        meta.section,
-                    );
-                    const match =
-                        listings.rows.find((r) => r.name === topic) ??
-                        listings.rows.find((r) => r.name.trim() === topic.trim()) ??
-                        null;
-                    avId = match?.id ?? null;
-                    console.log(
-                        `[deleteVideoconference] AV lookup returned ${listings.rows.length} rows; matched avId=${avId ?? 'null'}`,
-                    );
-                }
-
-                // Fallback: old date-based lookup (in case the topic parsing fails).
-                if (!avId && record.conference_date) {
-                    const rawDate = record.conference_date;
-                    const conferenceDate = toDateOnly(typeof rawDate === 'string' ? rawDate : (rawDate as Date).toISOString());
-                    const [year, month, day] = conferenceDate.split('-');
-                    const akademicDate = year && month && day ? `${day}/${month}/${year}` : null;
-                    if (akademicDate) {
-                        const listings = await this.listAulaVirtualConferences(
-                            aulaVirtualContext,
-                            akademicDate,
-                            akademicDate,
-                            topic,
-                            100,
+            if (avMatches.length) {
+                for (const match of avMatches) {
+                    const deleted = await this.deleteAulaVirtualConference(aulaVirtualContext, match.id);
+                    if (!deleted) {
+                        throw new BadRequestException(
+                            `No se pudo eliminar la videoconferencia en Aula Virtual (avId=${match.id}, respuesta inesperada). La reunion en Zoom y el registro local no fueron modificados.`,
                         );
-                        const match = listings.rows.find((r) => r.name === topic);
-                        avId = match?.id ?? null;
                     }
+                    deletedAulaVirtualCount++;
                 }
-            }
-
-            if (avId) {
-                akademicDeleted = await this.deleteAulaVirtualConference(aulaVirtualContext, avId);
-                if (!akademicDeleted) {
-                    // AV record found but could not be deleted — abort to avoid inconsistency.
-                    throw new BadRequestException(
-                        `No se pudo eliminar la videoconferencia en Aula Virtual (avId=${avId}, respuesta inesperada). La reunion en Zoom y el registro local no fueron modificados.`,
-                    );
-                }
+                akademicDeleted = true;
             } else {
-                // No AV record found — treat as already deleted, continue.
+                // No AV record found → treat as already deleted and continue.
                 akademicDeleted = true;
             }
         } catch (error) {
@@ -3591,13 +3552,65 @@ export class VideoconferenceService implements OnModuleInit {
         record.updated_at = now;
         await this.planningVideoconferencesRepo.save(record);
 
+        const childRows = await this.planningVideoconferencesRepo.find({
+            where: { owner_videoconference_id: record.id },
+        });
+        if (childRows.length) {
+            for (const child of childRows) {
+                child.delete_status = 'DELETED';
+                child.deleted_at = now;
+                if (zoomDeleted) child.zoom_deleted_at = now;
+                if (akademicDeleted) child.akademic_deleted_at = now;
+                child.delete_error = null;
+                child.updated_at = now;
+            }
+            await this.planningVideoconferencesRepo.save(childRows);
+            affectedLocalChildren = childRows.length;
+        }
+
         const zoomNote = !zoomDeleted ? ' La reunion de Zoom no pudo eliminarse (puede que ya no exista).' : '';
+        const aulaVirtualNote = deletedAulaVirtualCount > 0
+            ? ` Se eliminaron ${deletedAulaVirtualCount} registro(s) en Aula Virtual vinculados por tema y fecha.`
+            : ' No se encontraron registros activos en Aula Virtual; se marco el registro local como eliminado.';
+        const childrenNote = affectedLocalChildren > 0
+            ? ` Tambien se marcaron ${affectedLocalChildren} hijo(s) heredado(s) como eliminados.`
+            : '';
         return {
             success: true,
-            message: `Videoconferencia eliminada correctamente de Aula Virtual y marcada como eliminada.${zoomNote}`,
+            message: `Videoconferencia eliminada correctamente.${aulaVirtualNote}${childrenNote}${zoomNote}`,
             zoom_deleted: zoomDeleted,
             akademic_deleted: akademicDeleted,
         };
+    }
+
+    private async findAulaVirtualConferencesForDeletion(
+        context: AulaVirtualRequestContext,
+        record: PlanningSubsectionVideoconferenceEntity,
+    ) {
+        const topic = record.topic?.trim() ?? '';
+        const storedAvId = this.extractAulaVirtualId(record.response_json);
+        if (!topic) {
+            return storedAvId ? [{ id: storedAvId, name: '', sectionId: '', date: '' }] : [];
+        }
+
+        const conferenceDate = toDateOnly(record.conference_date);
+        const akademicDate = toAkademicDate(conferenceDate);
+        const rows = await this.listAllAulaVirtualConferences(context, null, null, topic);
+        const matches = rows.filter(
+            (row) =>
+                row.name.trim() === topic &&
+                isAkademicDateWithinDays(row.date, akademicDate, 1),
+        );
+        const byId = new Map(matches.filter((row) => row.id.trim()).map((row) => [row.id, row] as const));
+
+        if (storedAvId && !byId.has(storedAvId)) {
+            byId.set(storedAvId, { id: storedAvId, name: topic, sectionId: '', date: akademicDate });
+        }
+
+        console.log(
+            `[deleteVideoconference] AV delete lookup local=${record.id} topic="${topic}" date=${akademicDate} matches=${byId.size}`,
+        );
+        return [...byId.values()];
     }
 
     /**
@@ -3688,9 +3701,12 @@ export class VideoconferenceService implements OnModuleInit {
             rows = listing.rows;
         }
 
+        // Use exact name and date matching (with 1-day window) to identify the correct entry among weekly sessions.
+        const conferenceDate = toDateOnly(record.conference_date);
+        const akademicDate = toAkademicDate(conferenceDate);
+
         let match =
-            rows.find((r) => r.name === topic) ??
-            rows.find((r) => r.name.trim() === topic.trim()) ??
+            rows.find((r) => r.name.trim() === topic.trim() && isAkademicDateWithinDays(r.date, akademicDate, 1)) ??
             null;
 
         // Fallback: search by date if courseCode search didn't yield a match.
@@ -7692,6 +7708,12 @@ function doesStoredRecurrenceOverlapRange(
 ) {
     const range = readStoredRecurrenceRange(payload);
     return Boolean(range && range.startDate <= endDate && range.endDate >= startDate);
+}
+
+function toAkademicDate(value: string | Date | null | undefined) {
+    const isoDate = toDateOnly(value);
+    const [year, month, day] = isoDate.split('-');
+    return year && month && day ? `${day}/${month}/${year}` : '';
 }
 
 function normalizeAkademicDate(value: string | null | undefined) {

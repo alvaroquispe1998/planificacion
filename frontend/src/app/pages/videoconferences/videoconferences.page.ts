@@ -101,6 +101,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   loading = false;
   generating = false;
   generationProgress = 0;
+  generationDurationMs: number | null = null;
   /** Total occurrences sent to the backend for the current run, used to show "X / N" in progress bar. */
   generationTotal = 0;
   private generationStartTime = 0;
@@ -2029,6 +2030,19 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     };
   }
 
+  generationDurationLabel() {
+    if (this.generationDurationMs === null) {
+      return '';
+    }
+    const totalSeconds = Math.max(1, Math.round(this.generationDurationMs / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes <= 0) {
+      return `${seconds} seg`;
+    }
+    return seconds > 0 ? `${minutes} min ${seconds} seg` : `${minutes} min`;
+  }
+
   private buildOwnerOccurrenceKeysForGeneration(selectedRows: PreviewSelectionItem[]) {
     const keys = new Set<string>();
     for (const row of selectedRows) {
@@ -2096,7 +2110,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       parts.push(`${errors} con error`);
     }
 
-    return `${parts.length ? parts.join(', ') + '. ' : 'El lote fue procesado. '}Sincroniza el ID Zoom desde Auditoria.`;
+    const duration = this.generationDurationLabel();
+    const durationText = duration ? ` Tiempo total: ${duration}.` : '';
+    return `${parts.length ? parts.join(', ') + '. ' : 'El lote fue procesado. '}Sincroniza el ID Zoom desde Auditoria.${durationText}`;
   }
 
   // Max schedules/occurrences per single HTTP request to avoid proxy timeouts.
@@ -2128,6 +2144,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       };
     }
     const ids = payload.occurrenceKeys?.length ? payload.occurrenceKeys : (payload.scheduleIds ?? []);
+    this.generationDurationMs = null;
     if (ids.length > this.GENERATION_CHUNK_SIZE) {
       this.executeGenerationChunked(payload, hasConfirmedWarnings);
       return;
@@ -2244,6 +2261,8 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     this.loading = true;
     this.generating = true;
     this.generationProgress = 0;
+    this.generationDurationMs = null;
+    this.generationStartTime = Date.now();
     this.generationTotal = this.selectedCount || ids.length;
     this.cdr.detectChanges();
 
@@ -2282,7 +2301,10 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         if (isGatewayError) {
           // Backend still processing this chunk — show partial results and poll.
           if (allResults.length) {
-            this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
+            this.generationResult = {
+              results: allResults,
+              summary: this.rebuildGenerationSummary(allResults),
+            } as VideoconferenceGenerationResponse;
           }
           const recovered = await this.reconcileInterruptedChunk(
             chunk,
@@ -2292,7 +2314,10 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
             'El lote no devolvio respuesta a tiempo. Se verifico lo ya creado y se continuara con los siguientes.',
           );
           allResults.push(...recovered);
-          this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
+          this.generationResult = {
+            results: allResults,
+            summary: this.rebuildGenerationSummary(allResults),
+          } as VideoconferenceGenerationResponse;
           this.cdr.detectChanges();
           continue;
         }
@@ -2316,7 +2341,10 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
 
         // Real error — show partial results if any and stop
         if (allResults.length) {
-          this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
+          this.generationResult = {
+            results: allResults,
+            summary: this.rebuildGenerationSummary(allResults),
+          } as VideoconferenceGenerationResponse;
         }
         const recovered = await this.reconcileInterruptedChunk(
           chunk,
@@ -2326,7 +2354,10 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
           message || `Error en lote ${i + 1} de ${chunks.length}. Se continuara con los siguientes.`,
         );
         allResults.push(...recovered);
-        this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
+        this.generationResult = {
+          results: allResults,
+          summary: this.rebuildGenerationSummary(allResults),
+        } as VideoconferenceGenerationResponse;
         this.cdr.detectChanges();
         continue;
       }
@@ -2338,7 +2369,10 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     }
 
     // All chunks done
-    this.generationResult = { results: allResults } as VideoconferenceGenerationResponse;
+    this.generationResult = {
+      results: allResults,
+      summary: this.rebuildGenerationSummary(allResults),
+    } as VideoconferenceGenerationResponse;
     this.finishGenerationProgress();
     this.loading = false;
 
@@ -2493,6 +2527,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   private startGenerationProgress(total = 0, displayTotal?: number) {
     this.generationTotal = displayTotal ?? total;
     this.generationStartTime = Date.now();
+    this.generationDurationMs = null;
     this.generating = true;
     this.cdr.detectChanges();
     if (this.generationProgressInterval) {
@@ -2517,6 +2552,9 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
     if (this.generationPollInterval) {
       clearInterval(this.generationPollInterval);
       this.generationPollInterval = null;
+    }
+    if (this.generationStartTime) {
+      this.generationDurationMs = Date.now() - this.generationStartTime;
     }
     this.generationProgress = 100;
     this.cdr.detectChanges();
