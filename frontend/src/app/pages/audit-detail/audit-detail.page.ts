@@ -510,6 +510,11 @@ export class AuditDetailPageComponent implements OnInit {
   get deleteDateLabel(): string {
     const d = this.record?.conference_date;
     if (!d) return '';
+    // Use the string directly if it's YYYY-MM-DD to avoid timezone shifts (e.g. 2026-06-02 -> 02/06/2026)
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) {
+      const [y, m, day] = d.split('T')[0].split('-');
+      return `${day}/${m}/${y}`;
+    }
     try { return new Date(d).toLocaleDateString(); } catch { return String(d); }
   }
   get deleteTimeLabel(): string {

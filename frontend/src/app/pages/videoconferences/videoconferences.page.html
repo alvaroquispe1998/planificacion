@@ -262,7 +262,7 @@
         <div class="generation-progress-fill" [style.width.%]="generationProgress"></div>
       </div>
       <p class="generation-progress-hint">
-        Cada clase se crea individualmente en Aula Virtual y se concilia con Zoom. Tarda ~1&ndash;2 seg por clase &mdash; con {{ generationTotal || '?' }} clase(s) puede demorar hasta {{ ((generationTotal || 0) * 2) | number:'1.0-0' }} seg. No cierres esta ventana.
+        Cada horario se crea en Aula Virtual con el rango seleccionado y se registra para sincronizacion Zoom. No cierres esta ventana.
       </p>
     </div>
 
@@ -298,6 +298,10 @@
       <div class="summary-metric">
         <strong>{{ summary.requestedOccurrences }}</strong>
         <span>Procesadas</span>
+      </div>
+      <div class="summary-metric" *ngIf="generationDurationMs !== null">
+        <strong>{{ generationDurationLabel() }}</strong>
+        <span>Tiempo total</span>
       </div>
       <div class="summary-metric summary-metric-success">
         <strong>{{ summary.matched }}</strong>
@@ -504,7 +508,13 @@
       </article>
     </section>
 
-    <section class="generation-results-board" *ngIf="generationRows.length > 0">
+    <details class="generation-details-panel" *ngIf="generationRows.length > 0">
+      <summary>
+        <span>Ver detalle de resultados</span>
+        <strong>{{ generationRows.length }}</strong>
+      </summary>
+
+    <section class="generation-results-board">
       <article class="result-column" *ngIf="validationResultRows.length > 0">
         <header class="result-column-head">
           <div>
@@ -670,6 +680,7 @@
         </div>
       </article>
     </section>
+    </details>
 
     <div class="rows-shell">
       <div class="rows-header rows-header-actions">
