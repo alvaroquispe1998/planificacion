@@ -3418,7 +3418,7 @@ export class VideoconferenceService implements OnModuleInit {
                 }
             }
 
-            const ownerResult = await this.generateOccurrence(
+            const ownerResults = await this.generateOccurrence(
                 ownerOccurrence,
                 aulaVirtualContext,
                 zoomConfig.maxConcurrent,
@@ -3426,36 +3426,60 @@ export class VideoconferenceService implements OnModuleInit {
                 remoteMeetingsCache,
                 effectivePreferredUserId,
                 effectiveGroupName,
+                zoomConfig.timezone,
                 recurrentRange,
             );
-            results.push(ownerResult);
 
-            // Brief pause after each successful creation attempt to respect Aula Virtual
-            // and Zoom rate limits during bulk operations. Skipped when blocked/validation/error.
-            if (ownerResult.status === 'MATCHED' || ownerResult.status === 'CREATED_UNMATCHED') {
-                if (ownerOccurrence.override_is_temporary && ownerOccurrence.occurrence_type === 'RESCHEDULED') {
-                    await this.persistOccurrenceOverride({
-                        id: ownerOccurrence.override_id ?? newId(),
-                        schedule_id: ownerOccurrence.row.schedule_id,
-                        conference_date: ownerOccurrence.base_conference_date,
-                        action: 'RESCHEDULE',
-                        override_date: ownerOccurrence.effective_conference_date,
-                        override_start_time: compactTime(ownerOccurrence.effective_start_time),
-                        override_end_time: compactTime(ownerOccurrence.effective_end_time),
-                        reason_code: ownerOccurrence.override_reason_code,
-                        notes: ownerOccurrence.override_notes,
-                    });
+            for (const ownerResult of ownerResults) {
+                results.push(ownerResult);
+
+                // Brief pause after each successful creation attempt to respect Aula Virtual
+                // and Zoom rate limits during bulk operations. Skipped when blocked/validation/error.
+                if (ownerResult.status === 'MATCHED' || ownerResult.status === 'CREATED_UNMATCHED') {
+                    if (ownerOccurrence.override_is_temporary && ownerOccurrence.occurrence_type === 'RESCHEDULED') {
+                        await this.persistOccurrenceOverride({
+                            id: ownerOccurrence.override_id ?? newId(),
+                            schedule_id: ownerOccurrence.row.schedule_id,
+                            conference_date: ownerOccurrence.base_conference_date,
+                            action: 'RESCHEDULE',
+                            override_date: ownerOccurrence.effective_conference_date,
+                            override_start_time: compactTime(ownerOccurrence.effective_start_time),
+                            override_end_time: compactTime(ownerOccurrence.effective_end_time),
+                            reason_code: ownerOccurrence.override_reason_code,
+                            notes: ownerOccurrence.override_notes,
+                        });
+                    }
+                    await new Promise((resolve) => setTimeout(resolve, AULA_VIRTUAL_THROTTLE_MS));
                 }
-                await new Promise((resolve) => setTimeout(resolve, AULA_VIRTUAL_THROTTLE_MS));
-            }
 
-            const ownerRecord =
-                ownerResult.record_id
-                    ? await this.planningVideoconferencesRepo.findOne({ where: { id: ownerResult.record_id } })
-                    : null;
-            for (const childOccurrence of familyItems.filter((item) => item.inheritance.is_inherited)) {
-                const inheritedResult = await this.upsertInheritedOccurrence(childOccurrence, ownerRecord, ownerResult);
-                results.push(inheritedResult);
+                const ownerRecord =
+                    ownerResult.record_id
+                        ? await this.planningVideoconferencesRepo.findOne({ where: { id: ownerResult.record_id } })
+                        : null;
+
+                for (const childOccurrence of familyItems.filter((item) => item.inheritance.is_inherited)) {
+                    if (!ownerResult.conference_date) {
+                        continue;
+                    }
+                    const specificChild = {
+                        ...childOccurrence,
+                        occurrence_key: buildOccurrenceKey(childOccurrence.row.schedule_id, ownerResult.conference_date),
+                        base_conference_date: ownerResult.conference_date,
+                        effective_conference_date: ownerResult.conference_date,
+                        scheduled_start: buildDateTime(
+                            ownerResult.conference_date,
+                            childOccurrence.effective_start_time,
+                            zoomConfig.timezone,
+                        ),
+                        scheduled_end: buildDateTime(
+                            ownerResult.conference_date,
+                            childOccurrence.effective_end_time,
+                            zoomConfig.timezone,
+                        ),
+                    };
+                    const inheritedResult = await this.upsertInheritedOccurrence(specificChild, ownerRecord, ownerResult);
+                    results.push(inheritedResult);
+                }
             }
         }
 
@@ -3964,69 +3988,46 @@ export class VideoconferenceService implements OnModuleInit {
         occurrence: ExpandedOccurrence,
         aulaVirtualContext: AulaVirtualRequestContext,
         maxConcurrent: number,
-        zoomUsers: ZoomPoolUser[],
+        zoomPoolUsers: ZoomPoolUser[],
         remoteMeetingsCache: Map<string, ZoomMeetingSummary[] | null>,
-        preferredZoomUserId: string | null,
-        zoomGroupName: string,
-        recurrentRange: { startDate: string; endDate: string } | null = null,
-    ): Promise<GenerateResultItem> {
-        const validationError = this.validateScheduleForGeneration(occurrence.row);
-        if (validationError) {
-            return {
-                schedule_id: occurrence.row.schedule_id,
-                occurrence_key: occurrence.occurrence_key,
-                conference_date: occurrence.effective_conference_date,
-                status: 'VALIDATION_ERROR',
-                message: validationError,
-                record_id: null,
-                zoom_user_id: null,
-                zoom_user_email: null,
-                zoom_meeting_id: null,
-                link_mode: 'OWNED',
-                owner_videoconference_id: null,
-                inheritance: occurrence.inheritance,
-            };
-        }
-
-        const existingRows = await this.planningVideoconferencesRepo
-            .createQueryBuilder('conference')
-            .where('conference.planning_subsection_schedule_id = :scheduleId', { scheduleId: occurrence.row.schedule_id })
-            .andWhere('(conference.delete_status IS NULL OR conference.delete_status != :deletedStatus)', { deletedStatus: 'DELETED' })
-            .getMany();
-        const existing =
-            existingRows.find((conference) => {
-                if (conference.status === 'ERROR') {
-                    return false;
-                }
-                const conferenceDate = toDateOnly(conference.conference_date);
-                if (recurrentRange) {
-                    return (
-                        (conferenceDate >= recurrentRange.startDate && conferenceDate <= recurrentRange.endDate) ||
-                        doesStoredRecurrenceOverlapRange(
-                            conference.payload_json,
-                            recurrentRange.startDate,
-                            recurrentRange.endDate,
-                        )
-                    );
-                }
-                return conferenceDate === occurrence.effective_conference_date;
-            }) ?? null;
-        if (existing) {
-            // If the record was auto-created as INHERITED (when the parent was processed in a
-            // previous chunk) but this occurrence is now being processed as an owner, do NOT
-            // recreate it — but also do NOT count it as a "blocked duplicate". Surface it as
-            // a normal INHERITED result so the UI shows it in the "heredadas" column.
-            if (existing.link_mode === 'INHERITED' && !occurrence.inheritance.is_inherited) {
-                const inheritedStatus: GenerateResultItem['status'] = existing.status === 'MATCHED'
-                    ? 'MATCHED'
-                    : existing.status === 'CREATED_UNMATCHED'
-                        ? 'CREATED_UNMATCHED'
-                        : 'BLOCKED_EXISTING';
-                return {
-                    schedule_id: occurrence.row.schedule_id,
-                    occurrence_key: occurrence.occurrence_key,
-                    conference_date: occurrence.effective_conference_date,
-                    status: inheritedStatus,
+        preferredZoomUserId?: string | null,
+        preferredGroupName?: string | null,
+        timezone = 'America/Lima',
+        recurrentRange?: { startDate: string; endDate: string } | null,
+    ): Promise<GenerateResultItem[]> {
+        const now = new Date();
+        const conferenceDates = recurrentRange
+            ? enumerateConferenceDates(
+                  occurrence.row.day_of_week,
+                  recurrentRange.startDate,
+                  recurrentRange.endDate,
+              )
+            : [occurrence.effective_conference_date];
+        const dateOccurrences = conferenceDates.map((conferenceDate) => ({
+            ...occurrence,
+            occurrence_key: buildOccurrenceKey(occurrence.row.schedule_id, conferenceDate),
+            base_conference_date: conferenceDate,
+            effective_conference_date: conferenceDate,
+            scheduled_start: buildDateTime(conferenceDate, occurrence.effective_start_time, timezone),
+            scheduled_end: buildDateTime(conferenceDate, occurrence.effective_end_time, timezone),
+        }));
+        const existingRows = await this.loadExistingConferenceLookup(dateOccurrences);
+        const existingResults: GenerateResultItem[] = [];
+        for (const item of dateOccurrences) {
+            const existing = existingRows.get(`${item.row.schedule_id}::${toDateOnly(item.effective_conference_date)}`);
+            if (!existing) {
+                continue;
+            }
+            if (existing.link_mode === 'INHERITED' && !item.inheritance.is_inherited) {
+                existingResults.push({
+                    schedule_id: item.row.schedule_id,
+                    occurrence_key: item.occurrence_key,
+                    conference_date: item.effective_conference_date,
+                    status: existing.status === 'MATCHED'
+                        ? 'MATCHED'
+                        : existing.status === 'CREATED_UNMATCHED'
+                            ? 'CREATED_UNMATCHED'
+                            : 'BLOCKED_EXISTING',
                     message: 'Videoconferencia ya gestionada como herencia desde el horario padre.',
                     record_id: existing.id,
                     zoom_user_id: existing.zoom_user_id,
@@ -4034,184 +4035,297 @@ export class VideoconferenceService implements OnModuleInit {
                     zoom_meeting_id: existing.zoom_meeting_id,
                     link_mode: 'INHERITED',
                     owner_videoconference_id: existing.owner_videoconference_id,
-                    inheritance: occurrence.inheritance,
-                };
+                    inheritance: item.inheritance,
+                });
+                continue;
             }
-            const blockedMessage = existing.zoom_meeting_id
-                ? 'Este horario ya tenia una videoconferencia conciliada con Zoom desde una ejecucion anterior. No se genero un duplicado.'
-                : 'Este horario ya fue procesado en una ejecucion anterior pero aun sin conciliar con Zoom. Usa "Reintentar match" para vincularla.';
-            return {
-                schedule_id: occurrence.row.schedule_id,
-                occurrence_key: occurrence.occurrence_key,
-                conference_date: occurrence.effective_conference_date,
+            existingResults.push({
+                schedule_id: item.row.schedule_id,
+                occurrence_key: item.occurrence_key,
+                conference_date: item.effective_conference_date,
                 status: 'BLOCKED_EXISTING',
-                message: blockedMessage,
+                message: existing.zoom_meeting_id
+                    ? 'Este horario ya tenia una videoconferencia conciliada con Zoom desde una ejecucion anterior. No se genero un duplicado.'
+                    : 'Este horario ya fue procesado en una ejecucion anterior pero aun sin conciliar con Zoom. Usa "Reintentar match" para vincularla.',
                 record_id: existing.id,
                 zoom_user_id: existing.zoom_user_id,
                 zoom_user_email: existing.zoom_user_email,
                 zoom_meeting_id: existing.zoom_meeting_id,
                 link_mode: existing.link_mode ?? 'OWNED',
                 owner_videoconference_id: existing.owner_videoconference_id,
-                inheritance: occurrence.inheritance,
-            };
+                inheritance: item.inheritance,
+            });
+        }
+        const pendingOccurrences = dateOccurrences.filter(
+            (item) => !existingRows.has(`${item.row.schedule_id}::${toDateOnly(item.effective_conference_date)}`),
+        );
+
+        if (existingResults.length && !pendingOccurrences.length) {
+            return existingResults;
         }
 
-        let selectedZoomUser: ZoomPoolUser | null = null;
-        if (preferredZoomUserId) {
-            selectedZoomUser = zoomUsers.find((item) => item.zoom_user_id === preferredZoomUserId) ?? null;
-            if (!selectedZoomUser) {
-                return {
-                    schedule_id: occurrence.row.schedule_id,
-                    occurrence_key: occurrence.occurrence_key,
-                    conference_date: occurrence.effective_conference_date,
-                    status: 'ERROR',
-                    message: `El host sugerido (${preferredZoomUserId}) no pertenece al grupo Zoom "${zoomGroupName}" o esta inactivo.`,
+        const validationError = this.validateScheduleForGeneration(occurrence.row);
+        if (validationError) {
+            return [
+                ...existingResults,
+                ...pendingOccurrences.map((item) => ({
+                    schedule_id: item.row.schedule_id,
+                    occurrence_key: item.occurrence_key,
+                    conference_date: item.effective_conference_date,
+                    status: 'VALIDATION_ERROR' as const,
+                    message: validationError,
                     record_id: null,
                     zoom_user_id: null,
                     zoom_user_email: null,
                     zoom_meeting_id: null,
-                    link_mode: 'OWNED',
+                    link_mode: 'OWNED' as const,
                     owner_videoconference_id: null,
-                    inheritance: occurrence.inheritance,
-                };
+                    inheritance: item.inheritance,
+                })),
+            ];
+        }
+
+        let selectedZoomUser: ZoomPoolUser | null = null;
+        if (preferredZoomUserId) {
+            selectedZoomUser = zoomPoolUsers.find((item) => item.zoom_user_id === preferredZoomUserId) ?? null;
+            if (!selectedZoomUser) {
+                return [
+                    ...existingResults,
+                    ...pendingOccurrences.map((item) => ({
+                        schedule_id: item.row.schedule_id,
+                        occurrence_key: item.occurrence_key,
+                        conference_date: item.effective_conference_date,
+                        status: 'ERROR' as const,
+                        message: `El host sugerido (${preferredZoomUserId}) no pertenece al grupo Zoom "${preferredGroupName ?? ''}" o esta inactivo.`,
+                        record_id: null,
+                        zoom_user_id: null,
+                        zoom_user_email: null,
+                        zoom_meeting_id: null,
+                        link_mode: 'OWNED' as const,
+                        owner_videoconference_id: null,
+                        inheritance: item.inheritance,
+                    })),
+                ];
             }
         } else {
             const findResult = await this.findAvailableZoomUser(
                 occurrence.scheduled_start,
                 occurrence.scheduled_end,
-                zoomUsers,
+                zoomPoolUsers,
                 maxConcurrent,
                 remoteMeetingsCache,
             );
             selectedZoomUser = findResult.user;
         }
+
         if (!selectedZoomUser) {
-            return {
-                schedule_id: occurrence.row.schedule_id,
-                occurrence_key: occurrence.occurrence_key,
-                conference_date: occurrence.effective_conference_date,
-                status: 'NO_AVAILABLE_ZOOM_USER',
-                message:
-                    'No se encontro un usuario Zoom disponible para el horario con el margen definido.',
-                record_id: null,
-                zoom_user_id: null,
-                zoom_user_email: null,
-                zoom_meeting_id: null,
-                link_mode: 'OWNED',
-                owner_videoconference_id: null,
-                inheritance: occurrence.inheritance,
-            };
+            return [
+                ...existingResults,
+                ...pendingOccurrences.map((item) => ({
+                    schedule_id: item.row.schedule_id,
+                    occurrence_key: item.occurrence_key,
+                    conference_date: item.effective_conference_date,
+                    status: 'NO_AVAILABLE_ZOOM_USER' as const,
+                    message: 'No se encontro un usuario Zoom disponible para el horario con el margen definido.',
+                    record_id: null,
+                    zoom_user_id: null,
+                    zoom_user_email: null,
+                    zoom_meeting_id: null,
+                    link_mode: 'OWNED' as const,
+                    owner_videoconference_id: null,
+                    inheritance: item.inheritance,
+                })),
+            ];
         }
 
+        // Prepare Aula Virtual Payload
         const teacher = resolveTeacher(occurrence.row);
         const topic = occurrence.override_topic?.trim() || buildMeetingTopic(occurrence, teacher);
+        const effectiveRecurrentRange = existingResults.length ? null : recurrentRange ?? null;
         const aulaVirtualPayload = this.buildAulaVirtualPayload(
             occurrence,
             selectedZoomUser.zoom_user_id,
             teacher,
             topic,
-            recurrentRange,
+            effectiveRecurrentRange,
         );
 
-        const now = new Date();
-        let record = this.planningVideoconferencesRepo.create({
-            id: newId(),
-            planning_offer_id: occurrence.row.offer_id,
-            planning_section_id: occurrence.row.section_id,
-            planning_subsection_id: occurrence.row.subsection_id,
-            planning_subsection_schedule_id: occurrence.row.schedule_id,
-            conference_date: occurrence.effective_conference_date,
-            day_of_week: dayCodeForDate(occurrence.effective_conference_date),
-            start_time: compactTime(occurrence.effective_start_time),
-            end_time: compactTime(occurrence.effective_end_time),
-            scheduled_start: occurrence.scheduled_start,
-            scheduled_end: occurrence.scheduled_end,
-            zoom_user_id: selectedZoomUser.zoom_user_id,
-            zoom_user_email: selectedZoomUser.email,
-            zoom_user_name: selectedZoomUser.name,
-            zoom_meeting_id: null,
-            topic,
-            aula_virtual_name: aulaVirtualPayload.name,
-            join_url: null,
-            start_url: null,
-            link_mode: 'OWNED',
-            owner_videoconference_id: null,
-            inheritance_mapping_id: null,
-            status: 'CREATING',
-            match_attempts: 0,
-            matched_at: null,
-            error_message: null,
-            payload_json: {
-                ...aulaVirtualPayload,
-                occurrence_key: occurrence.occurrence_key,
-                occurrence_type: occurrence.occurrence_type,
-                base_conference_date: occurrence.base_conference_date,
-                effective_conference_date: occurrence.effective_conference_date,
-                override_id: occurrence.override_id,
-                override_reason_code: occurrence.override_reason_code,
-                override_notes: occurrence.override_notes,
-                override_topic: occurrence.override_topic,
-                recurrence_range: recurrentRange
-                    ? {
-                        mode: 'AULA_VIRTUAL_RANGE',
-                        start_date: recurrentRange.startDate,
-                        end_date: recurrentRange.endDate,
-                    }
-                    : null,
-            },
-            response_json: null,
-            created_at: now,
-            updated_at: now,
+        // Create records in "CREATING" status
+        let records = pendingOccurrences.map((item) => {
+            const itemAulaVirtualPayload = this.buildAulaVirtualPayload(
+                item,
+                selectedZoomUser.zoom_user_id,
+                teacher,
+                topic,
+                effectiveRecurrentRange,
+            );
+            return this.planningVideoconferencesRepo.create({
+                id: newId(),
+                planning_offer_id: item.row.offer_id,
+                planning_section_id: item.row.section_id,
+                planning_subsection_id: item.row.subsection_id,
+                planning_subsection_schedule_id: item.row.schedule_id,
+                conference_date: item.effective_conference_date,
+                day_of_week: dayCodeForDate(item.effective_conference_date),
+                start_time: compactTime(item.effective_start_time),
+                end_time: compactTime(item.effective_end_time),
+                scheduled_start: item.scheduled_start,
+                scheduled_end: item.scheduled_end,
+                zoom_user_id: selectedZoomUser.zoom_user_id,
+                zoom_user_email: selectedZoomUser.email,
+                zoom_user_name: selectedZoomUser.name,
+                zoom_meeting_id: null,
+                topic,
+                aula_virtual_name: itemAulaVirtualPayload.name,
+                join_url: null,
+                start_url: null,
+                status: 'CREATING',
+                link_mode: 'OWNED',
+                owner_videoconference_id: null,
+                inheritance_mapping_id: null,
+                match_attempts: 0,
+                matched_at: null,
+                error_message: null,
+                payload_json: {
+                    ...itemAulaVirtualPayload,
+                    occurrence_key: item.occurrence_key,
+                    occurrence_type: item.occurrence_type,
+                    base_conference_date: item.base_conference_date,
+                    effective_conference_date: item.effective_conference_date,
+                    override_id: item.override_id,
+                    override_reason_code: item.override_reason_code,
+                    override_notes: item.override_notes,
+                    override_topic: item.override_topic,
+                    recurrence_range: effectiveRecurrentRange
+                        ? {
+                            mode: 'AULA_VIRTUAL_RANGE',
+                            start_date: effectiveRecurrentRange.startDate,
+                            end_date: effectiveRecurrentRange.endDate,
+                        }
+                        : null,
+                },
+                response_json: null,
+                created_at: now,
+                updated_at: now,
+            });
         });
-        record = await this.planningVideoconferencesRepo.save(record);
+
+        records = await this.planningVideoconferencesRepo.save(records);
+
+        if (existingResults.length) {
+            const createdResults: GenerateResultItem[] = [];
+            for (let index = 0; index < records.length; index += 1) {
+                const record = records[index];
+                const item = pendingOccurrences[index];
+                const itemAulaVirtualPayload = this.buildAulaVirtualPayload(
+                    item,
+                    selectedZoomUser.zoom_user_id,
+                    teacher,
+                    topic,
+                    null,
+                );
+                try {
+                    const aulaVirtualResponse = await this.postAulaVirtualConference(
+                        aulaVirtualContext,
+                        itemAulaVirtualPayload,
+                    );
+                    record.response_json = aulaVirtualResponse;
+                    record.status = 'CREATED_UNMATCHED';
+                    record.error_message = null;
+                    record.updated_at = new Date();
+                    await this.planningVideoconferencesRepo.save(record);
+                    createdResults.push({
+                        schedule_id: item.row.schedule_id,
+                        occurrence_key: item.occurrence_key,
+                        conference_date: item.effective_conference_date,
+                        status: 'CREATED_UNMATCHED',
+                        message: 'Videoconferencia creada en Aula Virtual. Sincroniza el ID Zoom desde Auditoría.',
+                        record_id: record.id,
+                        zoom_user_id: record.zoom_user_id,
+                        zoom_user_email: record.zoom_user_email,
+                        zoom_meeting_id: null,
+                        link_mode: 'OWNED',
+                        owner_videoconference_id: null,
+                        inheritance: item.inheritance,
+                    });
+                } catch (error) {
+                    const errorMessage = toErrorMessage(error);
+                    record.status = 'ERROR';
+                    record.error_message = errorMessage;
+                    record.response_json = { error: errorMessage } as any;
+                    record.updated_at = new Date();
+                    await this.planningVideoconferencesRepo.save(record);
+                    createdResults.push({
+                        schedule_id: item.row.schedule_id,
+                        occurrence_key: item.occurrence_key,
+                        conference_date: item.effective_conference_date,
+                        status: 'ERROR',
+                        message: errorMessage,
+                        record_id: record.id,
+                        zoom_user_id: record.zoom_user_id,
+                        zoom_user_email: record.zoom_user_email,
+                        zoom_meeting_id: record.zoom_meeting_id,
+                        link_mode: 'OWNED',
+                        owner_videoconference_id: null,
+                        inheritance: item.inheritance,
+                    });
+                }
+            }
+            return [...existingResults, ...createdResults];
+        }
 
         try {
             const aulaVirtualResponse = await this.postAulaVirtualConference(
                 aulaVirtualContext,
                 aulaVirtualPayload,
             );
-            record.response_json = aulaVirtualResponse;
-            record.status = 'CREATED_UNMATCHED';
-            record.error_message = null;
-            record.updated_at = new Date();
-            await this.planningVideoconferencesRepo.save(record);
-            // Zoom meeting ID matching is deferred — use "Sincronizar datos Zoom" in Auditoría.
-            return {
+
+            for (const record of records) {
+                record.response_json = aulaVirtualResponse;
+                record.status = 'CREATED_UNMATCHED';
+                record.error_message = null;
+                record.updated_at = new Date();
+            }
+            await this.planningVideoconferencesRepo.save(records);
+
+            return records.map((record) => ({
                 schedule_id: occurrence.row.schedule_id,
-                occurrence_key: occurrence.occurrence_key,
-                conference_date: occurrence.effective_conference_date,
-                status: 'CREATED_UNMATCHED',
+                occurrence_key: `${occurrence.row.schedule_id}::${record.conference_date}`,
+                conference_date: record.conference_date,
+                status: 'CREATED_UNMATCHED' as const,
                 message: 'Videoconferencia creada en Aula Virtual. Sincroniza el ID Zoom desde Auditoría.',
                 record_id: record.id,
                 zoom_user_id: record.zoom_user_id,
                 zoom_user_email: record.zoom_user_email,
                 zoom_meeting_id: null,
-                link_mode: 'OWNED',
+                link_mode: 'OWNED' as const,
                 owner_videoconference_id: null,
                 inheritance: occurrence.inheritance,
-            };
+            }));
         } catch (error) {
-            record.status = 'ERROR';
-            record.error_message = toErrorMessage(error);
-            record.response_json = {
-                error: toErrorMessage(error),
-            };
-            record.updated_at = new Date();
-            await this.planningVideoconferencesRepo.save(record);
-            return {
+            const errorMessage = toErrorMessage(error);
+            for (const record of records) {
+                record.status = 'ERROR';
+                record.error_message = errorMessage;
+                record.response_json = { error: errorMessage } as any;
+                record.updated_at = new Date();
+            }
+            await this.planningVideoconferencesRepo.save(records);
+
+            return records.map((record) => ({
                 schedule_id: occurrence.row.schedule_id,
-                occurrence_key: occurrence.occurrence_key,
-                conference_date: occurrence.effective_conference_date,
-                status: 'ERROR',
-                message: toErrorMessage(error),
+                occurrence_key: `${occurrence.row.schedule_id}::${record.conference_date}`,
+                conference_date: record.conference_date,
+                status: 'ERROR' as const,
+                message: errorMessage,
                 record_id: record.id,
                 zoom_user_id: record.zoom_user_id,
                 zoom_user_email: record.zoom_user_email,
                 zoom_meeting_id: record.zoom_meeting_id,
-                link_mode: 'OWNED',
+                link_mode: 'OWNED' as const,
                 owner_videoconference_id: null,
                 inheritance: occurrence.inheritance,
-            };
+            }));
         }
     }
 
