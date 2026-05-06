@@ -430,7 +430,7 @@ export class PlanningInheritanceCopyLogEntity {
 }
 
 @Entity({ name: 'planning_subsection_videoconferences' })
-@Index(['planning_subsection_schedule_id', 'conference_date'], { unique: true })
+@Index(['planning_subsection_schedule_id', 'conference_date'])
 @Index(['zoom_user_id', 'conference_date'])
 @Index(['zoom_meeting_id'])
 @Index(['planning_offer_id', 'scheduled_start'])
