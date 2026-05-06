@@ -4280,6 +4280,12 @@ export class VideoconferenceService implements OnModuleInit {
                 audit_sync_status: ownerRecord?.audit_sync_status ?? 'PENDING',
                 audit_synced_at: ownerRecord?.audit_synced_at ?? null,
                 audit_sync_error: ownerRecord?.audit_sync_error ?? null,
+                delete_status: null,
+                deleted_at: null,
+                deleted_by: null,
+                delete_error: null,
+                zoom_deleted_at: null,
+                akademic_deleted_at: null,
                 updated_at: now,
             })
             : this.planningVideoconferencesRepo.create({
