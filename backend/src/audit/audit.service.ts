@@ -764,7 +764,18 @@ export class AuditService {
     }
     if (!record.zoom_meeting_id) {
       // No Zoom meeting ID yet — try to reconcile (match) it like generation does.
-      const reconciled = await this.videoconferenceService.reconcile(record.id);
+      const reconciled = await this.videoconferenceService.reconcile(record.id, {
+        maxAttempts: 1,
+        delayMs: 0,
+      });
+      if (!reconciled.matched) {
+        record.audit_sync_status = 'ERROR';
+        record.audit_synced_at = new Date();
+        record.audit_sync_error = reconciled.message;
+        record.updated_at = new Date();
+        await this.planningVideoconferencesRepo.save(record);
+        await this.syncInheritedAuditState(record.id);
+      }
       return this.getPlanningVideoconferenceAuditDetail(requestedRecord.id);
     }
 
@@ -905,8 +916,17 @@ export class AuditService {
         }
         if (after?.audit_sync_status === 'SYNCED') {
           result.synced += 1;
+          result.details.push({ id: row.id, ok: true });
+        } else if (after?.audit_sync_status === 'ERROR') {
+          result.errors += 1;
+          result.details.push({
+            id: row.id,
+            ok: false,
+            error: after.audit_sync_error ?? 'No se pudo sincronizar la videoconferencia.',
+          });
+        } else {
+          result.details.push({ id: row.id, ok: true });
         }
-        result.details.push({ id: row.id, ok: true });
       } catch (error) {
         result.errors += 1;
         result.details.push({ id: row.id, ok: false, error: this.toErrorMessage(error) });

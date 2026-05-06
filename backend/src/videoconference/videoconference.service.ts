@@ -3886,7 +3886,10 @@ export class VideoconferenceService implements OnModuleInit {
         return true;
     }
 
-    async reconcile(id: string): Promise<ReconcileResult> {
+    async reconcile(
+        id: string,
+        options: { maxAttempts?: number; delayMs?: number } = {},
+    ): Promise<ReconcileResult> {
         const recordId = String(id ?? '').trim();
         if (!recordId) {
             throw new BadRequestException('id es requerido.');
@@ -3945,6 +3948,7 @@ export class VideoconferenceService implements OnModuleInit {
             record.topic,
             record.scheduled_start,
             durationMinutes,
+            options,
         );
 
         if (matched) {
@@ -3969,7 +3973,7 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         record.status = record.zoom_meeting_id ? 'MATCHED' : 'CREATED_UNMATCHED';
-        record.match_attempts = (record.match_attempts ?? 0) + ZOOM_MATCH_ATTEMPTS;
+        record.match_attempts = (record.match_attempts ?? 0) + (options.maxAttempts ?? ZOOM_MATCH_ATTEMPTS);
         record.updated_at = new Date();
         const saved = await this.planningVideoconferencesRepo.save(record);
         return {
@@ -3981,6 +3985,123 @@ export class VideoconferenceService implements OnModuleInit {
                 saved,
                 'No se encontro una coincidencia unica en Zoom con el topic, hora y duracion esperados.',
             ),
+        };
+    }
+
+    async syncSectionFromAulaVirtual(
+        sectionId: string,
+        context: AulaVirtualRequestContext,
+    ): Promise<{
+        success: boolean;
+        message: string;
+        imported: number;
+        updated: number;
+    }> {
+        const sid = String(sectionId ?? '').trim();
+        if (!sid) {
+            throw new BadRequestException('sectionId (s) es requerido.');
+        }
+
+        // 1. Obtener datos del listado externo usando fetch nativo
+        const listUrl = new URL(`/web/conference/list?s=${sid}`, context.baseUrl);
+        let externalSessions: any[] = [];
+        try {
+            const response = await fetch(listUrl.toString(), {
+                headers: {
+                    accept: 'application/json, text/plain, */*',
+                    cookie: context.cookie,
+                    referer: context.baseUrl,
+                },
+            });
+            if (response.ok) {
+                const data = await response.json();
+                externalSessions = Array.isArray(data) ? data : [];
+            }
+        } catch (error) {
+            throw new Error(`Error al consultar listado de Aula Virtual: ${toErrorMessage(error)}`);
+        }
+
+        if (externalSessions.length === 0) {
+            return { success: true, message: 'No se encontraron sesiones en Aula Virtual para esta seccion.', imported: 0, updated: 0 };
+        }
+
+        // 2. Cargar horarios locales para esta seccion usando QueryBuilder para manejar la relacion indirecta
+        const schedules = await this.schedulesRepo
+            .createQueryBuilder('schedule')
+            .innerJoinAndSelect(PlanningSubsectionEntity, 'subsection', 'subsection.id = schedule.planning_subsection_id')
+            .innerJoinAndSelect(PlanningSectionEntity, 'section', 'section.id = subsection.planning_section_id')
+            .where('subsection.planning_section_id = :sid', { sid })
+            .getRawMany();
+
+        // 3. Procesar cada sesion externa
+        let imported = 0;
+        let updated = 0;
+        const now = new Date();
+
+        for (const ext of externalSessions) {
+            const extDate = toDateOnly(ext.startTime || ext.date);
+            const extZoomId = extractZoomMeetingIdFromUrl(ext.url);
+            const extTopic = ext.title || '';
+
+            // Intentar encontrar un horario local que coincida con el dia de la semana
+            const dayCode = dayCodeForDate(extDate);
+            // Al usar getRawMany, los nombres de los campos vienen con el alias de la tabla (ej: schedule_day_of_week)
+            const matchingRaw = schedules.find(s => s.schedule_day_of_week === dayCode);
+
+            if (!matchingRaw) continue;
+
+            // Buscar si ya existe el registro en nuestra BD
+            const existing = await this.planningVideoconferencesRepo.findOne({
+                where: {
+                    planning_subsection_schedule_id: matchingRaw.schedule_id,
+                    conference_date: extDate
+                }
+            });
+
+            if (existing) {
+                // Actualizar vinculo con Zoom si ha cambiado
+                if (existing.zoom_meeting_id !== extZoomId || existing.join_url !== ext.url) {
+                    existing.zoom_meeting_id = extZoomId ?? existing.zoom_meeting_id;
+                    existing.join_url = ext.url ?? existing.join_url;
+                    existing.topic = extTopic || existing.topic;
+                    existing.status = extZoomId ? 'MATCHED' : existing.status;
+                    existing.updated_at = now;
+                    await this.planningVideoconferencesRepo.save(existing);
+                    updated++;
+                }
+            } else {
+                // Importar registro faltante
+                const newRecord = this.planningVideoconferencesRepo.create({
+                    id: newId(),
+                    planning_offer_id: matchingRaw.section_planning_offer_id,
+                    planning_section_id: matchingRaw.subsection_planning_section_id,
+                    planning_subsection_id: matchingRaw.subsection_id,
+                    planning_subsection_schedule_id: matchingRaw.schedule_id,
+                    conference_date: extDate,
+                    day_of_week: dayCode,
+                    start_time: compactTime(ext.startTime || ext.start || ''),
+                    end_time: compactTime(ext.endTime || ext.end || ''),
+                    scheduled_start: new Date(ext.startTime || ext.date),
+                    scheduled_end: new Date(ext.endTime || ext.startTime || ext.date),
+                    zoom_meeting_id: extZoomId,
+                    topic: extTopic,
+                    join_url: ext.url,
+                    status: extZoomId ? 'MATCHED' : 'CREATED_UNMATCHED',
+                    link_mode: 'OWNED',
+                    payload_json: { imported_from_av_list: true, av_data: ext },
+                    created_at: now,
+                    updated_at: now
+                });
+                await this.planningVideoconferencesRepo.save(newRecord);
+                imported++;
+            }
+        }
+
+        return {
+            success: true,
+            message: `Sincronizacion completada: ${imported} nuevas, ${updated} actualizadas.`,
+            imported,
+            updated
         };
     }
 
@@ -7177,12 +7298,15 @@ export class VideoconferenceService implements OnModuleInit {
         topic: string,
         scheduledStart: Date,
         durationMinutes: number,
+        options: { maxAttempts?: number; delayMs?: number } = {},
     ): Promise<ZoomMatchResult | null> {
         if (!userEmail.trim()) {
             return null;
         }
 
-        for (let attempt = 1; attempt <= ZOOM_MATCH_ATTEMPTS; attempt += 1) {
+        const maxAttempts = Math.max(1, Math.min(ZOOM_MATCH_ATTEMPTS, Number(options.maxAttempts ?? ZOOM_MATCH_ATTEMPTS) || ZOOM_MATCH_ATTEMPTS));
+        const delayMs = Math.max(0, Number(options.delayMs ?? ZOOM_MATCH_DELAY_MS) || 0);
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             const meetings = await this.zoomAccountService.listUserMeetingsByTypes(userEmail, [
                 'upcoming',
                 'live',
@@ -7213,8 +7337,8 @@ export class VideoconferenceService implements OnModuleInit {
                 };
             }
 
-            if (attempt < ZOOM_MATCH_ATTEMPTS) {
-                await sleep(ZOOM_MATCH_DELAY_MS);
+            if (attempt < maxAttempts && delayMs > 0) {
+                await sleep(delayMs);
             }
         }
 
@@ -8192,4 +8316,10 @@ function toErrorMessage(error: unknown) {
 
 function sleep(ms: number) {
     return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function extractZoomMeetingIdFromUrl(url: string): string | null {
+    if (!url) return null;
+    const match = url.match(/\/j\/(\d+)/);
+    return match ? match[1] : null;
 }
