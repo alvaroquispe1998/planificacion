@@ -132,6 +132,14 @@ export class VideoconferenceController {
         return this.service.reconcile(id);
     }
 
+    @Post('sync-aula-virtual/:sectionId')
+    async syncFromAulaVirtual(
+        @Param('sectionId') sectionId: string,
+        @Body('context') context: any,
+    ) {
+        return this.service.syncSectionFromAulaVirtual(sectionId, context);
+    }
+
     @Delete(':id')
     async deleteVideoconference(@Param('id') id: string) {
         return this.service.deleteVideoconference(id);
