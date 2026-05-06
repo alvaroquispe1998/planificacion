@@ -3705,27 +3705,22 @@ export class VideoconferenceService implements OnModuleInit {
         const conferenceDate = toDateOnly(record.conference_date);
         const akademicDate = toAkademicDate(conferenceDate);
 
+        const topicTrimmed = (topic || '').trim();
         let match =
-            rows.find((r) => r.name.trim() === topic.trim() && isAkademicDateWithinDays(r.date, akademicDate, 1)) ??
+            rows.find((r) => (r.name || '').trim() === topicTrimmed && isAkademicDateWithinDays(r.date, akademicDate, 1)) ??
             null;
 
         // Fallback: search by date if courseCode search didn't yield a match.
-        if (!match && record.conference_date) {
-            const rawDate = record.conference_date;
-            const conferenceDate = toDateOnly(typeof rawDate === 'string' ? rawDate : (rawDate as Date).toISOString());
-            const [year, month, day] = conferenceDate.split('-');
-            const akademicDate = year && month && day ? `${day}/${month}/${year}` : null;
-            if (akademicDate) {
-                const listing = await this.listAulaVirtualConferences(
-                    context,
-                    akademicDate,
-                    akademicDate,
-                    topic,
-                    100,
-                );
-                rows = listing.rows;
-                match = rows.find((r) => r.name === topic) ?? null;
-            }
+        if (!match && akademicDate) {
+            const listing = await this.listAulaVirtualConferences(
+                context,
+                akademicDate,
+                akademicDate,
+                topic,
+                100,
+            );
+            rows = listing.rows;
+            match = rows.find((r) => r.name === topic) ?? null;
         }
 
         if (!match) {
