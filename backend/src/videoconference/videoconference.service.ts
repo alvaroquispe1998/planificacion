@@ -4826,177 +4826,119 @@ export class VideoconferenceService implements OnModuleInit {
                 vc_course_name: effectiveCourse?.name ?? null,
                 vc_section_id: effectiveSection?.id ?? row.vc_section_id,
                 vc_section_name: effectiveSection?.name ?? row.vc_section_name,
-                vc_source: useSourceContext ? 'sync_source' : offerVcContext.vc_source,
+                vc_source: useSourceContext ? ('sync_source' as const) : offerVcContext.vc_source,
                 vc_context_message: useSourceContext
                     ? 'Contexto AV restaurado desde la sincronizacion.'
                     : offerVcContext.vc_context_message,
             };
         });
 
-        // Fallback: si la seccion VC matcheada esta "vacia" (sin docentes y sin
-        // alumnos) probablemente sea un duplicado obsoleto. Buscar una hermana
-        // con el mismo course_id + name que tenga docentes o alumnos.
-        const isEmptyVcSection = (section: VcSectionEntity | null | undefined) => {
-            if (!section) return false;
-            const teachers = Array.isArray(section.teachers_json) ? section.teachers_json : [];
-            const hasTeachers = teachers.length > 0;
-            const hasStudents =
-                typeof section.student_count === 'number' && section.student_count > 0;
-            return !hasTeachers && !hasStudents;
-        };
-
-        const replacementsNeeded = new Map<string, { course_id: string; name: string }>();
-        for (const row of resolved) {
-            const sectionId = row.vc_section_id ?? null;
-            if (!sectionId) continue;
-            const section = vcSectionMap.get(sectionId);
-            if (!section || !isEmptyVcSection(section)) continue;
-            const courseId = (row.vc_course_id ?? section.course_id ?? '').trim();
-            const sectionName = (row.vc_section_name ?? section.name ?? '').trim();
-            if (!courseId || !sectionName) continue;
-            const key = `${courseId}::${sectionName}`;
-            if (!replacementsNeeded.has(key)) {
-                replacementsNeeded.set(key, { course_id: courseId, name: sectionName });
-            }
-        }
-
-        if (replacementsNeeded.size === 0) {
-            return resolved;
-        }
-
-        const courseIdsToQuery = uniqueIds(
-            [...replacementsNeeded.values()].map((item) => item.course_id),
-        );
-        const namesToQuery = Array.from(
-            new Set([...replacementsNeeded.values()].map((item) => item.name)),
-        );
-        const candidateSiblings = await this.vcSectionsRepo.find({
-            where: {
-                course_id: In(courseIdsToQuery),
-                name: In(namesToQuery),
-            },
-        });
-
-        const replacementByKey = new Map<string, VcSectionEntity>();
-        for (const sibling of candidateSiblings) {
-            if (isEmptyVcSection(sibling)) continue;
-            const key = `${sibling.course_id}::${sibling.name}`;
-            const existing = replacementByKey.get(key);
-            if (!existing) {
-                replacementByKey.set(key, sibling);
-                continue;
-            }
-            // Preferir la que tenga mas alumnos; en empate, la que tenga docentes.
-            const existingCount = existing.student_count ?? 0;
-            const siblingCount = sibling.student_count ?? 0;
-            if (siblingCount > existingCount) {
-                replacementByKey.set(key, sibling);
-            }
-        }
-
-        if (replacementByKey.size === 0) {
-            return resolved;
-        }
+        // 2. Resolve "Leader" sections for any row that might have better sibling (same course/name but more students/teachers)
+        const sectionIdsToResolve = resolved
+            .map((r) => r.vc_section_id)
+            .filter((id): id is string => Boolean(id));
+        const effectiveSectionMap = await this.resolveEffectiveVcSectionIds(sectionIdsToResolve);
 
         return resolved.map((row) => {
-            const sectionId = row.vc_section_id ?? null;
-            if (!sectionId) return row;
-            const currentSection = vcSectionMap.get(sectionId);
-            if (!currentSection || !isEmptyVcSection(currentSection)) return row;
-            const courseId = (row.vc_course_id ?? currentSection.course_id ?? '').trim();
-            const sectionName = (row.vc_section_name ?? currentSection.name ?? '').trim();
-            const replacement = replacementByKey.get(`${courseId}::${sectionName}`);
-            if (!replacement || replacement.id === sectionId) return row;
+            const currentId = row.vc_section_id;
+            if (!currentId) return row;
+            const effectiveId = effectiveSectionMap.get(currentId);
+            if (!effectiveId || effectiveId === currentId) return row;
+
+            const replacement = vcSectionMap.get(effectiveId) || null;
             return {
                 ...row,
-                vc_section_id: replacement.id,
+                vc_section_id: effectiveId,
+                vc_section_name: replacement?.name ?? row.vc_section_name,
             };
         });
     }
 
     /**
      * Dada una lista de vc_section_id, devuelve un map id_original -> id_efectivo.
-     * Si la sección original esta "vacía" (sin docentes y sin alumnos), busca una
-     * hermana con el mismo course_id + name que tenga datos reales y devuelve
-     * el id de esa hermana. Caso contrario devuelve el mismo id.
+     * Siempre busca el "Mejor Candidato" entre todas las secciones que compartan
+     * el mismo course_id + name.
      *
-     * Mismo criterio que `resolveRowsWithAvContext` para mantener coherencia
-     * entre la previsualización/creación de videoconferencias y la copia
-     * Akademic de herencias.
+     * Criterio de prioridad:
+     * 1. Que tenga teachers_json.
+     * 2. El que tenga mayor student_count (desempate).
      */
     private async resolveEffectiveVcSectionIds(
         sectionIds: Array<string | null | undefined>,
     ): Promise<Map<string, string>> {
-        const isEmpty = (section: VcSectionEntity | null | undefined) => {
-            if (!section) return false;
-            const teachers = Array.isArray(section.teachers_json) ? section.teachers_json : [];
-            const hasTeachers = teachers.length > 0;
-            const hasStudents =
-                typeof section.student_count === 'number' && section.student_count > 0;
-            return !hasTeachers && !hasStudents;
-        };
-
         const out = new Map<string, string>();
-        const unique = Array.from(
+        const uniqueIds = Array.from(
             new Set(sectionIds.filter((id): id is string => typeof id === 'string' && id.length > 0)),
         );
-        if (unique.length === 0) return out;
+        if (uniqueIds.length === 0) return out;
 
-        const sections = await this.vcSectionsRepo.find({ where: { id: In(unique) } });
+        const sections = await this.vcSectionsRepo.find({ where: { id: In(uniqueIds) } });
         const sectionMap = new Map(sections.map((s) => [s.id, s] as const));
 
-        const replacementsNeeded = new Map<string, { course_id: string; name: string }>();
+        // Group by course_id and name to find all siblings
+        const pairsToQuery = new Map<string, { courseId: string; name: string }>();
         for (const section of sections) {
-            if (!isEmpty(section)) continue;
             const courseId = (section.course_id ?? '').trim();
             const sectionName = (section.name ?? '').trim();
             if (!courseId || !sectionName) continue;
-            replacementsNeeded.set(`${courseId}::${sectionName}`, {
-                course_id: courseId,
-                name: sectionName,
-            });
+            pairsToQuery.set(`${courseId}::${sectionName}`, { courseId, name: sectionName });
         }
 
-        if (replacementsNeeded.size === 0) {
-            for (const id of unique) out.set(id, id);
+        if (pairsToQuery.size === 0) {
+            for (const id of uniqueIds) out.set(id, id);
             return out;
         }
 
-        const courseIdsToQuery = Array.from(
-            new Set([...replacementsNeeded.values()].map((i) => i.course_id)),
-        );
-        const namesToQuery = Array.from(
-            new Set([...replacementsNeeded.values()].map((i) => i.name)),
-        );
+        const courseIds = Array.from(new Set([...pairsToQuery.values()].map((p) => p.courseId)));
+        const names = Array.from(new Set([...pairsToQuery.values()].map((p) => p.name)));
+
         const candidates = await this.vcSectionsRepo.find({
-            where: { course_id: In(courseIdsToQuery), name: In(namesToQuery) },
+            where: { course_id: In(courseIds), name: In(names) },
         });
 
-        const replacementByKey = new Map<string, VcSectionEntity>();
-        for (const sibling of candidates) {
-            if (isEmpty(sibling)) continue;
-            const key = `${sibling.course_id}::${sibling.name}`;
-            const existing = replacementByKey.get(key);
+        // Resolve the "Best Candidate" for each Course::Name pair
+        const bestCandidateByPair = new Map<string, VcSectionEntity>();
+        for (const candidate of candidates) {
+            const key = `${(candidate.course_id ?? '').trim()}::${(candidate.name ?? '').trim()}`;
+            const existing = bestCandidateByPair.get(key);
+
+            const candidateTeachers = Array.isArray(candidate.teachers_json) ? candidate.teachers_json : [];
+            const hasTeachers = candidateTeachers.length > 0;
+            const candidateCount = candidate.student_count ?? 0;
+
             if (!existing) {
-                replacementByKey.set(key, sibling);
+                bestCandidateByPair.set(key, candidate);
                 continue;
             }
+
+            const existingTeachers = Array.isArray(existing.teachers_json) ? existing.teachers_json : [];
+            const existingHasTeachers = existingTeachers.length > 0;
             const existingCount = existing.student_count ?? 0;
-            const siblingCount = sibling.student_count ?? 0;
-            if (siblingCount > existingCount) {
-                replacementByKey.set(key, sibling);
+
+            // Priority 1: Has teachers
+            if (hasTeachers && !existingHasTeachers) {
+                bestCandidateByPair.set(key, candidate);
+                continue;
+            }
+            if (!hasTeachers && existingHasTeachers) {
+                continue;
+            }
+
+            // Priority 2: Max student count (Tie-breaker if both have/don't have teachers)
+            if (candidateCount > existingCount) {
+                bestCandidateByPair.set(key, candidate);
             }
         }
 
-        for (const id of unique) {
+        for (const id of uniqueIds) {
             const section = sectionMap.get(id);
-            if (!section || !isEmpty(section)) {
+            if (!section) {
                 out.set(id, id);
                 continue;
             }
             const key = `${(section.course_id ?? '').trim()}::${(section.name ?? '').trim()}`;
-            const replacement = replacementByKey.get(key);
-            out.set(id, replacement?.id ?? id);
+            const best = bestCandidateByPair.get(key);
+            out.set(id, best?.id ?? id);
         }
 
         return out;
