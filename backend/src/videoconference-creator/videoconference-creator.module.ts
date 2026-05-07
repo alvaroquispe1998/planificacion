@@ -14,12 +14,14 @@ import {
     ZoomGroupEntity,
     ZoomGroupUserEntity,
 } from '../videoconference/videoconference.entity';
+import { AuthModule } from '../auth/auth.module';
 import { VideoconferenceModule } from '../videoconference/videoconference.module';
 import { VideoconferenceCreatorController } from './videoconference-creator.controller';
 import { VideoconferenceCreatorService } from './videoconference-creator.service';
 
 @Module({
     imports: [
+        AuthModule,
         VideoconferenceModule,
         TypeOrmModule.forFeature([
             ManualVideoconferenceEntity,

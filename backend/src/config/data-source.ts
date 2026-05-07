@@ -9,11 +9,16 @@
  *   DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
  */
 import 'reflect-metadata';
+import { join } from 'path';
 import * as dotenv from 'dotenv';
 import { DataSource } from 'typeorm';
 import { appEntities } from './typeorm.config';
 
 dotenv.config();
+
+// __dirname = dist/config/ en producción, src/config/ en desarrollo.
+// El glob {.ts,.js} cubre ambos entornos.
+const migrationsPath = join(__dirname, '../migrations/*{.ts,.js}');
 
 export const AppDataSource = new DataSource({
   type: 'mysql',
@@ -23,7 +28,7 @@ export const AppDataSource = new DataSource({
   password: process.env.DB_PASSWORD ?? 'root',
   database: process.env.DB_NAME ?? 'uai_planning',
   entities: appEntities,
-  migrations: ['src/migrations/*.ts'],
+  migrations: [migrationsPath],
   synchronize: false,
   timezone: 'Z',
 });
