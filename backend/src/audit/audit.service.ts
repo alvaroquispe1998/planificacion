@@ -547,6 +547,7 @@ export class AuditService {
       .addSelect('subsection.code', 'subsection_code')
       .addSelect('subsection.kind', 'subsection_kind')
       .addSelect('subsection.denomination', 'subsection_denomination')
+      .addSelect('subsection.vc_section_id', 'vc_section_id')
       .addSelect('MIN(vc.conference_date)', 'first_conference_date')
       .addSelect('MAX(vc.conference_date)', 'last_conference_date')
       .addSelect('COUNT(*)', 'session_count')
@@ -576,6 +577,7 @@ export class AuditService {
       .addGroupBy('subsection.code')
       .addGroupBy('subsection.kind')
       .addGroupBy('subsection.denomination')
+      .addGroupBy('subsection.vc_section_id')
       .orderBy('offer.course_code', 'ASC')
       .addOrderBy('section.external_code', 'ASC')
       .addOrderBy('section.code', 'ASC')
@@ -593,6 +595,7 @@ export class AuditService {
         planning_section_id: planningSectionId,
         planning_subsection_id: planningSubsectionId,
         source_section_id: recordString(row, 'source_section_id'),
+        vc_section_id: recordString(row, 'vc_section_id'),
         semester_id: recordString(row, 'semester_id'),
         semester_name: recordString(row, 'semester_name'),
         campus_id: recordString(row, 'campus_id'),

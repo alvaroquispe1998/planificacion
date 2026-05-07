@@ -291,6 +291,14 @@
   white-space: nowrap;
 }
 
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .pagination-bar {
   display: flex;
   justify-content: flex-end;

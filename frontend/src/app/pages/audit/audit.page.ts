@@ -47,6 +47,7 @@ export class AuditPageComponent implements OnInit {
   syncing = false;
   readonly syncBatchSize = 10;
   syncingAulaVirtual = false;
+  syncingAulaVirtualRowId = '';
   readonly aulaVirtualBatchSize = 5;
   syncProgress: { processed: number; total: number } = { processed: 0, total: 0 };
   aulaVirtualSyncProgress: { processed: number; total: number } = { processed: 0, total: 0 };
@@ -483,7 +484,7 @@ export class AuditPageComponent implements OnInit {
   }
 
   async syncAulaVirtual() {
-    if (this.syncing || this.syncingAulaVirtual) return;
+    if (this.syncing || this.syncingAulaVirtual || this.syncingAulaVirtualRowId) return;
 
     this.syncingAulaVirtual = true;
     this.syncResultMessage = '';
@@ -556,6 +557,48 @@ export class AuditPageComponent implements OnInit {
         return;
       }
       this.syncResultMessage = err?.error?.message ?? 'No se pudo sincronizar desde Aula Virtual.';
+      this.cdr.detectChanges();
+    }
+  }
+
+  async syncAulaVirtualRow(row: any) {
+    if (this.syncing || this.syncingAulaVirtual || this.syncingAulaVirtualRowId) return;
+
+    const vcSectionId = row?.vc_section_id || '';
+    if (!row?.planning_section_id || !row?.planning_subsection_id || !vcSectionId) {
+      this.syncHadErrors = true;
+      this.syncResultMessage = 'Esta fila no tiene el vc_section_id necesario para consultar Aula Virtual.';
+      this.cdr.detectChanges();
+      return;
+    }
+
+    this.syncingAulaVirtualRowId = row.id || row.planning_subsection_id;
+    this.syncResultMessage = '';
+    this.syncHadErrors = false;
+    this.cdr.detectChanges();
+
+    try {
+      const res = await firstValueFrom(
+        this.api.syncAulaVirtualVideoconferenceSections({
+          limit: 1,
+          offset: 0,
+          planning_section_id: row.planning_section_id,
+          planning_subsection_id: row.planning_subsection_id,
+          vc_section_id: vcSectionId,
+        }),
+      );
+
+      const imported = Math.max(0, Number(res?.imported ?? 0));
+      const updated = Math.max(0, Number(res?.updated ?? 0));
+      const errors = Math.max(0, Number(res?.errors ?? 0));
+      this.syncingAulaVirtualRowId = '';
+      this.syncHadErrors = errors > 0;
+      this.syncResultMessage = `Aula Virtual revisado para ${row.course_code || 'la seccion'}: ${imported} nuevas | ${updated} actualizadas${errors ? ' | ' + errors + ' con error' : ''}.`;
+      this.loadRows();
+    } catch (err: any) {
+      this.syncingAulaVirtualRowId = '';
+      this.syncHadErrors = true;
+      this.syncResultMessage = err?.error?.message ?? 'No se pudo revisar esta seccion en Aula Virtual.';
       this.cdr.detectChanges();
     }
   }

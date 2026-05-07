@@ -10,20 +10,20 @@
     </div>
     <div class="hero-actions">
       <button type="button" class="btn btn-primary" (click)="syncPending()"
-        [disabled]="loading || syncing || syncingAulaVirtual || totals.pending_audit === 0"
+        [disabled]="loading || syncing || syncingAulaVirtual || syncingAulaVirtualRowId || totals.pending_audit === 0"
         [title]="totals.pending_audit === 0 ? 'No hay sesiones pendientes' : ('Sincroniza automaticamente en lotes de ' + syncBatchSize + ' VCs')">
         {{ syncing
           ? ('Sincronizando ' + (syncProgress.processed || 0) + '/' + (syncProgress.total || 0) + '…')
           : ('Sincronizar pendientes' + (totals.pending_audit ? ' (' + totals.pending_audit + ')' : '')) }}
       </button>
       <button type="button" class="btn btn-secondary" (click)="syncAulaVirtual()"
-        [disabled]="loading || syncing || syncingAulaVirtual"
+        [disabled]="loading || syncing || syncingAulaVirtual || syncingAulaVirtualRowId"
         [title]="'Recorre todas las secciones existentes con ID de Aula Virtual en lotes de ' + aulaVirtualBatchSize">
         {{ syncingAulaVirtual
           ? ('Aula Virtual ' + (aulaVirtualSyncProgress.processed || 0) + '/' + (aulaVirtualSyncProgress.total || 0) + '...')
           : 'Sincronizar Aula Virtual' }}
       </button>
-      <button type="button" class="btn btn-secondary" (click)="loadRows()" [disabled]="loading || syncing || syncingAulaVirtual">
+      <button type="button" class="btn btn-secondary" (click)="loadRows()" [disabled]="loading || syncing || syncingAulaVirtual || syncingAulaVirtualRowId">
         {{ loading ? 'Actualizando...' : 'Recargar lista' }}
       </button>
     </div>
@@ -214,9 +214,16 @@
               </div>
             </td>
             <td class="action-col">
-              <button type="button" class="btn btn-primary btn-sm" (click)="openSessions(row)">
-                Ver sesiones
-              </button>
+              <div class="row-actions">
+                <button type="button" class="btn btn-secondary btn-sm" (click)="syncAulaVirtualRow(row)"
+                  [disabled]="loading || syncing || syncingAulaVirtual || syncingAulaVirtualRowId || !row.vc_section_id"
+                  [title]="row.vc_section_id ? ('Consultar Aula Virtual con vc_section_id ' + row.vc_section_id) : 'Esta fila no tiene vc_section_id'">
+                  {{ syncingAulaVirtualRowId === row.id ? 'Revisando...' : 'Revisar Aula Virtual' }}
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" (click)="openSessions(row)">
+                  Ver sesiones
+                </button>
+              </div>
             </td>
           </tr>
         </tbody>
