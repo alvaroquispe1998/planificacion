@@ -3,6 +3,7 @@ export const WINDOW_PERMISSIONS = {
   CONFLICTS: 'window.conflicts',
   AUDIT: 'window.audit',
   VIDEOCONFERENCES: 'window.videoconferences',
+  VIDEOCONFERENCE_CREATOR: 'window.videoconference_creator',
   SECURITY: 'window.security',
   SETTINGS: 'window.settings',
 } as const;
@@ -26,6 +27,10 @@ export const ACTION_PERMISSIONS = {
   VIDEOCONFERENCES_REPROGRAMACIONES_VIEW: 'action.videoconferences.reprogramaciones.view',
   AUDIT_EXPORT: 'action.audit.export',
   SYNC_EXECUTE: 'action.settings.sync_execute',
+  VIDEOCONFERENCE_CREATOR_VIEW: 'action.videoconference_creator.view',
+  VIDEOCONFERENCE_CREATOR_CREATE_UNIQUE: 'action.videoconference_creator.create_unique',
+  VIDEOCONFERENCE_CREATOR_CREATE_WEEKLY: 'action.videoconference_creator.create_weekly',
+  VIDEOCONFERENCE_CREATOR_APPROVE_BACKUP: 'action.videoconference_creator.approve_backup',
 } as const;
 
 export const ROLE_CODES = {
@@ -260,6 +265,52 @@ export const PERMISSION_SEEDS = [
     parent_window_code: WINDOW_PERMISSIONS.SETTINGS,
     sort_order: 200,
   },
+  // ── Videoconference Creator ─────────────────────────────────────────────────
+  {
+    code: WINDOW_PERMISSIONS.VIDEOCONFERENCE_CREATOR,
+    type: 'WINDOW' as const,
+    description: 'Acceso al modulo de creacion de videoconferencias.',
+    display_name: 'Crear Videoconferencias',
+    group_key: 'videoconference_creator',
+    parent_window_code: null,
+    sort_order: 45,
+  },
+  {
+    code: ACTION_PERMISSIONS.VIDEOCONFERENCE_CREATOR_VIEW,
+    type: 'ACTION' as const,
+    description: 'Ver el modulo de creacion de videoconferencias y las propias reuniones.',
+    display_name: 'Ver creador VC',
+    group_key: 'videoconference_creator',
+    parent_window_code: WINDOW_PERMISSIONS.VIDEOCONFERENCE_CREATOR,
+    sort_order: 210,
+  },
+  {
+    code: ACTION_PERMISSIONS.VIDEOCONFERENCE_CREATOR_CREATE_UNIQUE,
+    type: 'ACTION' as const,
+    description: 'Crear videoconferencias unicas (fecha/hora puntual).',
+    display_name: 'Crear VC unica',
+    group_key: 'videoconference_creator',
+    parent_window_code: WINDOW_PERMISSIONS.VIDEOCONFERENCE_CREATOR,
+    sort_order: 211,
+  },
+  {
+    code: ACTION_PERMISSIONS.VIDEOCONFERENCE_CREATOR_CREATE_WEEKLY,
+    type: 'ACTION' as const,
+    description: 'Crear videoconferencias recurrentes semanales.',
+    display_name: 'Crear VC semanal',
+    group_key: 'videoconference_creator',
+    parent_window_code: WINDOW_PERMISSIONS.VIDEOCONFERENCE_CREATOR,
+    sort_order: 212,
+  },
+  {
+    code: ACTION_PERMISSIONS.VIDEOCONFERENCE_CREATOR_APPROVE_BACKUP,
+    type: 'ACTION' as const,
+    description: 'Aprobar borradores sin host usando el backup del grupo.',
+    display_name: 'Aprobar VC con backup',
+    group_key: 'videoconference_creator',
+    parent_window_code: WINDOW_PERMISSIONS.VIDEOCONFERENCE_CREATOR,
+    sort_order: 213,
+  },
 ] as const;
 
 export const ROLE_SEEDS = [
@@ -288,6 +339,11 @@ export const ROLE_SEEDS = [
       ACTION_PERMISSIONS.VIDEOCONFERENCES_ZOOM_USERS_VIEW,
       ACTION_PERMISSIONS.VIDEOCONFERENCES_CURSOS_ESPECIALES_VIEW,
       ACTION_PERMISSIONS.VIDEOCONFERENCES_REPROGRAMACIONES_VIEW,
+      WINDOW_PERMISSIONS.VIDEOCONFERENCE_CREATOR,
+      ACTION_PERMISSIONS.VIDEOCONFERENCE_CREATOR_VIEW,
+      ACTION_PERMISSIONS.VIDEOCONFERENCE_CREATOR_CREATE_UNIQUE,
+      ACTION_PERMISSIONS.VIDEOCONFERENCE_CREATOR_CREATE_WEEKLY,
+      ACTION_PERMISSIONS.VIDEOCONFERENCE_CREATOR_APPROVE_BACKUP,
     ],
   },
 ] as const;

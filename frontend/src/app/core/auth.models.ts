@@ -3,6 +3,7 @@ export type WindowCode =
   | 'window.conflicts'
   | 'window.audit'
   | 'window.videoconferences'
+  | 'window.videoconference_creator'
   | 'window.security'
   | 'window.settings';
 
@@ -24,6 +25,10 @@ export type PermissionCode =
   | 'action.videoconferences.zoom_users.view'
   | 'action.videoconferences.cursos_especiales.view'
   | 'action.videoconferences.reprogramaciones.view'
+  | 'action.videoconference_creator.view'
+  | 'action.videoconference_creator.create_unique'
+  | 'action.videoconference_creator.create_weekly'
+  | 'action.videoconference_creator.approve_backup'
   | 'action.audit.export'
   | 'action.settings.sync_execute';
 

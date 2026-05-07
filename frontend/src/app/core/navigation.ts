@@ -1,6 +1,6 @@
 import { PermissionCode, WindowCode } from './auth.models';
 
-export type AppModuleKey = 'planning' | 'videoconferences' | 'integrations' | 'administration';
+export type AppModuleKey = 'planning' | 'videoconferences' | 'videoconference_creator' | 'integrations' | 'administration';
 
 type NavMatch = {
   exact?: string[];
@@ -200,6 +200,35 @@ export const APP_NAV_GROUPS: NavGroup[] = [
             window: 'window.audit',
             match: {
               exact: ['/analisis/transcripcion'],
+            },
+          },
+        ],
+      },
+      {
+        key: 'videoconference_creator',
+        label: 'Crear Videoconferencias',
+        hint: 'Reuniones Zoom manuales',
+        icon: 'camera',
+        children: [
+          {
+            label: 'Crear reunión',
+            path: '/videoconferences/creator',
+            icon: 'spark',
+            window: 'window.videoconference_creator',
+            permission: 'action.videoconference_creator.view',
+            match: {
+              exact: ['/videoconferences/creator'],
+              prefix: ['/videoconferences/creator/'],
+            },
+          },
+          {
+            label: 'Borradores sin host',
+            path: '/videoconferences/creator/drafts',
+            icon: 'history',
+            window: 'window.videoconference_creator',
+            permission: 'action.videoconference_creator.approve_backup',
+            match: {
+              exact: ['/videoconferences/creator/drafts'],
             },
           },
         ],
