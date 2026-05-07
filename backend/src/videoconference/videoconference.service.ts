@@ -4173,73 +4173,72 @@ export class VideoconferenceService implements OnModuleInit {
         }
         const schedules = await schedulesQuery.getRawMany();
 
-        // 3. Procesar cada sesion externa
+        const existingRecords = await this.planningVideoconferencesRepo.find({
+            where: subsectionId
+                ? { planning_section_id: planningSectionId, planning_subsection_id: subsectionId }
+                : { planning_section_id: planningSectionId },
+        });
+
+        // 3. Procesar cada sesion externa. Solo se insertan faltantes; los existentes no se modifican.
         let imported = 0;
-        let updated = 0;
+        const updated = 0;
         const now = new Date();
 
         for (const ext of externalSessions) {
-            const extDate = toDateOnly(ext.startTime || ext.date);
-            if (!/^\d{4}-\d{2}-\d{2}$/.test(extDate)) {
+            const normalized = normalizeAulaVirtualListSession(ext);
+            if (!normalized) {
                 continue;
             }
-            const extZoomId = extractZoomMeetingIdFromUrl(ext.url);
-            const extTopic = ext.title || '';
-            const extStart = compactTime(ext.startTime || ext.start || '');
 
             // Intentar encontrar un horario local que coincida con el dia de la semana
-            const dayCode = dayCodeForDate(extDate);
+            const dayCode = dayCodeForDate(normalized.date);
             // Al usar getRawMany, los nombres de los campos vienen con el alias de la tabla (ej: schedule_day_of_week)
-            const matchingRaw = schedules.find(s => s.schedule_day_of_week === dayCode && compactTime(s.schedule_start_time) === extStart)
+            const matchingRaw = schedules.find(s =>
+                s.schedule_day_of_week === dayCode
+                && compactTime(s.schedule_start_time) === normalized.startTime
+                && compactTime(s.schedule_end_time) === normalized.endTime
+            )
+                ?? schedules.find(s => s.schedule_day_of_week === dayCode && compactTime(s.schedule_start_time) === normalized.startTime)
                 ?? schedules.find(s => s.schedule_day_of_week === dayCode);
 
             if (!matchingRaw) continue;
 
-            // Buscar si ya existe el registro en nuestra BD
-            const existing = await this.planningVideoconferencesRepo.findOne({
-                where: {
-                    planning_subsection_schedule_id: matchingRaw.schedule_id,
-                    conference_date: extDate
-                }
-            });
+            const existing = existingRecords.find((record) =>
+                isSameAulaVirtualImportedSession(record, normalized)
+            );
+            if (existing) continue;
 
-            if (existing) {
-                // Actualizar vinculo con Zoom si ha cambiado
-                if (existing.zoom_meeting_id !== extZoomId || existing.join_url !== ext.url) {
-                    existing.zoom_meeting_id = extZoomId ?? existing.zoom_meeting_id;
-                    existing.join_url = ext.url ?? existing.join_url;
-                    existing.topic = extTopic || existing.topic;
-                    existing.status = extZoomId ? 'MATCHED' : existing.status;
-                    existing.updated_at = now;
-                    await this.planningVideoconferencesRepo.save(existing);
-                    updated++;
-                }
-            } else {
-                // Importar registro faltante
-                const newRecord = this.planningVideoconferencesRepo.create({
-                    id: newId(),
-                    planning_offer_id: matchingRaw.section_planning_offer_id,
-                    planning_section_id: matchingRaw.subsection_planning_section_id,
-                    planning_subsection_id: matchingRaw.subsection_id,
-                    planning_subsection_schedule_id: matchingRaw.schedule_id,
-                    conference_date: extDate,
-                    day_of_week: dayCode,
-                    start_time: compactTime(ext.startTime || ext.start || ''),
-                    end_time: compactTime(ext.endTime || ext.end || ''),
-                    scheduled_start: new Date(ext.startTime || ext.date),
-                    scheduled_end: new Date(ext.endTime || ext.startTime || ext.date),
-                    zoom_meeting_id: extZoomId,
-                    topic: extTopic,
-                    join_url: ext.url,
-                    status: extZoomId ? 'MATCHED' : 'CREATED_UNMATCHED',
-                    link_mode: 'OWNED',
-                    payload_json: { imported_from_av_list: true, av_data: ext },
-                    created_at: now,
-                    updated_at: now
-                });
-                await this.planningVideoconferencesRepo.save(newRecord);
-                imported++;
-            }
+            const newRecord = this.planningVideoconferencesRepo.create({
+                id: newId(),
+                planning_offer_id: matchingRaw.section_planning_offer_id,
+                planning_section_id: matchingRaw.subsection_planning_section_id,
+                planning_subsection_id: matchingRaw.subsection_id,
+                planning_subsection_schedule_id: matchingRaw.schedule_id,
+                conference_date: normalized.date,
+                day_of_week: dayCode,
+                start_time: normalized.startTime,
+                end_time: normalized.endTime,
+                scheduled_start: normalized.scheduledStart,
+                scheduled_end: normalized.scheduledEnd,
+                zoom_meeting_id: normalized.zoomMeetingId,
+                topic: normalized.title,
+                aula_virtual_name: normalized.title,
+                join_url: normalized.url,
+                status: normalized.zoomMeetingId ? 'MATCHED' : 'CREATED_UNMATCHED',
+                matched_at: normalized.zoomMeetingId ? now : null,
+                link_mode: 'OWNED',
+                payload_json: {
+                    imported_from_av_list: true,
+                    aula_virtual_id: normalized.id,
+                    aula_virtual_section_id: aulaVirtualSectionId,
+                    av_data: ext,
+                },
+                created_at: now,
+                updated_at: now
+            });
+            const saved = await this.planningVideoconferencesRepo.save(newRecord);
+            existingRecords.push(saved);
+            imported++;
         }
 
         return {
@@ -8081,6 +8080,124 @@ function toDateOnly(value: string | Date | null | undefined): string {
     if (!value) return '';
     const str = typeof value === 'string' ? value : value.toISOString();
     return str.slice(0, 10);
+}
+
+type NormalizedAulaVirtualListSession = {
+    id: string | null;
+    date: string;
+    startTime: string;
+    endTime: string;
+    scheduledStart: Date;
+    scheduledEnd: Date;
+    zoomMeetingId: string | null;
+    title: string | null;
+    url: string | null;
+};
+
+function normalizeAulaVirtualListSession(raw: unknown): NormalizedAulaVirtualListSession | null {
+    const item = readNullableRecord(raw);
+    if (!item) {
+        return null;
+    }
+
+    const rawStart = readNullableString(item.startTime) ?? readNullableString(item.start);
+    const rawEnd = readNullableString(item.endTime) ?? readNullableString(item.end);
+    const date =
+        parseAulaVirtualDateOnly(rawStart)
+        ?? parseAulaVirtualDateOnly(item.date)
+        ?? parseAulaVirtualDateOnly(rawEnd);
+    const startTime = parseAulaVirtualTime(rawStart);
+    const endTime = parseAulaVirtualTime(rawEnd) ?? startTime;
+    if (!date || !startTime || !endTime) {
+        return null;
+    }
+
+    const url = readNullableString(item.url) ?? readNullableString(item.join_url);
+    return {
+        id: readNullableString(item.id),
+        date,
+        startTime,
+        endTime,
+        scheduledStart: buildDateTime(date, startTime, 'America/Lima'),
+        scheduledEnd: buildDateTime(date, endTime, 'America/Lima'),
+        zoomMeetingId: extractZoomMeetingIdFromUrl(url ?? ''),
+        title: readNullableString(item.title) ?? readNullableString(item.name),
+        url,
+    };
+}
+
+function parseAulaVirtualDateOnly(value: unknown) {
+    if (value instanceof Date) {
+        return toDateOnly(value);
+    }
+    if (typeof value !== 'string' || !value.trim()) {
+        return null;
+    }
+    const normalized = value.trim();
+    const iso = normalized.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) {
+        return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    }
+    const dmy = normalized.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmy) {
+        const [, day, month, year] = dmy;
+        return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+    }
+    return null;
+}
+
+function parseAulaVirtualTime(value: unknown) {
+    if (value instanceof Date) {
+        return value.toISOString().slice(11, 16);
+    }
+    if (typeof value !== 'string' || !value.trim()) {
+        return null;
+    }
+    const normalized = value.trim();
+    const isoTime = normalized.match(/T(\d{2}):(\d{2})/);
+    if (isoTime) {
+        return `${isoTime[1]}:${isoTime[2]}`;
+    }
+    const looseTime = normalized.match(/(?:^|\s)(\d{1,2}):(\d{2})/);
+    if (looseTime) {
+        return `${looseTime[1].padStart(2, '0')}:${looseTime[2]}`;
+    }
+    return null;
+}
+
+function isSameAulaVirtualImportedSession(
+    record: PlanningSubsectionVideoconferenceEntity,
+    session: NormalizedAulaVirtualListSession,
+) {
+    const storedAulaVirtualId = payloadPickString(
+        record.payload_json,
+        'aula_virtual_id',
+        'av_data.id',
+        'response.id',
+    );
+    if (session.id && storedAulaVirtualId === session.id) {
+        return true;
+    }
+
+    if (session.zoomMeetingId && record.zoom_meeting_id === session.zoomMeetingId) {
+        return true;
+    }
+
+    const storedJoinUrl = readNullableString(record.join_url);
+    if (session.url && storedJoinUrl === session.url) {
+        return true;
+    }
+
+    const storedJoinZoomId = extractZoomMeetingIdFromUrl(storedJoinUrl ?? '');
+    if (session.zoomMeetingId && storedJoinZoomId === session.zoomMeetingId) {
+        return true;
+    }
+
+    return (
+        toDateOnly(record.conference_date) === session.date
+        && compactTime(record.start_time) === session.startTime
+        && compactTime(record.end_time) === session.endTime
+    );
 }
 
 function normalizeIsoDate(value: string) {
