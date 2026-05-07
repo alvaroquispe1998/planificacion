@@ -4273,11 +4273,20 @@ export class VideoconferenceService implements OnModuleInit {
                 `(
                     (:aulaVirtualId != '' AND JSON_UNQUOTE(JSON_EXTRACT(vc.payload_json, '$.aula_virtual_id')) = :aulaVirtualId)
                     OR (:aulaVirtualId != '' AND JSON_UNQUOTE(JSON_EXTRACT(vc.payload_json, '$.av_data.id')) = :aulaVirtualId)
-                    OR (:zoomMeetingId != '' AND TRIM(COALESCE(vc.zoom_meeting_id, '')) = :zoomMeetingId)
-                    OR (:url != '' AND TRIM(COALESCE(vc.join_url, '')) = :url)
                     OR (
                         LEFT(CAST(vc.start_time AS CHAR), 5) = :startTime
                         AND LEFT(CAST(vc.end_time AS CHAR), 5) = :endTime
+                        AND (
+                            (:zoomMeetingId != '' AND TRIM(COALESCE(vc.zoom_meeting_id, '')) = :zoomMeetingId)
+                            OR (:url != '' AND TRIM(COALESCE(vc.join_url, '')) = :url)
+                            OR (:zoomMeetingId = '' AND :url = '')
+                        )
+                    )
+                    OR (
+                        LEFT(CAST(vc.start_time AS CHAR), 5) = :startTime
+                        AND LEFT(CAST(vc.end_time AS CHAR), 5) = :endTime
+                        AND TRIM(COALESCE(vc.zoom_meeting_id, '')) = ''
+                        AND TRIM(COALESCE(vc.join_url, '')) = ''
                     )
                 )`,
                 {
@@ -8225,25 +8234,25 @@ function isSameAulaVirtualImportedSession(
         return true;
     }
 
-    if (sameDate && sessionZoomMeetingId && recordZoomMeetingId === sessionZoomMeetingId) {
+    const sameTime =
+        compactTime(record.start_time) === session.startTime
+        && compactTime(record.end_time) === session.endTime;
+
+    if (sameDate && sameTime && sessionZoomMeetingId && recordZoomMeetingId === sessionZoomMeetingId) {
         return true;
     }
 
     const storedJoinUrl = readNullableString(record.join_url);
-    if (sameDate && session.url && storedJoinUrl === session.url) {
+    if (sameDate && sameTime && session.url && storedJoinUrl === session.url) {
         return true;
     }
 
     const storedJoinZoomId = normalizeComparableId(extractZoomMeetingIdFromUrl(storedJoinUrl ?? ''));
-    if (sameDate && sessionZoomMeetingId && storedJoinZoomId === sessionZoomMeetingId) {
+    if (sameDate && sameTime && sessionZoomMeetingId && storedJoinZoomId === sessionZoomMeetingId) {
         return true;
     }
 
-    return (
-        sameDate
-        && compactTime(record.start_time) === session.startTime
-        && compactTime(record.end_time) === session.endTime
-    );
+    return sameDate && sameTime && !sessionZoomMeetingId && !session.url;
 }
 
 function normalizeComparableId(value: string | null | undefined) {
