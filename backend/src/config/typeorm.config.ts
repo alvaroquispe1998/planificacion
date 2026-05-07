@@ -75,6 +75,10 @@ import {
 } from '../entities/catalog-sync.entities';
 
 import {
+  ManualVideoconferenceEntity,
+  ManualVideoconferenceUserZoomGroupEntity,
+} from '../entities/videoconference-creator.entities';
+import {
   VideoconferenceEntity,
   VideoconferenceGenerationBatchEntity,
   VideoconferenceGenerationBatchResultEntity,
@@ -175,6 +179,8 @@ export const appEntities = [
   ExternalSessionEntity,
   SyncJobEntity,
   SyncLogEntity,
+  ManualVideoconferenceEntity,
+  ManualVideoconferenceUserZoomGroupEntity,
 ];
 
 type DatabaseCandidate = {
