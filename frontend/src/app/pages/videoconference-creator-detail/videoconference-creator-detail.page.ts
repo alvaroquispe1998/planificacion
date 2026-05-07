@@ -4,6 +4,8 @@ import { ActivatedRoute, Router } from '@angular/router';
 import {
     MeetingDetail,
     ManualMeeting,
+    MeetingInstance,
+    MeetingParticipant,
     VideoconferenceCreatorApiService,
 } from '../../services/videoconference-creator-api.service';
 import { AuthService } from '../../core/auth.service';

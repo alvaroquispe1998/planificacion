@@ -59,10 +59,25 @@ export interface CreateMeetingDto {
     recurrence_weekly_days?: string;
 }
 
+export interface MeetingInstance {
+    zoom_meeting_uuid?: string;
+    actual_start?: string;
+    duration_minutes?: number;
+    status?: string;
+    [key: string]: unknown;
+}
+
+export interface MeetingParticipant {
+    display_name?: string;
+    email?: string;
+    role?: string;
+    [key: string]: unknown;
+}
+
 export interface MeetingDetail {
     meeting: ManualMeeting;
-    instances: unknown[];
-    participants: unknown[];
+    instances: MeetingInstance[];
+    participants: MeetingParticipant[];
 }
 
 export interface ApproveDraftDto {
