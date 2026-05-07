@@ -4209,6 +4209,11 @@ export class VideoconferenceService implements OnModuleInit {
                 isSameAulaVirtualImportedSession(record, normalized)
             );
             if (existing) continue;
+            const alreadyStored = await this.hasActiveOwnedAulaVirtualSession(
+                planningSectionId,
+                normalized,
+            );
+            if (alreadyStored) continue;
 
             const newRecord = this.planningVideoconferencesRepo.create({
                 id: newId(),
@@ -4249,6 +4254,42 @@ export class VideoconferenceService implements OnModuleInit {
             imported,
             updated
         };
+    }
+
+    private async hasActiveOwnedAulaVirtualSession(
+        planningSectionId: string,
+        session: NormalizedAulaVirtualListSession,
+    ) {
+        const count = await this.planningVideoconferencesRepo
+            .createQueryBuilder('vc')
+            .where('vc.planning_section_id = :planningSectionId', { planningSectionId })
+            .andWhere("vc.link_mode != 'INHERITED'")
+            .andWhere('vc.deleted_at IS NULL')
+            .andWhere("(vc.delete_status IS NULL OR vc.delete_status != 'DELETED')")
+            .andWhere('DATE(vc.conference_date) = :conferenceDate', {
+                conferenceDate: session.date,
+            })
+            .andWhere(
+                `(
+                    (:aulaVirtualId != '' AND JSON_UNQUOTE(JSON_EXTRACT(vc.payload_json, '$.aula_virtual_id')) = :aulaVirtualId)
+                    OR (:aulaVirtualId != '' AND JSON_UNQUOTE(JSON_EXTRACT(vc.payload_json, '$.av_data.id')) = :aulaVirtualId)
+                    OR (:zoomMeetingId != '' AND TRIM(COALESCE(vc.zoom_meeting_id, '')) = :zoomMeetingId)
+                    OR (:url != '' AND TRIM(COALESCE(vc.join_url, '')) = :url)
+                    OR (
+                        LEFT(CAST(vc.start_time AS CHAR), 5) = :startTime
+                        AND LEFT(CAST(vc.end_time AS CHAR), 5) = :endTime
+                    )
+                )`,
+                {
+                    aulaVirtualId: normalizeComparableId(session.id),
+                    zoomMeetingId: normalizeComparableId(session.zoomMeetingId),
+                    url: session.url?.trim() ?? '',
+                    startTime: session.startTime,
+                    endTime: session.endTime,
+                },
+            )
+            .getCount();
+        return count > 0;
     }
 
     private async findAulaVirtualSyncSections(
