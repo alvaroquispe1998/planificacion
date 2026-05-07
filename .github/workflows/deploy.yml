@@ -89,6 +89,11 @@ jobs:
             # Instalar dependencias de producción
             npm install --omit=dev --prefer-offline
 
+            # Correr migraciones pendientes antes de reiniciar
+            echo "▶  Ejecutando migraciones..."
+            node node_modules/typeorm/cli.js migration:run -d dist/config/data-source.js
+            echo "✅ Migraciones aplicadas"
+
             # Ejecutar pm2 como usuario
             export PM2_HOME=/home/autonomadeica/.pm2
 
@@ -109,6 +114,4 @@ jobs:
 
             pm2 save
             echo "✅ Deploy completado como autonomadeica"
-            echo "ℹ️  Si DB_SYNCHRONIZE=true en el .env del servidor, TypeORM correrá ALTER TABLEs al arrancar."
-            echo "ℹ️  Verifica que DB_SYNCHRONIZE=false en producción para evitar bloqueos de DB al reiniciar."
             

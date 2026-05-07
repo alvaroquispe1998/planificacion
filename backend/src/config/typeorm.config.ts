@@ -1,4 +1,5 @@
 import { existsSync } from 'fs';
+import { join } from 'path';
 import { Socket } from 'net';
 import { ConfigService } from '@nestjs/config';
 import { DataSourceOptions } from 'typeorm';
@@ -288,6 +289,15 @@ export async function buildTypeOrmConfig(configService: ConfigService): Promise<
     readConfig(configService, 'DB_SYNCHRONIZE', 'false') === 'true' &&
     readConfig(configService, 'DB_SYNC_ALLOWED', 'false') === 'true';
 
+  // DB_MIGRATIONS_RUN=true → TypeORM corre migraciones pendientes al arrancar.
+  // Recomendado en producción como doble seguro junto al paso del CI/CD.
+  const migrationsRunEnabled =
+    readConfig(configService, 'DB_MIGRATIONS_RUN', 'false') === 'true';
+
+  // __dirname apunta a dist/config/ en producción y src/config/ en desarrollo.
+  // El glob {.ts,.js} cubre ambos casos.
+  const migrationsPath = join(__dirname, '../migrations/*{.ts,.js}');
+
   if (
     resolvedEndpoint.host !== configuredHost ||
     resolvedEndpoint.port !== configuredPort
@@ -306,6 +316,8 @@ export async function buildTypeOrmConfig(configService: ConfigService): Promise<
     password: readConfig(configService, 'DB_PASSWORD', 'root'),
     database: readConfig(configService, 'DB_NAME', 'uai_planning'),
     entities: appEntities,
+    migrations: [migrationsPath],
+    migrationsRun: migrationsRunEnabled,
     synchronize: dbSynchronizeEnabled,
     timezone: 'Z',
     // Connection pool — prevents pool exhaustion from long-running generation jobs
