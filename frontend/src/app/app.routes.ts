@@ -27,6 +27,9 @@ import { TranscriptAnalysisPageComponent } from './pages/transcript-analysis/tra
 
 import { VideoconferencesPageComponent } from './pages/videoconferences/videoconferences.page';
 import { VideoconferenceEspecialesPageComponent } from './pages/videoconference-especiales/videoconference-especiales.page';
+import { VideoconferenceCreatorPageComponent } from './pages/videoconference-creator/videoconference-creator.page';
+import { VideoconferenceCreatorDetailPageComponent } from './pages/videoconference-creator-detail/videoconference-creator-detail.page';
+import { VideoconferenceCreatorDraftsPageComponent } from './pages/videoconference-creator-drafts/videoconference-creator-drafts.page';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'planning' },
@@ -224,4 +227,32 @@ export const routes: Routes = [
   { path: 'settings', pathMatch: 'full', redirectTo: 'integrations/sync' },
   { path: 'admin/security', pathMatch: 'full', canActivate: [securityLandingGuard], component: SecurityPageComponent },
   { path: 'security', pathMatch: 'full', canActivate: [securityLandingGuard], component: SecurityPageComponent },
+  // ── Videoconference Creator ──────────────────────────────────────────────
+  {
+    path: 'videoconferences/creator',
+    component: VideoconferenceCreatorPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.videoconference_creator',
+      requiredPermission: 'action.videoconference_creator.view',
+    },
+  },
+  {
+    path: 'videoconferences/creator/drafts',
+    component: VideoconferenceCreatorDraftsPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.videoconference_creator',
+      requiredPermission: 'action.videoconference_creator.approve_backup',
+    },
+  },
+  {
+    path: 'videoconferences/creator/:id',
+    component: VideoconferenceCreatorDetailPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.videoconference_creator',
+      requiredPermission: 'action.videoconference_creator.view',
+    },
+  },
 ];

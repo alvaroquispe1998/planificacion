@@ -245,6 +245,13 @@ export class ZoomConfigEntity {
     @Column({ type: 'varchar', length: 60, default: 'America/Lima' })
     timezone!: string;
 
+    /**
+     * Comma-separated list of TI email addresses to notify when a manual
+     * videoconference is saved as DRAFT_NO_HOST.
+     */
+    @Column({ type: 'text', nullable: true })
+    ti_alert_emails!: string | null;
+
     @Column({ type: 'datetime' })
     created_at!: Date;
 
@@ -289,6 +296,10 @@ export class ZoomGroupEntity {
 
     @Column({ type: 'boolean', default: true })
     is_active!: boolean;
+
+    /** Optional backup Zoom user ID used when the primary host pool is exhausted. */
+    @Column({ type: 'varchar', length: 36, nullable: true })
+    backup_zoom_user_id!: string | null;
 
     @Column({ type: 'datetime' })
     created_at!: Date;

@@ -97,6 +97,10 @@ export class MeetingInstanceEntity {
   @Column({ type: 'varchar', length: 36, nullable: true })
   planning_subsection_videoconference_id!: string | null;
 
+  /** FK to manual_videoconferences.id — nullable, only set for manually created meetings. */
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  manual_videoconference_id!: string | null;
+
   @Column({ type: 'varchar', length: 50 })
   zoom_meeting_id!: string;
 

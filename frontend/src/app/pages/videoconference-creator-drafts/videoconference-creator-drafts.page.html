@@ -1,0 +1,42 @@
+<div class="drafts-page">
+  <div class="panel">
+    <h2 class="panel-title">Borradores sin host (DRAFT_NO_HOST)</h2>
+
+    <div *ngIf="loading" class="status-block">Cargando…</div>
+    <div *ngIf="error" class="status-block status-error">{{ error }}</div>
+
+    <div *ngIf="!loading && drafts.length === 0" class="empty-state">
+      No hay borradores pendientes de aprobación.
+    </div>
+
+    <table *ngIf="!loading && drafts.length > 0" class="data-table">
+      <thead>
+        <tr>
+          <th>Tema</th>
+          <th>Tipo</th>
+          <th>Inicio</th>
+          <th>Creado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let d of drafts">
+          <td>{{ d.topic }}</td>
+          <td>{{ d.type === 'WEEKLY' ? 'Semanal' : 'Única' }}</td>
+          <td>{{ d.start_time | date:'dd/MM/yyyy HH:mm' }}</td>
+          <td>{{ d.created_at | date:'dd/MM/yyyy' }}</td>
+          <td class="actions-cell">
+            <button type="button" class="btn btn-sm" (click)="openDetail(d.id)">
+              Ver
+            </button>
+            <button type="button" class="btn btn-warn btn-sm"
+              [disabled]="approvingId === d.id"
+              (click)="approveBackup(d.id)">
+              {{ approvingId === d.id ? 'Aprobando…' : 'Aprobar con backup' }}
+            </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>

@@ -9,6 +9,7 @@ import { SyncModule } from './sync/sync.module';
 import { SyllabusModule } from './syllabus/syllabus.module';
 import { TranscriptAnalysisModule } from './transcript-analysis/transcript-analysis.module';
 import { VideoconferenceModule } from './videoconference/videoconference.module';
+import { VideoconferenceCreatorModule } from './videoconference-creator/videoconference-creator.module';
 import { AppController } from './app.controller';
 import { buildTypeOrmConfig } from './config/typeorm.config';
 
@@ -27,6 +28,7 @@ import { buildTypeOrmConfig } from './config/typeorm.config';
     SyllabusModule,
     TranscriptAnalysisModule,
     VideoconferenceModule,
+    VideoconferenceCreatorModule,
   ],
   controllers: [AppController],
 })

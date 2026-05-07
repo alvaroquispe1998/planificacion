@@ -1,0 +1,116 @@
+<div class="detail-page">
+  <div *ngIf="loading" class="status-block">Cargando…</div>
+  <div *ngIf="error" class="status-block status-error">{{ error }}</div>
+
+  <ng-container *ngIf="!loading && meeting">
+
+    <!-- Hero -->
+    <div class="hero">
+      <div>
+        <p class="eyebrow">Videoconferencia</p>
+        <h1>{{ meeting.topic }}</h1>
+        <p class="hero-copy" *ngIf="meeting.agenda">{{ meeting.agenda }}</p>
+      </div>
+      <div class="hero-actions">
+        <button type="button" class="btn btn-secondary" (click)="back()">← Volver</button>
+        <button type="button" class="btn btn-primary"
+          *ngIf="meeting.zoom_meeting_id"
+          [disabled]="syncing"
+          (click)="sync()">
+          {{ syncing ? 'Sincronizando…' : 'Sincronizar desde Zoom' }}
+        </button>
+        <button type="button" class="btn btn-warn"
+          *ngIf="meeting.status === 'DRAFT_NO_HOST' && canApproveBackup"
+          [disabled]="approving"
+          (click)="approveBackup()">
+          {{ approving ? 'Aprobando…' : 'Aprobar con backup' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Info grid -->
+    <div class="panel">
+      <h2>Detalles de la reunión</h2>
+      <div class="summary-grid">
+        <div class="info-card">
+          <p class="eyebrow">Estado</p>
+          <span class="badge" [ngClass]="statusClass(meeting.status)">
+            {{ statusLabel(meeting.status) }}
+          </span>
+        </div>
+        <div class="info-card">
+          <p class="eyebrow">Tipo</p>
+          <p>{{ meeting.type === 'WEEKLY' ? 'Semanal recurrente' : 'Única' }}</p>
+        </div>
+        <div class="info-card">
+          <p class="eyebrow">Inicio</p>
+          <p>{{ meeting.start_time | date:'dd/MM/yyyy HH:mm' }}</p>
+        </div>
+        <div class="info-card">
+          <p class="eyebrow">Duración</p>
+          <p>{{ meeting.duration_minutes }} min</p>
+        </div>
+        <div class="info-card" *ngIf="meeting.zoom_meeting_id">
+          <p class="eyebrow">Zoom Meeting ID</p>
+          <p>{{ meeting.zoom_meeting_id }}</p>
+        </div>
+        <div class="info-card" *ngIf="meeting.join_url">
+          <p class="eyebrow">Enlace de unión</p>
+          <a [href]="meeting.join_url" target="_blank" rel="noopener">Abrir en Zoom</a>
+        </div>
+      </div>
+
+      <div *ngIf="meeting.error_message" class="alert alert-err">
+        <strong>Error:</strong> {{ meeting.error_message }}
+      </div>
+    </div>
+
+    <!-- Instances -->
+    <div class="panel" *ngIf="detail">
+      <h2>Instancias pasadas ({{ detail.instances.length }})</h2>
+      <div *ngIf="detail.instances.length === 0" class="empty-state">
+        Ninguna instancia encontrada. Usa el botón "Sincronizar" para bajar datos desde Zoom.
+      </div>
+      <table *ngIf="detail.instances.length > 0" class="data-table">
+        <thead>
+          <tr>
+            <th>UUID Zoom</th>
+            <th>Inicio real</th>
+            <th>Duración</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let inst of detail.instances">
+            <td class="mono">{{ inst['zoom_meeting_uuid'] }}</td>
+            <td>{{ inst['actual_start'] ? (inst['actual_start'] | date:'dd/MM/yyyy HH:mm') : '—' }}</td>
+            <td>{{ inst['duration_minutes'] != null ? inst['duration_minutes'] + ' min' : '—' }}</td>
+            <td>{{ inst['status'] }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Participants -->
+    <div class="panel" *ngIf="detail && detail.participants.length > 0">
+      <h2>Participantes ({{ detail.participants.length }})</h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Email</th>
+            <th>Rol</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let p of detail.participants">
+            <td>{{ p['display_name'] }}</td>
+            <td>{{ p['email'] ?? '—' }}</td>
+            <td>{{ p['role'] }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </ng-container>
+</div>

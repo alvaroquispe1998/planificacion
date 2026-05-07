@@ -400,6 +400,60 @@ export class ZoomAccountService {
         return text;
     }
 
+    /**
+     * Creates a Zoom meeting on behalf of a user (identified by email).
+     * @param hostEmail  Zoom user email that will own the meeting.
+     * @param payload    Zoom "Create Meeting" request body. Must include at least `topic`, `type`, `start_time`, `duration`.
+     * @returns { ok, meetingId, joinUrl, startUrl, response } or { ok: false, reason }
+     */
+    async createZoomMeeting(
+        hostEmail: string,
+        payload: Record<string, unknown>,
+    ): Promise<
+        | { ok: true; meetingId: string; joinUrl: string | null; startUrl: string | null; response: Record<string, unknown> }
+        | { ok: false; reason: string; response?: Record<string, unknown> }
+    > {
+        try {
+            const token = await this.getAccessToken();
+            const url = `${ZOOM_API_BASE_URL}/users/${encodeURIComponent(hostEmail)}/meetings`;
+            const response = await this.fetchWithDiagnostics(
+                url,
+                {
+                    method: 'POST',
+                    headers: {
+                        authorization: `Bearer ${token}`,
+                        'content-type': 'application/json',
+                        accept: 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                },
+                'Zoom API createMeeting',
+            );
+
+            const bodyText = await response.text();
+            const parsed = this.parseJson<Record<string, unknown>>(bodyText) ?? {};
+
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    reason: `Zoom API devolvio ${response.status}: ${bodyText.slice(0, 300)}`,
+                    response: parsed,
+                };
+            }
+
+            const meetingId = parsed.id !== undefined && parsed.id !== null ? String(parsed.id) : '';
+            return {
+                ok: true,
+                meetingId,
+                joinUrl: typeof parsed.join_url === 'string' ? parsed.join_url : null,
+                startUrl: typeof parsed.start_url === 'string' ? parsed.start_url : null,
+                response: parsed,
+            };
+        } catch (error) {
+            return { ok: false, reason: this.toErrorMessage(error) };
+        }
+    }
+
     private async findConfigEntity() {
         const rows = await this.zoomConfigRepo.find({
             order: { created_at: 'ASC' },

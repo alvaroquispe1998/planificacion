@@ -1,0 +1,145 @@
+<div class="creator-page">
+  <!-- Loading / error state -->
+  <div *ngIf="loading" class="status-block">Cargando…</div>
+  <div *ngIf="error && !loading" class="status-block status-error">{{ error }}</div>
+
+  <ng-container *ngIf="!loading && profile">
+
+    <!-- ── Creation Form ──────────────────────────────────────────────── -->
+    <section class="panel">
+      <h2 class="panel-title">Nueva videoconferencia</h2>
+
+      <div *ngIf="successMsg" class="alert alert-ok">{{ successMsg }}</div>
+      <div *ngIf="error && saving === false && successMsg === ''" class="alert alert-err">{{ error }}</div>
+
+      <form (ngSubmit)="submit()" #f="ngForm" class="form-grid">
+
+        <!-- Type selector -->
+        <div class="field field--full" *ngIf="profile.can_create_unique || profile.can_create_weekly">
+          <label class="field-label">Tipo de reunión</label>
+          <div class="toggle-group">
+            <button type="button"
+              class="toggle-btn"
+              [class.active]="formMode === 'UNIQUE'"
+              [disabled]="!profile.can_create_unique"
+              (click)="formMode = 'UNIQUE'">
+              Única
+            </button>
+            <button type="button"
+              class="toggle-btn"
+              [class.active]="formMode === 'WEEKLY'"
+              [disabled]="!profile.can_create_weekly"
+              (click)="formMode = 'WEEKLY'">
+              Semanal recurrente
+            </button>
+          </div>
+        </div>
+
+        <!-- Zoom group -->
+        <div class="field">
+          <label class="field-label" for="groupId">Grupo de hosts Zoom</label>
+          <select id="groupId" [(ngModel)]="formGroupId" name="groupId" required class="input">
+            <option value="">— Selecciona un grupo —</option>
+            <option *ngFor="let g of availableGroups" [value]="g.id">{{ g.name }}</option>
+          </select>
+        </div>
+
+        <!-- Topic -->
+        <div class="field">
+          <label class="field-label" for="topic">Tema</label>
+          <input id="topic" type="text" [(ngModel)]="formTopic" name="topic" required
+            maxlength="300" placeholder="Título de la reunión" class="input" />
+        </div>
+
+        <!-- Agenda -->
+        <div class="field field--full">
+          <label class="field-label" for="agenda">Agenda (opcional)</label>
+          <textarea id="agenda" [(ngModel)]="formAgenda" name="agenda"
+            rows="3" maxlength="2000" placeholder="Descripción / puntos a tratar" class="input"></textarea>
+        </div>
+
+        <!-- Start time -->
+        <div class="field">
+          <label class="field-label" for="startTime">Fecha y hora de inicio</label>
+          <input id="startTime" type="datetime-local" [(ngModel)]="formStartTime" name="startTime"
+            required class="input" />
+        </div>
+
+        <!-- Duration -->
+        <div class="field">
+          <label class="field-label" for="duration">Duración (minutos)</label>
+          <input id="duration" type="number" [(ngModel)]="formDuration" name="duration"
+            required min="15" max="720" class="input" />
+        </div>
+
+        <!-- Weekly recurrence controls -->
+        <ng-container *ngIf="formMode === 'WEEKLY'">
+          <div class="field">
+            <label class="field-label" for="recEndDate">Fecha fin de recurrencia</label>
+            <input id="recEndDate" type="date" [(ngModel)]="formRecurrenceEndDate"
+              name="recEndDate" class="input" />
+          </div>
+
+          <div class="field">
+            <label class="field-label">Días de la semana</label>
+            <div class="day-picker">
+              <label *ngFor="let d of weekdayOptions" class="day-option">
+                <input type="radio" [(ngModel)]="formRecurrenceWeeklyDays"
+                  name="recWeeklyDays" [value]="d.value" />
+                {{ d.label }}
+              </label>
+            </div>
+          </div>
+        </ng-container>
+
+        <div class="field field--full form-actions">
+          <button type="submit" class="btn btn-primary"
+            [disabled]="saving || !canCreate || !formTopic || !formGroupId || !formStartTime">
+            {{ saving ? 'Creando…' : 'Crear videoconferencia' }}
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ── Meetings List ──────────────────────────────────────────────── -->
+    <section class="panel">
+      <h2 class="panel-title">Mis videoconferencias</h2>
+
+      <div *ngIf="meetings.length === 0" class="empty-state">
+        No hay videoconferencias registradas todavía.
+      </div>
+
+      <table *ngIf="meetings.length > 0" class="data-table">
+        <thead>
+          <tr>
+            <th>Tema</th>
+            <th>Tipo</th>
+            <th>Inicio</th>
+            <th>Duración</th>
+            <th>Estado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let m of meetings">
+            <td>{{ m.topic }}</td>
+            <td>{{ m.type === 'WEEKLY' ? 'Semanal' : 'Única' }}</td>
+            <td>{{ m.start_time | date:'dd/MM/yyyy HH:mm' }}</td>
+            <td>{{ m.duration_minutes }} min</td>
+            <td>
+              <span class="badge" [ngClass]="statusClass(m.status)">
+                {{ statusLabel(m.status) }}
+              </span>
+            </td>
+            <td>
+              <button type="button" class="btn btn-sm" (click)="openDetail(m.id)">
+                Ver detalle
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+  </ng-container>
+</div>
