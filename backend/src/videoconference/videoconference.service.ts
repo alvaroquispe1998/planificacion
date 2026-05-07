@@ -243,6 +243,19 @@ type AulaVirtualRequestContext = {
     cookie: string;
 };
 
+type AulaVirtualSectionSyncFilters = {
+    semester_id?: string;
+    campus_id?: string;
+    faculty_id?: string;
+    academic_program_id?: string;
+    course_code?: string;
+    planning_section_id?: string;
+    source_section_id?: string;
+    search?: string;
+    limit?: number;
+    offset?: number;
+};
+
 type AulaVirtualPayload = {
     courseCode: string;
     courseName: string;
@@ -3988,35 +4001,150 @@ export class VideoconferenceService implements OnModuleInit {
         };
     }
 
+    async syncSectionsFromAulaVirtual(
+        filters: AulaVirtualSectionSyncFilters = {},
+    ): Promise<{
+        success: boolean;
+        message: string;
+        processed: number;
+        imported: number;
+        updated: number;
+        errors: number;
+        total_sections: number;
+        details: Array<{
+            planning_section_id: string;
+            source_section_id: string;
+            course_code: string | null;
+            section_code: string | null;
+            ok: boolean;
+            imported?: number;
+            updated?: number;
+            error?: string;
+        }>;
+    }> {
+        const limit = Math.max(1, Math.min(50, Number(filters.limit ?? 10) || 10));
+        const offset = Math.max(0, Number(filters.offset ?? 0) || 0);
+        const sectionRows = await this.findAulaVirtualSyncSections(filters);
+        const batch = sectionRows.slice(offset, offset + limit);
+
+        let imported = 0;
+        let updated = 0;
+        let errors = 0;
+        const details: Array<{
+            planning_section_id: string;
+            source_section_id: string;
+            course_code: string | null;
+            section_code: string | null;
+            ok: boolean;
+            imported?: number;
+            updated?: number;
+            error?: string;
+        }> = [];
+
+        if (batch.length === 0) {
+            return {
+                success: true,
+                message: 'No hay secciones pendientes de revisar en este lote.',
+                processed: 0,
+                imported,
+                updated,
+                errors,
+                total_sections: sectionRows.length,
+                details,
+            };
+        }
+
+        const context = await this.getAulaVirtualRequestContext();
+        for (const row of batch) {
+            try {
+                const result = await this.syncSectionFromAulaVirtual(
+                    row.planning_section_id,
+                    context,
+                    row.source_section_id,
+                );
+                imported += result.imported;
+                updated += result.updated;
+                details.push({
+                    planning_section_id: row.planning_section_id,
+                    source_section_id: row.source_section_id,
+                    course_code: row.course_code,
+                    section_code: row.section_code,
+                    ok: true,
+                    imported: result.imported,
+                    updated: result.updated,
+                });
+            } catch (error) {
+                errors++;
+                details.push({
+                    planning_section_id: row.planning_section_id,
+                    source_section_id: row.source_section_id,
+                    course_code: row.course_code,
+                    section_code: row.section_code,
+                    ok: false,
+                    error: toErrorMessage(error),
+                });
+            }
+        }
+
+        return {
+            success: errors === 0,
+            message: `Sincronizacion Aula Virtual: ${batch.length} secciones procesadas, ${imported} nuevas, ${updated} actualizadas, ${errors} con error.`,
+            processed: batch.length,
+            imported,
+            updated,
+            errors,
+            total_sections: sectionRows.length,
+            details,
+        };
+    }
+
     async syncSectionFromAulaVirtual(
         sectionId: string,
-        context: AulaVirtualRequestContext,
+        context?: AulaVirtualRequestContext | null,
+        sourceSectionId?: string | null,
     ): Promise<{
         success: boolean;
         message: string;
         imported: number;
         updated: number;
     }> {
-        const sid = String(sectionId ?? '').trim();
-        if (!sid) {
+        const planningSectionId = String(sectionId ?? '').trim();
+        const aulaVirtualSectionId = String(sourceSectionId ?? sectionId ?? '').trim();
+        if (!planningSectionId) {
             throw new BadRequestException('sectionId (s) es requerido.');
         }
+        if (!aulaVirtualSectionId) {
+            throw new BadRequestException('sourceSectionId de Aula Virtual es requerido.');
+        }
+
+        const effectiveContext =
+            context?.baseUrl?.trim() && context?.cookie?.trim()
+                ? { baseUrl: context.baseUrl.trim(), cookie: context.cookie }
+                : await this.getAulaVirtualRequestContext();
 
         // 1. Obtener datos del listado externo usando fetch nativo
-        const listUrl = new URL(`/web/conference/list?s=${sid}`, context.baseUrl);
+        const listUrl = new URL('/web/conference/list', effectiveContext.baseUrl);
+        listUrl.searchParams.set('s', aulaVirtualSectionId);
         let externalSessions: any[] = [];
         try {
             const response = await fetch(listUrl.toString(), {
                 headers: {
                     accept: 'application/json, text/plain, */*',
-                    cookie: context.cookie,
-                    referer: context.baseUrl,
+                    cookie: effectiveContext.cookie,
+                    referer: effectiveContext.baseUrl,
                 },
             });
-            if (response.ok) {
-                const data = await response.json();
-                externalSessions = Array.isArray(data) ? data : [];
+            if (!response.ok) {
+                throw new Error(`Aula Virtual respondio ${response.status} al consultar la seccion ${aulaVirtualSectionId}.`);
             }
+            const data = await response.json();
+            externalSessions = Array.isArray(data)
+                ? data
+                : Array.isArray(data?.data)
+                    ? data.data
+                    : Array.isArray(data?.items)
+                        ? data.items
+                        : [];
         } catch (error) {
             throw new Error(`Error al consultar listado de Aula Virtual: ${toErrorMessage(error)}`);
         }
@@ -4030,7 +4158,7 @@ export class VideoconferenceService implements OnModuleInit {
             .createQueryBuilder('schedule')
             .innerJoinAndSelect(PlanningSubsectionEntity, 'subsection', 'subsection.id = schedule.planning_subsection_id')
             .innerJoinAndSelect(PlanningSectionEntity, 'section', 'section.id = subsection.planning_section_id')
-            .where('subsection.planning_section_id = :sid', { sid })
+            .where('subsection.planning_section_id = :planningSectionId', { planningSectionId })
             .getRawMany();
 
         // 3. Procesar cada sesion externa
@@ -4040,13 +4168,18 @@ export class VideoconferenceService implements OnModuleInit {
 
         for (const ext of externalSessions) {
             const extDate = toDateOnly(ext.startTime || ext.date);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(extDate)) {
+                continue;
+            }
             const extZoomId = extractZoomMeetingIdFromUrl(ext.url);
             const extTopic = ext.title || '';
+            const extStart = compactTime(ext.startTime || ext.start || '');
 
             // Intentar encontrar un horario local que coincida con el dia de la semana
             const dayCode = dayCodeForDate(extDate);
             // Al usar getRawMany, los nombres de los campos vienen con el alias de la tabla (ej: schedule_day_of_week)
-            const matchingRaw = schedules.find(s => s.schedule_day_of_week === dayCode);
+            const matchingRaw = schedules.find(s => s.schedule_day_of_week === dayCode && compactTime(s.schedule_start_time) === extStart)
+                ?? schedules.find(s => s.schedule_day_of_week === dayCode);
 
             if (!matchingRaw) continue;
 
@@ -4103,6 +4236,86 @@ export class VideoconferenceService implements OnModuleInit {
             imported,
             updated
         };
+    }
+
+    private async findAulaVirtualSyncSections(
+        filters: AulaVirtualSectionSyncFilters = {},
+    ): Promise<Array<{
+        planning_section_id: string;
+        source_section_id: string;
+        course_code: string | null;
+        section_code: string | null;
+    }>> {
+        const query = this.offersRepo
+            .createQueryBuilder('offer')
+            .innerJoin(PlanningSectionEntity, 'section', 'section.planning_offer_id = offer.id')
+            .innerJoin(PlanningSubsectionEntity, 'subsection', 'subsection.planning_section_id = section.id')
+            .innerJoin(PlanningSubsectionScheduleEntity, 'schedule', 'schedule.planning_subsection_id = subsection.id')
+            .select('section.id', 'planning_section_id')
+            .addSelect('section.source_section_id', 'source_section_id')
+            .addSelect('offer.course_code', 'course_code')
+            .addSelect('COALESCE(section.external_code, section.code)', 'section_code')
+            .where('section.source_section_id IS NOT NULL')
+            .andWhere("TRIM(section.source_section_id) != ''")
+            .distinct(true)
+            .orderBy('offer.course_code', 'ASC')
+            .addOrderBy('section.external_code', 'ASC')
+            .addOrderBy('section.code', 'ASC');
+
+        const semesterId = cleanOptionalString(filters.semester_id);
+        const campusId = cleanOptionalString(filters.campus_id);
+        const facultyId = cleanOptionalString(filters.faculty_id);
+        const programId = cleanOptionalString(filters.academic_program_id);
+        const courseCode = cleanOptionalString(filters.course_code);
+        const planningSectionId = cleanOptionalString(filters.planning_section_id);
+        const sourceSectionId = cleanOptionalString(filters.source_section_id);
+        const search = cleanOptionalString(filters.search);
+
+        if (semesterId) {
+            query.andWhere('offer.semester_id = :semesterId', { semesterId });
+        }
+        if (campusId) {
+            query.andWhere('offer.campus_id = :campusId', { campusId });
+        }
+        if (facultyId) {
+            query.andWhere('offer.faculty_id = :facultyId', { facultyId });
+        }
+        if (programId) {
+            query.andWhere('offer.academic_program_id = :programId', { programId });
+        }
+        if (courseCode) {
+            query.andWhere("LOWER(COALESCE(offer.course_code, '')) LIKE :courseCode", {
+                courseCode: `%${courseCode.toLowerCase()}%`,
+            });
+        }
+        if (planningSectionId) {
+            query.andWhere('section.id = :planningSectionId', { planningSectionId });
+        }
+        if (sourceSectionId) {
+            query.andWhere('section.source_section_id = :sourceSectionId', { sourceSectionId });
+        }
+        if (search) {
+            query.andWhere(
+                `(
+                    LOWER(COALESCE(offer.course_code, '')) LIKE :searchLike OR
+                    LOWER(COALESCE(offer.course_name, '')) LIKE :searchLike OR
+                    LOWER(COALESCE(section.external_code, section.code, '')) LIKE :searchLike OR
+                    LOWER(COALESCE(section.source_section_id, '')) LIKE :searchLike OR
+                    LOWER(COALESCE(subsection.code, '')) LIKE :searchLike
+                )`,
+                { searchLike: `%${search.toLowerCase()}%` },
+            );
+        }
+
+        const rows = await query.getRawMany<Record<string, unknown>>();
+        return rows
+            .map((row) => ({
+                planning_section_id: readNullableString(row.planning_section_id) ?? '',
+                source_section_id: readNullableString(row.source_section_id) ?? '',
+                course_code: readNullableString(row.course_code),
+                section_code: readNullableString(row.section_code),
+            }))
+            .filter((row) => row.planning_section_id && row.source_section_id);
     }
 
     private async generateOccurrence(
@@ -8108,6 +8321,10 @@ function readString(value: unknown) {
 
 function readNullableString(value: unknown) {
     return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function cleanOptionalString(value: unknown) {
+    return readNullableString(value) ?? undefined;
 }
 
 function readNumber(value: unknown) {
