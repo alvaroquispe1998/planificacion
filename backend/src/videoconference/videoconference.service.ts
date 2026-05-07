@@ -4173,11 +4173,15 @@ export class VideoconferenceService implements OnModuleInit {
         }
         const schedules = await schedulesQuery.getRawMany();
 
-        const existingRecords = await this.planningVideoconferencesRepo.find({
+        const existingRecords = (await this.planningVideoconferencesRepo.find({
             where: subsectionId
                 ? { planning_section_id: planningSectionId, planning_subsection_id: subsectionId }
                 : { planning_section_id: planningSectionId },
-        });
+        })).filter((record) =>
+            record.link_mode !== 'INHERITED'
+            && !record.deleted_at
+            && record.delete_status !== 'DELETED'
+        );
 
         // 3. Procesar cada sesion externa. Solo se insertan faltantes; los existentes no se modifican.
         let imported = 0;
@@ -8169,6 +8173,7 @@ function isSameAulaVirtualImportedSession(
     record: PlanningSubsectionVideoconferenceEntity,
     session: NormalizedAulaVirtualListSession,
 ) {
+    const sameDate = toDateOnly(record.conference_date) === session.date;
     const storedAulaVirtualId = payloadPickString(
         record.payload_json,
         'aula_virtual_id',
@@ -8179,22 +8184,22 @@ function isSameAulaVirtualImportedSession(
         return true;
     }
 
-    if (session.zoomMeetingId && record.zoom_meeting_id === session.zoomMeetingId) {
+    if (sameDate && session.zoomMeetingId && record.zoom_meeting_id === session.zoomMeetingId) {
         return true;
     }
 
     const storedJoinUrl = readNullableString(record.join_url);
-    if (session.url && storedJoinUrl === session.url) {
+    if (sameDate && session.url && storedJoinUrl === session.url) {
         return true;
     }
 
     const storedJoinZoomId = extractZoomMeetingIdFromUrl(storedJoinUrl ?? '');
-    if (session.zoomMeetingId && storedJoinZoomId === session.zoomMeetingId) {
+    if (sameDate && session.zoomMeetingId && storedJoinZoomId === session.zoomMeetingId) {
         return true;
     }
 
     return (
-        toDateOnly(record.conference_date) === session.date
+        sameDate
         && compactTime(record.start_time) === session.startTime
         && compactTime(record.end_time) === session.endTime
     );
