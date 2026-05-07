@@ -82,10 +82,10 @@
         </thead>
         <tbody>
           <tr *ngFor="let inst of detail.instances">
-            <td class="mono">{{ inst['zoom_meeting_uuid'] }}</td>
-            <td>{{ inst['actual_start'] ? (inst['actual_start'] | date:'dd/MM/yyyy HH:mm') : '—' }}</td>
-            <td>{{ inst['duration_minutes'] != null ? inst['duration_minutes'] + ' min' : '—' }}</td>
-            <td>{{ inst['status'] }}</td>
+            <td class="mono">{{ inst.zoom_meeting_uuid }}</td>
+            <td>{{ inst.actual_start ? (inst.actual_start | date:'dd/MM/yyyy HH:mm') : '—' }}</td>
+            <td>{{ inst.duration_minutes != null ? inst.duration_minutes + ' min' : '—' }}</td>
+            <td>{{ inst.status }}</td>
           </tr>
         </tbody>
       </table>
@@ -104,9 +104,9 @@
         </thead>
         <tbody>
           <tr *ngFor="let p of detail.participants">
-            <td>{{ p['display_name'] }}</td>
-            <td>{{ p['email'] ?? '—' }}</td>
-            <td>{{ p['role'] }}</td>
+            <td>{{ p.display_name }}</td>
+            <td>{{ p.email ?? '—' }}</td>
+            <td>{{ p.role }}</td>
           </tr>
         </tbody>
       </table>
