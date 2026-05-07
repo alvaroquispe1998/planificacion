@@ -4174,9 +4174,7 @@ export class VideoconferenceService implements OnModuleInit {
         const schedules = await schedulesQuery.getRawMany();
 
         const existingRecords = (await this.planningVideoconferencesRepo.find({
-            where: subsectionId
-                ? { planning_section_id: planningSectionId, planning_subsection_id: subsectionId }
-                : { planning_section_id: planningSectionId },
+            where: { planning_section_id: planningSectionId },
         })).filter((record) =>
             record.link_mode !== 'INHERITED'
             && !record.deleted_at
@@ -8174,6 +8172,8 @@ function isSameAulaVirtualImportedSession(
     session: NormalizedAulaVirtualListSession,
 ) {
     const sameDate = toDateOnly(record.conference_date) === session.date;
+    const sessionZoomMeetingId = normalizeComparableId(session.zoomMeetingId);
+    const recordZoomMeetingId = normalizeComparableId(record.zoom_meeting_id);
     const storedAulaVirtualId = payloadPickString(
         record.payload_json,
         'aula_virtual_id',
@@ -8184,7 +8184,7 @@ function isSameAulaVirtualImportedSession(
         return true;
     }
 
-    if (sameDate && session.zoomMeetingId && record.zoom_meeting_id === session.zoomMeetingId) {
+    if (sameDate && sessionZoomMeetingId && recordZoomMeetingId === sessionZoomMeetingId) {
         return true;
     }
 
@@ -8193,8 +8193,8 @@ function isSameAulaVirtualImportedSession(
         return true;
     }
 
-    const storedJoinZoomId = extractZoomMeetingIdFromUrl(storedJoinUrl ?? '');
-    if (sameDate && session.zoomMeetingId && storedJoinZoomId === session.zoomMeetingId) {
+    const storedJoinZoomId = normalizeComparableId(extractZoomMeetingIdFromUrl(storedJoinUrl ?? ''));
+    if (sameDate && sessionZoomMeetingId && storedJoinZoomId === sessionZoomMeetingId) {
         return true;
     }
 
@@ -8203,6 +8203,10 @@ function isSameAulaVirtualImportedSession(
         && compactTime(record.start_time) === session.startTime
         && compactTime(record.end_time) === session.endTime
     );
+}
+
+function normalizeComparableId(value: string | null | undefined) {
+    return `${value ?? ''}`.trim();
 }
 
 function normalizeIsoDate(value: string) {
