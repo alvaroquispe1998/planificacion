@@ -524,6 +524,26 @@ export class ApiService {
     }>(`${this.baseUrl}/audit/planning-videoconferences/sync-pending`, payload);
   }
 
+  syncAulaVirtualVideoconferenceSections(payload: Record<string, string | number | boolean | undefined> = {}) {
+    return this.http.post<{
+      success: boolean;
+      message: string;
+      processed: number;
+      imported: number;
+      updated: number;
+      errors: number;
+      total_sections: number;
+      details: Array<{
+        planning_section_id: string;
+        source_section_id: string;
+        ok: boolean;
+        imported?: number;
+        updated?: number;
+        error?: string;
+      }>;
+    }>(`${this.baseUrl}/videoconference/sync-aula-virtual`, payload);
+  }
+
   getZoomPool() {
     return this.http.get<any>(`${this.baseUrl}/settings/zoom/pool`);
   }

@@ -132,6 +132,25 @@ export class VideoconferenceController {
         return this.service.reconcile(id);
     }
 
+    @Post('sync-aula-virtual')
+    async syncSectionsFromAulaVirtual(
+        @Body()
+        body: {
+            limit?: number;
+            offset?: number;
+            semester_id?: string;
+            campus_id?: string;
+            faculty_id?: string;
+            academic_program_id?: string;
+            course_code?: string;
+            planning_section_id?: string;
+            source_section_id?: string;
+            search?: string;
+        } = {},
+    ) {
+        return this.service.syncSectionsFromAulaVirtual(body);
+    }
+
     @Post('sync-aula-virtual/:sectionId')
     async syncFromAulaVirtual(
         @Param('sectionId') sectionId: string,

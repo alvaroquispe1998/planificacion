@@ -46,7 +46,10 @@ export class AuditPageComponent implements OnInit {
   // SincronizaciÃ³n masiva
   syncing = false;
   readonly syncBatchSize = 10;
+  syncingAulaVirtual = false;
+  readonly aulaVirtualBatchSize = 5;
   syncProgress: { processed: number; total: number } = { processed: 0, total: 0 };
+  aulaVirtualSyncProgress: { processed: number; total: number } = { processed: 0, total: 0 };
   syncResultMessage = '';
   syncHadErrors = false;
   totals = {
@@ -392,7 +395,7 @@ export class AuditPageComponent implements OnInit {
   }
 
   async syncPending() {
-    if (this.syncing || this.totals.pending_audit === 0) return;
+    if (this.syncing || this.syncingAulaVirtual || this.totals.pending_audit === 0) return;
 
     const initialPending = Math.max(0, Number(this.totals.pending_audit ?? 0));
     this.syncing = true;
@@ -475,6 +478,84 @@ export class AuditPageComponent implements OnInit {
         return;
       }
       this.syncResultMessage = err?.error?.message ?? 'No se pudo ejecutar la sincronización masiva.';
+      this.cdr.detectChanges();
+    }
+  }
+
+  async syncAulaVirtual() {
+    if (this.syncing || this.syncingAulaVirtual) return;
+
+    this.syncingAulaVirtual = true;
+    this.syncResultMessage = '';
+    this.syncHadErrors = false;
+    this.aulaVirtualSyncProgress = { processed: 0, total: 0 };
+    this.cdr.detectChanges();
+
+    const payload: Record<string, string | number | boolean | undefined> = {
+      semester_id: this.filters.semester_id || undefined,
+      campus_id: this.filters.campus_id || undefined,
+      faculty_id: this.filters.faculty_id || undefined,
+      academic_program_id: this.filters.academic_program_id || undefined,
+      course_code: this.filters.course_code || undefined,
+      search: this.filters.search || undefined,
+    };
+
+    let offset = 0;
+    let processed = 0;
+    let imported = 0;
+    let updated = 0;
+    let errors = 0;
+    let totalSections = 0;
+
+    try {
+      while (true) {
+        const res = await firstValueFrom(
+          this.api.syncAulaVirtualVideoconferenceSections({
+            ...payload,
+            limit: this.aulaVirtualBatchSize,
+            offset,
+          }),
+        );
+
+        const batchProcessed = Math.max(0, Number(res?.processed ?? 0));
+        totalSections = Math.max(totalSections, Number(res?.total_sections ?? 0));
+        processed += batchProcessed;
+        imported += Math.max(0, Number(res?.imported ?? 0));
+        updated += Math.max(0, Number(res?.updated ?? 0));
+        errors += Math.max(0, Number(res?.errors ?? 0));
+        offset += batchProcessed;
+        this.aulaVirtualSyncProgress = {
+          processed: Math.min(processed, totalSections || processed),
+          total: totalSections,
+        };
+        this.cdr.detectChanges();
+
+        if (batchProcessed === 0 || processed >= totalSections) {
+          break;
+        }
+      }
+
+      this.syncingAulaVirtual = false;
+      this.syncHadErrors = errors > 0;
+      this.syncResultMessage = totalSections === 0
+        ? 'No se encontraron secciones con ID de Aula Virtual para sincronizar.'
+        : `Aula Virtual completado: ${processed}/${totalSections} secciones. ${imported} nuevas | ${updated} actualizadas${errors ? ' | ' + errors + ' con error' : ''}.`;
+      this.loadRows();
+    } catch (err: any) {
+      this.syncingAulaVirtual = false;
+      this.syncHadErrors = true;
+      this.aulaVirtualSyncProgress = {
+        processed: Math.min(processed, totalSections || processed),
+        total: totalSections,
+      };
+      if (this.isGatewaySyncError(err)) {
+        this.syncResultMessage = processed > 0
+          ? `La conexion se corto despues de revisar ${processed} secciones. Recargando la lista para reflejar el avance real.`
+          : 'La conexion se corto durante la sincronizacion con Aula Virtual. Recargando la lista para reflejar cualquier avance aplicado.';
+        this.loadRows();
+        return;
+      }
+      this.syncResultMessage = err?.error?.message ?? 'No se pudo sincronizar desde Aula Virtual.';
       this.cdr.detectChanges();
     }
   }
