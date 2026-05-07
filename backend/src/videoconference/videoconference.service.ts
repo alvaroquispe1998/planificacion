@@ -250,6 +250,8 @@ type AulaVirtualSectionSyncFilters = {
     academic_program_id?: string;
     course_code?: string;
     planning_section_id?: string;
+    planning_subsection_id?: string;
+    vc_section_id?: string;
     source_section_id?: string;
     search?: string;
     limit?: number;
@@ -4013,7 +4015,8 @@ export class VideoconferenceService implements OnModuleInit {
         total_sections: number;
         details: Array<{
             planning_section_id: string;
-            source_section_id: string;
+            planning_subsection_id: string;
+            vc_section_id: string;
             course_code: string | null;
             section_code: string | null;
             ok: boolean;
@@ -4032,7 +4035,8 @@ export class VideoconferenceService implements OnModuleInit {
         let errors = 0;
         const details: Array<{
             planning_section_id: string;
-            source_section_id: string;
+            planning_subsection_id: string;
+            vc_section_id: string;
             course_code: string | null;
             section_code: string | null;
             ok: boolean;
@@ -4060,13 +4064,15 @@ export class VideoconferenceService implements OnModuleInit {
                 const result = await this.syncSectionFromAulaVirtual(
                     row.planning_section_id,
                     context,
-                    row.source_section_id,
+                    row.vc_section_id,
+                    row.planning_subsection_id,
                 );
                 imported += result.imported;
                 updated += result.updated;
                 details.push({
                     planning_section_id: row.planning_section_id,
-                    source_section_id: row.source_section_id,
+                    planning_subsection_id: row.planning_subsection_id,
+                    vc_section_id: row.vc_section_id,
                     course_code: row.course_code,
                     section_code: row.section_code,
                     ok: true,
@@ -4077,7 +4083,8 @@ export class VideoconferenceService implements OnModuleInit {
                 errors++;
                 details.push({
                     planning_section_id: row.planning_section_id,
-                    source_section_id: row.source_section_id,
+                    planning_subsection_id: row.planning_subsection_id,
+                    vc_section_id: row.vc_section_id,
                     course_code: row.course_code,
                     section_code: row.section_code,
                     ok: false,
@@ -4101,7 +4108,8 @@ export class VideoconferenceService implements OnModuleInit {
     async syncSectionFromAulaVirtual(
         sectionId: string,
         context?: AulaVirtualRequestContext | null,
-        sourceSectionId?: string | null,
+        vcSectionId?: string | null,
+        planningSubsectionId?: string | null,
     ): Promise<{
         success: boolean;
         message: string;
@@ -4109,12 +4117,13 @@ export class VideoconferenceService implements OnModuleInit {
         updated: number;
     }> {
         const planningSectionId = String(sectionId ?? '').trim();
-        const aulaVirtualSectionId = String(sourceSectionId ?? sectionId ?? '').trim();
+        const aulaVirtualSectionId = String(vcSectionId ?? sectionId ?? '').trim();
+        const subsectionId = String(planningSubsectionId ?? '').trim();
         if (!planningSectionId) {
             throw new BadRequestException('sectionId (s) es requerido.');
         }
         if (!aulaVirtualSectionId) {
-            throw new BadRequestException('sourceSectionId de Aula Virtual es requerido.');
+            throw new BadRequestException('vc_section_id de Aula Virtual es requerido.');
         }
 
         const effectiveContext =
@@ -4154,12 +4163,15 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         // 2. Cargar horarios locales para esta seccion usando QueryBuilder para manejar la relacion indirecta
-        const schedules = await this.schedulesRepo
+        const schedulesQuery = this.schedulesRepo
             .createQueryBuilder('schedule')
             .innerJoinAndSelect(PlanningSubsectionEntity, 'subsection', 'subsection.id = schedule.planning_subsection_id')
             .innerJoinAndSelect(PlanningSectionEntity, 'section', 'section.id = subsection.planning_section_id')
-            .where('subsection.planning_section_id = :planningSectionId', { planningSectionId })
-            .getRawMany();
+            .where('subsection.planning_section_id = :planningSectionId', { planningSectionId });
+        if (subsectionId) {
+            schedulesQuery.andWhere('subsection.id = :subsectionId', { subsectionId });
+        }
+        const schedules = await schedulesQuery.getRawMany();
 
         // 3. Procesar cada sesion externa
         let imported = 0;
@@ -4242,7 +4254,8 @@ export class VideoconferenceService implements OnModuleInit {
         filters: AulaVirtualSectionSyncFilters = {},
     ): Promise<Array<{
         planning_section_id: string;
-        source_section_id: string;
+        planning_subsection_id: string;
+        vc_section_id: string;
         course_code: string | null;
         section_code: string | null;
     }>> {
@@ -4252,11 +4265,12 @@ export class VideoconferenceService implements OnModuleInit {
             .innerJoin(PlanningSubsectionEntity, 'subsection', 'subsection.planning_section_id = section.id')
             .innerJoin(PlanningSubsectionScheduleEntity, 'schedule', 'schedule.planning_subsection_id = subsection.id')
             .select('section.id', 'planning_section_id')
-            .addSelect('section.source_section_id', 'source_section_id')
+            .addSelect('subsection.id', 'planning_subsection_id')
+            .addSelect('subsection.vc_section_id', 'vc_section_id')
             .addSelect('offer.course_code', 'course_code')
             .addSelect('COALESCE(section.external_code, section.code)', 'section_code')
-            .where('section.source_section_id IS NOT NULL')
-            .andWhere("TRIM(section.source_section_id) != ''")
+            .where('subsection.vc_section_id IS NOT NULL')
+            .andWhere("TRIM(subsection.vc_section_id) != ''")
             .distinct(true)
             .orderBy('offer.course_code', 'ASC')
             .addOrderBy('section.external_code', 'ASC')
@@ -4268,7 +4282,8 @@ export class VideoconferenceService implements OnModuleInit {
         const programId = cleanOptionalString(filters.academic_program_id);
         const courseCode = cleanOptionalString(filters.course_code);
         const planningSectionId = cleanOptionalString(filters.planning_section_id);
-        const sourceSectionId = cleanOptionalString(filters.source_section_id);
+        const planningSubsectionId = cleanOptionalString(filters.planning_subsection_id);
+        const vcSectionId = cleanOptionalString(filters.vc_section_id ?? filters.source_section_id);
         const search = cleanOptionalString(filters.search);
 
         if (semesterId) {
@@ -4291,8 +4306,11 @@ export class VideoconferenceService implements OnModuleInit {
         if (planningSectionId) {
             query.andWhere('section.id = :planningSectionId', { planningSectionId });
         }
-        if (sourceSectionId) {
-            query.andWhere('section.source_section_id = :sourceSectionId', { sourceSectionId });
+        if (planningSubsectionId) {
+            query.andWhere('subsection.id = :planningSubsectionId', { planningSubsectionId });
+        }
+        if (vcSectionId) {
+            query.andWhere('subsection.vc_section_id = :vcSectionId', { vcSectionId });
         }
         if (search) {
             query.andWhere(
@@ -4300,7 +4318,7 @@ export class VideoconferenceService implements OnModuleInit {
                     LOWER(COALESCE(offer.course_code, '')) LIKE :searchLike OR
                     LOWER(COALESCE(offer.course_name, '')) LIKE :searchLike OR
                     LOWER(COALESCE(section.external_code, section.code, '')) LIKE :searchLike OR
-                    LOWER(COALESCE(section.source_section_id, '')) LIKE :searchLike OR
+                    LOWER(COALESCE(subsection.vc_section_id, '')) LIKE :searchLike OR
                     LOWER(COALESCE(subsection.code, '')) LIKE :searchLike
                 )`,
                 { searchLike: `%${search.toLowerCase()}%` },
@@ -4311,11 +4329,12 @@ export class VideoconferenceService implements OnModuleInit {
         return rows
             .map((row) => ({
                 planning_section_id: readNullableString(row.planning_section_id) ?? '',
-                source_section_id: readNullableString(row.source_section_id) ?? '',
+                planning_subsection_id: readNullableString(row.planning_subsection_id) ?? '',
+                vc_section_id: readNullableString(row.vc_section_id) ?? '',
                 course_code: readNullableString(row.course_code),
                 section_code: readNullableString(row.section_code),
             }))
-            .filter((row) => row.planning_section_id && row.source_section_id);
+            .filter((row) => row.planning_section_id && row.planning_subsection_id && row.vc_section_id);
     }
 
     private async generateOccurrence(

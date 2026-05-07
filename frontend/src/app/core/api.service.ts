@@ -535,7 +535,8 @@ export class ApiService {
       total_sections: number;
       details: Array<{
         planning_section_id: string;
-        source_section_id: string;
+        planning_subsection_id: string;
+        vc_section_id: string;
         ok: boolean;
         imported?: number;
         updated?: number;

@@ -144,6 +144,8 @@ export class VideoconferenceController {
             academic_program_id?: string;
             course_code?: string;
             planning_section_id?: string;
+            planning_subsection_id?: string;
+            vc_section_id?: string;
             source_section_id?: string;
             search?: string;
         } = {},
