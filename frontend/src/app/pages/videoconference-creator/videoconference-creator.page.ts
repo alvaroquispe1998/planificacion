@@ -1,7 +1,9 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
+import { timeout, catchError } from 'rxjs/operators';
+import { of } from 'rxjs';
 import {
     CreateMeetingDto,
     CreatorProfile,
@@ -15,7 +17,7 @@ type FormMode = 'UNIQUE' | 'WEEKLY';
 @Component({
     selector: 'app-videoconference-creator-page',
     standalone: true,
-    imports: [CommonModule, FormsModule, RouterLink],
+    imports: [CommonModule, FormsModule],
     templateUrl: './videoconference-creator.page.html',
     styleUrl: './videoconference-creator.page.css',
 })
@@ -59,23 +61,32 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     load(): void {
         this.loading = true;
         this.error = '';
-        this.api.getProfile().subscribe({
-            next: (profile) => {
-                this.profile = profile;
-                if (profile.can_create_unique && !profile.can_create_weekly) {
-                    this.formMode = 'UNIQUE';
-                } else if (!profile.can_create_unique && profile.can_create_weekly) {
-                    this.formMode = 'WEEKLY';
+        this.api.getProfile().pipe(
+            timeout(15000),
+            catchError((err) => {
+                const status = err?.status;
+                if (status === 403) {
+                    this.error = 'No tienes permisos para acceder a este módulo. Contacta al administrador.';
+                } else if (status === 0 || err?.name === 'TimeoutError') {
+                    this.error = 'No se pudo conectar con el servidor. Verifica tu conexión o intenta más tarde.';
+                } else {
+                    this.error = 'No se pudo cargar el perfil. Verifica tus permisos.';
                 }
-                if (profile.assigned_groups.length > 0) {
-                    this.formGroupId = profile.assigned_groups[0].id;
-                }
-                this.loadMeetings();
-            },
-            error: () => {
-                this.error = 'No se pudo cargar el perfil. Verifica tus permisos.';
                 this.loading = false;
-            },
+                return of(null);
+            }),
+        ).subscribe((profile) => {
+            if (!profile) return;
+            this.profile = profile;
+            if (profile.can_create_unique && !profile.can_create_weekly) {
+                this.formMode = 'UNIQUE';
+            } else if (!profile.can_create_unique && profile.can_create_weekly) {
+                this.formMode = 'WEEKLY';
+            }
+            if (profile.assigned_groups.length > 0) {
+                this.formGroupId = profile.assigned_groups[0].id;
+            }
+            this.loadMeetings();
         });
     }
 

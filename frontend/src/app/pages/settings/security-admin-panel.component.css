@@ -364,6 +364,173 @@ button:not(.ghost):not(.list-item):not(.mini-link) {
   margin: 0;
 }
 
+/* ── Compact permission table ───────────────────────────────────── */
+
+.perm-summary-bar {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.9rem;
+  color: #66788c;
+  padding: 0.4rem 0;
+}
+
+.perm-summary-bar strong {
+  color: #173558;
+}
+
+.perm-table-wrap {
+  border: 1px solid #dde6ef;
+  border-radius: 1rem;
+  overflow: hidden;
+  background: #fff;
+}
+
+.perm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.perm-table thead tr {
+  background: #f4f7fb;
+}
+
+.perm-th-module,
+.perm-th-access,
+.perm-th-actions {
+  padding: 0.6rem 0.9rem;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: #5b6c80;
+  border-bottom: 1px solid #dde6ef;
+}
+
+.perm-th-module { width: 200px; }
+.perm-th-access { width: 80px; text-align: center; }
+
+.perm-row {
+  border-bottom: 1px solid #edf1f7;
+}
+
+.perm-row:last-child {
+  border-bottom: none;
+}
+
+.perm-row:hover {
+  background: #f8fbff;
+}
+
+.perm-td-module {
+  padding: 0.65rem 0.9rem;
+  vertical-align: middle;
+}
+
+.perm-module-name {
+  font-weight: 600;
+  color: #173558;
+}
+
+.perm-module-code {
+  font-size: 0.78rem;
+  color: #8fa0b2;
+  margin-top: 0.1rem;
+}
+
+.perm-td-access {
+  padding: 0.65rem 0.9rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.perm-td-actions {
+  padding: 0.55rem 0.9rem;
+  vertical-align: middle;
+}
+
+/* Toggle switch */
+.perm-toggle {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.perm-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.perm-toggle-track {
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  background: #cbd5e0;
+  border-radius: 999px;
+  position: relative;
+  transition: background 0.18s;
+}
+
+.perm-toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.18s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+}
+
+.perm-toggle input:checked + .perm-toggle-track {
+  background: #0f7752;
+}
+
+.perm-toggle input:checked + .perm-toggle-track::after {
+  transform: translateX(16px);
+}
+
+/* Action chips */
+.perm-action-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid #d8e3ee;
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  margin: 0.2rem 0.25rem 0.2rem 0;
+  font-size: 0.82rem;
+  color: #4a6278;
+  background: #f4f7fb;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.perm-action-chip input {
+  width: auto;
+  margin: 0;
+  accent-color: #0f7752;
+  cursor: pointer;
+}
+
+.perm-action-chip.active {
+  background: #edf8f3;
+  border-color: #0f7752;
+  color: #0a5c3c;
+  font-weight: 600;
+}
+
+.perm-no-actions {
+  color: #c0ccd8;
+  font-size: 0.85rem;
+}
+
+
+
 .feedback,
 .error {
   margin: 0;

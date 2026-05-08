@@ -717,4 +717,13 @@ export class ApiService {
   getAdminScopeCatalog() {
     return this.http.get<any>(`${this.baseUrl}/auth/admin/scopes/catalog`);
   }
+
+  // --- Videoconference Creator: user Zoom group assignments ---
+  getCreatorUserZoomGroups(userId: string) {
+    return this.http.get<any[]>(`${this.baseUrl}/videoconference-creator/security/users/${userId}/zoom-groups`);
+  }
+
+  setCreatorUserZoomGroups(userId: string, groupIds: string[]) {
+    return this.http.post<any[]>(`${this.baseUrl}/videoconference-creator/security/users/${userId}/zoom-groups`, { zoom_group_ids: groupIds });
+  }
 }

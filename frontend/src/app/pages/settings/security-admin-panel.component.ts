@@ -36,11 +36,15 @@ export class SecurityAdminPanelComponent implements OnChanges {
   isLoading = false;
   isSavingUser = false;
   isSavingRole = false;
+  isSavingZoomGroups = false;
   feedback = '';
   errorMessage = '';
 
   userForm = this.emptyUserForm();
   userAssignments: AssignmentRow[] = [this.emptyAssignment()];
+
+  availableZoomGroups: any[] = [];
+  selectedZoomGroupIds = new Set<string>();
 
   roleForm = this.emptyRoleForm();
   rolePermissionIds = new Set<string>();
@@ -152,12 +156,57 @@ export class SecurityAdminPanelComponent implements OnChanges {
       user.assignments?.length > 0 ? this.mapAssignmentsToRows(user.assignments) : [this.emptyAssignment()];
     this.feedback = '';
     this.errorMessage = '';
+    this.loadZoomGroupsForUser(user.id);
+  }
+
+  private loadZoomGroupsForUser(userId: string) {
+    this.selectedZoomGroupIds = new Set<string>();
+    this.loadAvailableZoomGroups();
+    this.api.getCreatorUserZoomGroups(userId).pipe(
+      catchError(() => of([])),
+    ).subscribe((groups: any[]) => {
+      this.selectedZoomGroupIds = new Set((groups ?? []).map((g: any) => g.zoom_group_id ?? g.id));
+      this.cdr.detectChanges();
+    });
+  }
+
+  private loadAvailableZoomGroups() {
+    if (this.availableZoomGroups.length) return;
+    this.api.listZoomGroups().pipe(catchError(() => of([]))).subscribe((groups: any[]) => {
+      this.availableZoomGroups = groups ?? [];
+      this.cdr.detectChanges();
+    });
+  }
+
+  isZoomGroupSelected(groupId: string): boolean {
+    return this.selectedZoomGroupIds.has(groupId);
+  }
+
+  toggleZoomGroup(groupId: string, checked: boolean) {
+    const next = new Set(this.selectedZoomGroupIds);
+    if (checked) next.add(groupId); else next.delete(groupId);
+    this.selectedZoomGroupIds = next;
+  }
+
+  saveZoomGroups() {
+    if (!this.selectedUserId) return;
+    this.isSavingZoomGroups = true;
+    this.api.setCreatorUserZoomGroups(this.selectedUserId, [...this.selectedZoomGroupIds]).pipe(
+      catchError((err) => {
+        this.errorMessage = err?.error?.message ?? 'No se pudieron guardar los grupos Zoom.';
+        return of(null);
+      }),
+      finalize(() => { this.isSavingZoomGroups = false; this.cdr.detectChanges(); }),
+    ).subscribe((result) => {
+      if (result !== null) this.feedback = 'Grupos Zoom guardados correctamente.';
+    });
   }
 
   createNewUser() {
     this.selectedUserId = '';
     this.userForm = this.emptyUserForm();
     this.userAssignments = [this.emptyAssignment()];
+    this.selectedZoomGroupIds = new Set<string>();
   }
 
   addAssignment() {
