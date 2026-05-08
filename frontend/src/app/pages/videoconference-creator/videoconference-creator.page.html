@@ -65,7 +65,7 @@
           </button>
         </div>
 
-        <div class="meeting-list" *ngIf="filteredMeetings.length > 0">
+        <div class="meeting-list" *ngIf="!loadingMeetings && filteredMeetings.length > 0">
           <div class="meeting-row" *ngFor="let m of filteredMeetings" (click)="openDetail(m.id)">
             <div class="meeting-status-bar" [ngClass]="statusClass(m.status)"></div>
             <div class="meeting-body">

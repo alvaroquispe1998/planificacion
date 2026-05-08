@@ -18,7 +18,9 @@ export interface ManualMeeting {
     creator_display_name: string | null;
     zoom_group_id: string;
     assigned_zoom_user_id: string | null;
+    assigned_zoom_user_name: string | null;
     backup_zoom_user_id: string | null;
+    backup_zoom_user_name: string | null;
     type: ManualMeetingType;
     topic: string;
     agenda: string | null;
@@ -111,6 +113,10 @@ export class VideoconferenceCreatorApiService {
 
     approveDraft(id: string, dto: ApproveDraftDto = {}) {
         return this.http.post<ManualMeeting>(`${BASE}/meetings/${id}/approve-backup`, dto);
+    }
+
+    cancelMeeting(id: string) {
+        return this.http.post<ManualMeeting>(`${BASE}/meetings/${id}/cancel`, {});
     }
 
     listDrafts() {

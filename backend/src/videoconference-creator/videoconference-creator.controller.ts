@@ -90,6 +90,16 @@ export class VideoconferenceCreatorController {
         return this.service.syncFromZoom(id, user.id, isAdminOrTI);
     }
 
+    @Post('meetings/:id/cancel')
+    @RequirePermissions('action.videoconference_creator.view')
+    async cancelMeeting(
+        @Param('id') id: string,
+        @CurrentAuthUser() user: AuthenticatedRequestUser,
+    ) {
+        const isAdminOrTI = user.is_admin || user.roles.some((r) => r.code === 'IT_SUPPORT');
+        return this.service.cancelMeeting(id, user.id, isAdminOrTI);
+    }
+
     /**
      * Approves a DRAFT_NO_HOST meeting using the group backup or an override host.
      * Requires approve_backup permission.

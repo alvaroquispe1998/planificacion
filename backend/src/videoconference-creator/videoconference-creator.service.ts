@@ -100,18 +100,7 @@ export class VideoconferenceCreatorService {
             qb.where('mv.created_by_user_id = :userId', { userId });
         }
         const meetings = await qb.getMany();
-
-        // Enrich with creator display names
-        const creatorIds = [...new Set(meetings.map((m) => m.created_by_user_id))];
-        const creators = creatorIds.length
-            ? await this.authUserRepo.find({ where: { id: In(creatorIds) }, select: ['id', 'display_name', 'username'] })
-            : [];
-        const creatorMap = new Map(creators.map((u) => [u.id, u.display_name || u.username]));
-
-        return meetings.map((m) => ({
-            ...m,
-            creator_display_name: creatorMap.get(m.created_by_user_id) ?? null,
-        }));
+        return this.enrichMeetings(meetings);
     }
 
     // ── Get single meeting ─────────────────────────────────────────────────────
@@ -135,7 +124,34 @@ export class VideoconferenceCreatorService {
             })
             : [];
 
-        return { meeting: mv, instances, participants };
+        const [meeting] = await this.enrichMeetings([mv]);
+        return { meeting, instances, participants };
+    }
+
+    async cancelMeeting(id: string, userId: string, isAdminOrTI: boolean) {
+        const mv = await this.mvRepo.findOne({ where: { id } });
+        if (!mv) throw new NotFoundException('Videoconferencia no encontrada.');
+        if (!isAdminOrTI && mv.created_by_user_id !== userId) {
+            throw new ForbiddenException('Sin acceso a esta videoconferencia.');
+        }
+        if (mv.status === 'CANCELLED') {
+            throw new BadRequestException('La videoconferencia ya está cancelada.');
+        }
+
+        if (mv.zoom_meeting_id) {
+            const deleteResult = await this.zoomService.deleteZoomMeeting(mv.zoom_meeting_id);
+            if (!deleteResult.deleted) {
+                throw new BadRequestException(`No se pudo cancelar en Zoom: ${deleteResult.reason}`);
+            }
+        }
+
+        mv.status = 'CANCELLED';
+        mv.error_message = null;
+        mv.updated_at = new Date();
+        await this.mvRepo.save(mv);
+
+        const [meeting] = await this.enrichMeetings([mv]);
+        return meeting;
     }
 
     // ── Create meeting ─────────────────────────────────────────────────────────
@@ -401,6 +417,40 @@ export class VideoconferenceCreatorService {
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
+
+    private async enrichMeetings(meetings: ManualVideoconferenceEntity[]) {
+        if (meetings.length === 0) {
+            return [];
+        }
+
+        const creatorIds = [...new Set(meetings.map((m) => m.created_by_user_id).filter(Boolean))];
+        const assignedHostIds = [...new Set(meetings.map((m) => m.assigned_zoom_user_id).filter(Boolean))] as string[];
+        const backupHostIds = [...new Set(meetings.map((m) => m.backup_zoom_user_id).filter(Boolean))] as string[];
+        const zoomUserIds = [...new Set([...assignedHostIds, ...backupHostIds])];
+
+        const [creators, zoomUsers] = await Promise.all([
+            creatorIds.length
+                ? this.authUserRepo.find({ where: { id: In(creatorIds) }, select: ['id', 'display_name', 'username'] })
+                : Promise.resolve([]),
+            zoomUserIds.length
+                ? this.zoomUserRepo.find({ where: { id: In(zoomUserIds) } })
+                : Promise.resolve([]),
+        ]);
+
+        const creatorMap = new Map(creators.map((u) => [u.id, u.display_name || u.username]));
+        const zoomUserMap = new Map(zoomUsers.map((u) => [u.id, u.name || u.email]));
+
+        return meetings.map((m) => ({
+            ...m,
+            creator_display_name: creatorMap.get(m.created_by_user_id) ?? null,
+            assigned_zoom_user_name: m.assigned_zoom_user_id
+                ? (zoomUserMap.get(m.assigned_zoom_user_id) ?? null)
+                : null,
+            backup_zoom_user_name: m.backup_zoom_user_id
+                ? (zoomUserMap.get(m.backup_zoom_user_id) ?? null)
+                : null,
+        }));
+    }
 
     private async hasConflict(
         zoomUserId: string,

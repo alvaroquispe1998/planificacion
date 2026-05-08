@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subject, of } from 'rxjs';
-import { takeUntil, timeout, catchError } from 'rxjs/operators';
+import { takeUntil, timeout, catchError, retry } from 'rxjs/operators';
 import {
     MeetingDetail,
     ManualMeeting,
@@ -23,6 +23,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     loading = true;
     syncing = false;
     approving = false;
+    cancelling = false;
     error = '';
     detail: MeetingDetail | null = null;
     private currentId = '';
@@ -34,6 +35,10 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
 
     get canApproveBackup(): boolean {
         return this.auth.hasPermission('action.videoconference_creator.approve_backup');
+    }
+
+    get canCancel(): boolean {
+        return Boolean(this.meeting && this.meeting.status !== 'CANCELLED');
     }
 
     constructor(
@@ -62,8 +67,10 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     private load(id: string): void {
         this.loading = true;
         this.error = '';
+        this.detail = null;
         this.api.getMeeting(id).pipe(
             timeout(15000),
+            retry({ count: 1, delay: 400 }),
             catchError(() => {
                 this.error = 'No se pudo cargar la videoconferencia. Verifica tu conexión o intenta de nuevo.';
                 this.loading = false;
@@ -74,6 +81,13 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
             this.detail = detail;
             this.loading = false;
         });
+    }
+
+    retryLoad(): void {
+        if (!this.currentId) {
+            return;
+        }
+        this.load(this.currentId);
     }
 
     sync(): void {
@@ -101,6 +115,32 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
             error: (err) => {
                 this.approving = false;
                 this.error = err?.error?.message ?? 'Error al aprobar.';
+            },
+        });
+    }
+
+    cancelMeeting(): void {
+        if (!this.meeting || !this.canCancel) return;
+
+        const confirmed = globalThis.confirm(
+            'Se cancelará la reunión en Zoom y quedará marcada como cancelada en el sistema. ¿Deseas continuar?',
+        );
+        if (!confirmed) {
+            return;
+        }
+
+        this.cancelling = true;
+        this.error = '';
+        this.api.cancelMeeting(this.meeting.id).subscribe({
+            next: (meeting) => {
+                this.cancelling = false;
+                if (this.detail) {
+                    this.detail = { ...this.detail, meeting };
+                }
+            },
+            error: (err) => {
+                this.cancelling = false;
+                this.error = err?.error?.message ?? 'No se pudo cancelar la videoconferencia.';
             },
         });
     }

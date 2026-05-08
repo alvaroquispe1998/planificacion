@@ -219,6 +219,9 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     }
 
     openDetail(id: string): void {
+        if (this.loading || this.loadingMeetings) {
+            return;
+        }
         this.router.navigate(['/videoconferences/creator', id]);
     }
 

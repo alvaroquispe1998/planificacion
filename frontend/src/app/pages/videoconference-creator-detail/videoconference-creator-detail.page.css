@@ -106,6 +106,10 @@
   background: #0f7752; color: #fff;
 }
 .btn-approve:hover:not(:disabled) { background: #0a5c3c; }
+.btn-danger {
+  background: #a92d2d; color: #fff;
+}
+.btn-danger:hover:not(:disabled) { background: #8f2424; }
 .btn-secondary {
   background: #f0f4fb; color: #1e3458; border: 1px solid #cddaea;
 }
@@ -141,6 +145,12 @@
   font-weight: 600;
 }
 
+.info-subvalue {
+  margin: 0.35rem 0 0;
+  color: #60799b;
+  font-size: 0.8rem;
+}
+
 .info-link {
   color: #3b7dd8;
   font-size: 0.88rem;
@@ -148,6 +158,29 @@
   text-decoration: none;
 }
 .info-link:hover { text-decoration: underline; }
+
+.info-link--action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #1f5fbf;
+}
+
+.info-link-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 999px;
+  background: #eef4fb;
+  font-size: 0.95rem;
+}
+
+.info-link-arrow {
+  color: #7a96b8;
+  font-size: 0.9rem;
+}
 
 .mono { font-family: monospace; font-size: 0.85rem; }
 

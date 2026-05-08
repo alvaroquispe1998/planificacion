@@ -9,7 +9,10 @@
   <!-- Error -->
   <div *ngIf="error && !loading" class="full-error">
     <p>{{ error }}</p>
-    <button class="btn btn-secondary" (click)="back()">← Volver</button>
+    <div class="hero-actions">
+      <button class="btn btn-sync" (click)="retryLoad()">Reintentar</button>
+      <button class="btn btn-secondary" (click)="back()">← Volver</button>
+    </div>
   </div>
 
   <ng-container *ngIf="!loading && meeting">
@@ -33,16 +36,23 @@
         <button type="button" class="btn btn-back" (click)="back()">← Volver</button>
         <button type="button" class="btn btn-sync"
           *ngIf="meeting.zoom_meeting_id"
-          [disabled]="syncing"
+          [disabled]="syncing || cancelling"
           (click)="sync()">
           <span *ngIf="!syncing">↻ Sincronizar desde Zoom</span>
           <span *ngIf="syncing" class="btn-saving"><span class="spinner spinner--sm"></span> Sincronizando...</span>
         </button>
         <button type="button" class="btn btn-approve"
           *ngIf="meeting.status === 'DRAFT_NO_HOST' && canApproveBackup"
-          [disabled]="approving"
+          [disabled]="approving || cancelling"
           (click)="approveBackup()">
           {{ approving ? 'Aprobando...' : '✓ Aprobar con backup' }}
+        </button>
+        <button type="button" class="btn btn-danger"
+          *ngIf="canCancel"
+          [disabled]="cancelling || syncing || approving"
+          (click)="cancelMeeting()">
+          <span *ngIf="!cancelling">✕ Cancelar reunión</span>
+          <span *ngIf="cancelling" class="btn-saving"><span class="spinner spinner--sm"></span> Cancelando...</span>
         </button>
       </div>
     </div>
@@ -63,13 +73,24 @@
       </div>
       <div class="info-card" *ngIf="meeting.join_url">
         <p class="info-label">Enlace de unión</p>
-        <a class="info-link" [href]="meeting.join_url" target="_blank" rel="noopener noreferrer">
-          Abrir en Zoom ↗
+        <a class="info-link info-link--action" [href]="meeting.join_url" target="_blank" rel="noopener noreferrer">
+          <span class="info-link-icon">🎓</span>
+          <span>Entrar como participante</span>
+          <span class="info-link-arrow">↗</span>
         </a>
       </div>
-      <div class="info-card" *ngIf="meeting.assigned_zoom_user_id">
+      <div class="info-card" *ngIf="meeting.start_url">
+        <p class="info-label">Enlace del host</p>
+        <a class="info-link info-link--action" [href]="meeting.start_url" target="_blank" rel="noopener noreferrer">
+          <span class="info-link-icon">🎥</span>
+          <span>Iniciar como host</span>
+          <span class="info-link-arrow">↗</span>
+        </a>
+      </div>
+      <div class="info-card" *ngIf="meeting.assigned_zoom_user_name || meeting.assigned_zoom_user_id">
         <p class="info-label">Host Zoom asignado</p>
-        <p class="info-value mono">{{ meeting.assigned_zoom_user_id }}</p>
+        <p class="info-value">{{ meeting.assigned_zoom_user_name ?? 'Usuario Zoom sin nombre' }}</p>
+        <p class="info-subvalue mono" *ngIf="meeting.assigned_zoom_user_id">ID: {{ meeting.assigned_zoom_user_id }}</p>
       </div>
       <div class="info-card" *ngIf="meeting.recurrence_json">
         <p class="info-label">Recurrencia</p>
