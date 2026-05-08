@@ -145,6 +145,14 @@
   font-weight: 600;
 }
 
+.host-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.15rem;
+}
+.host-icon { font-size: 1rem; flex-shrink: 0; }
+
 .info-subvalue {
   margin: 0.35rem 0 0;
   color: #60799b;
@@ -165,6 +173,35 @@
   gap: 0.55rem;
   color: #1f5fbf;
 }
+
+/* ── Link row (host + join en la misma card) ────────────────── */
+.info-card--links {
+  grid-column: span 2;
+}
+
+.link-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0;
+}
+.link-row + .link-row {
+  border-top: 1px solid #eef2f8;
+}
+
+.btn-copy {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.2rem 0.35rem;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: #60799b;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.btn-copy:hover { background: #eef4fb; }
 
 .info-link-icon {
   display: inline-flex;

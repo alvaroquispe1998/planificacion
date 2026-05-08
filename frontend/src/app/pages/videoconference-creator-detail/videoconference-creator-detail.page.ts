@@ -11,6 +11,7 @@ import {
     VideoconferenceCreatorApiService,
 } from '../../services/videoconference-creator-api.service';
 import { AuthService } from '../../core/auth.service';
+import { DialogService } from '../../core/dialog.service';
 
 @Component({
     selector: 'app-videoconference-creator-detail-page',
@@ -37,8 +38,39 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         return this.auth.hasPermission('action.videoconference_creator.approve_backup');
     }
 
+    /** Sólo reuniones futuras (aún no iniciadas) pueden cancelarse. */
     get canCancel(): boolean {
-        return Boolean(this.meeting && this.meeting.status !== 'CANCELLED');
+        if (!this.meeting || this.meeting.status === 'CANCELLED') return false;
+        const now = new Date();
+        const start = new Date(this.meeting.start_time);
+        return start > now;
+    }
+
+    /** Sincronizar no tiene sentido en reuniones canceladas. */
+    get canSync(): boolean {
+        return Boolean(this.meeting?.zoom_meeting_id) && this.meeting?.status !== 'CANCELLED';
+    }
+
+    /** Etiqueta legible de recurrencia (días + hasta). */
+    get recurrenceLabel(): string | null {
+        const r = this.meeting?.recurrence_json;
+        if (!r) return null;
+        const dayNames: Record<string, string> = {
+            '1': 'Dom', '2': 'Lun', '3': 'Mar', '4': 'Mié',
+            '5': 'Jue', '6': 'Vie', '7': 'Sáb',
+        };
+        const weeklyDays = r['weekly_days'] as string | undefined;
+        const dayLabels = weeklyDays
+            ? weeklyDays.split(',').map((d) => dayNames[d.trim()] ?? d).join(', ')
+            : '';
+        const endDt = r['end_date_time'] as string | undefined;
+        const endLabel = endDt
+            ? new Date(endDt).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+            : null;
+        const parts: string[] = [];
+        if (dayLabels) parts.push(`Cada semana los: ${dayLabels}`);
+        if (endLabel) parts.push(`Hasta el ${endLabel}`);
+        return parts.length ? parts.join(' · ') : null;
     }
 
     constructor(
@@ -46,6 +78,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         private readonly router: Router,
         private readonly api: VideoconferenceCreatorApiService,
         private readonly auth: AuthService,
+        private readonly dialog: DialogService,
         private readonly cdr: ChangeDetectorRef,
         private readonly zone: NgZone,
     ) { }
@@ -131,30 +164,42 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         });
     }
 
-    cancelMeeting(): void {
+    async cancelMeeting(): Promise<void> {
         if (!this.meeting || !this.canCancel) return;
 
-        const confirmed = globalThis.confirm(
-            'Se cancelará la reunión en Zoom y quedará marcada como cancelada en el sistema. ¿Deseas continuar?',
-        );
-        if (!confirmed) {
-            return;
-        }
+        const confirmed = await this.dialog.confirm({
+            title: 'Cancelar reunión',
+            message: 'Se eliminará la reunión en Zoom y quedará marcada como cancelada en el sistema. Esta acción no se puede deshacer.',
+            confirmLabel: 'Sí, cancelar reunión',
+            cancelLabel: 'No, mantener',
+            tone: 'danger',
+        });
+        if (!confirmed) return;
 
         this.cancelling = true;
         this.error = '';
+        this.cdr.markForCheck();
         this.api.cancelMeeting(this.meeting.id).subscribe({
             next: (meeting) => {
-                this.cancelling = false;
-                if (this.detail) {
-                    this.detail = { ...this.detail, meeting };
-                }
+                this.zone.run(() => {
+                    this.cancelling = false;
+                    if (this.detail) this.detail = { ...this.detail, meeting };
+                    this.cdr.markForCheck();
+                });
             },
             error: (err) => {
-                this.cancelling = false;
-                this.error = err?.error?.message ?? 'No se pudo cancelar la videoconferencia.';
+                this.zone.run(() => {
+                    this.cancelling = false;
+                    this.error = err?.error?.message ?? 'No se pudo cancelar la videoconferencia.';
+                    this.cdr.markForCheck();
+                });
             },
         });
+    }
+
+    copyToClipboard(text: string | null | undefined): void {
+        if (!text) return;
+        void navigator.clipboard.writeText(text);
     }
 
     back(): void {
