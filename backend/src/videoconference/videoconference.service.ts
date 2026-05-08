@@ -3634,7 +3634,19 @@ export class VideoconferenceService implements OnModuleInit {
 
         const conferenceDate = toDateOnly(record.conference_date);
         const akademicDate = toAkademicDate(conferenceDate);
-        const rows = await this.listAllAulaVirtualConferences(context, null, null, topic);
+
+        // Prefer the section-scoped endpoint when sectionId is available in payload_json.
+        const payloadSectionId = String(
+            (record.payload_json as Record<string, unknown> | null)?.['sectionId'] ?? '',
+        ).trim();
+
+        let rows: Array<{ id: string; name: string; sectionId: string; date: string }>;
+        if (payloadSectionId) {
+            rows = await this.listAulaVirtualConferencesBySection(context, payloadSectionId);
+        } else {
+            rows = await this.listAllAulaVirtualConferences(context, null, null, topic);
+        }
+
         const matches = rows.filter(
             (row) =>
                 row.name.trim() === topic &&
@@ -3647,9 +3659,43 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         console.log(
-            `[deleteVideoconference] AV delete lookup local=${record.id} topic="${topic}" date=${akademicDate} matches=${byId.size}`,
+            `[deleteVideoconference] AV delete lookup local=${record.id} topic="${topic}" date=${akademicDate} sectionId=${payloadSectionId || 'none'} rows=${rows.length} matches=${byId.size} rowsSample=${JSON.stringify(rows.slice(0, 3))}`,
         );
         return [...byId.values()];
+    }
+
+    private async listAulaVirtualConferencesBySection(
+        context: AulaVirtualRequestContext,
+        sectionId: string,
+    ): Promise<Array<{ id: string; name: string; sectionId: string; date: string }>> {
+        const url = new URL(
+            `/web/conference/list?s=${encodeURIComponent(sectionId)}`,
+            context.baseUrl,
+        );
+        const response = await fetch(url.toString(), {
+            method: 'GET',
+            headers: {
+                accept: 'application/json, text/plain, */*',
+                cookie: context.cookie,
+                referer: `${context.baseUrl}/web/conference/teacher?s=${encodeURIComponent(sectionId)}`,
+                'user-agent': 'Mozilla/5.0 (UAI Videoconferencias)',
+                'x-requested-with': 'XMLHttpRequest',
+            },
+        });
+        const bodyText = await response.text();
+        const parsed = parseMaybeJson(bodyText);
+        if (!Array.isArray(parsed)) {
+            return [];
+        }
+        return (parsed as unknown[]).map((item) => {
+            const r = item as Record<string, unknown>;
+            return {
+                id: String(r['id'] ?? ''),
+                name: String(r['title'] ?? r['name'] ?? ''),
+                sectionId,
+                date: String(r['date'] ?? ''),
+            };
+        });
     }
 
     /**
@@ -6657,7 +6703,7 @@ export class VideoconferenceService implements OnModuleInit {
             const r = item as Record<string, unknown>;
             return {
                 id: String(r['id'] ?? ''),
-                name: String(r['name'] ?? ''),
+                name: String(r['name'] ?? r['title'] ?? ''),
                 sectionId: String(r['sectionId'] ?? ''),
                 date: String(r['date'] ?? ''),
             };
