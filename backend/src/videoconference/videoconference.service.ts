@@ -3771,8 +3771,19 @@ export class VideoconferenceService implements OnModuleInit {
             );
         }
 
+        const conferenceDate = toDateOnly(record.conference_date);
+        const akademicDate = toAkademicDate(conferenceDate);
+        const topicTrimmed = (topic || '').trim();
+
+        // Prefer section-scoped endpoint when sectionId is available in payload_json.
+        const payloadSectionId = String(
+            (record.payload_json as Record<string, unknown> | null)?.['sectionId'] ?? '',
+        ).trim();
+
         let rows: Array<{ id: string; name: string; sectionId: string; date: string }> = [];
-        if (meta.courseCode) {
+        if (payloadSectionId) {
+            rows = await this.listAulaVirtualConferencesBySection(context, payloadSectionId);
+        } else if (meta.courseCode) {
             const listing = await this.listAulaVirtualConferences(
                 context,
                 null,
@@ -3787,16 +3798,12 @@ export class VideoconferenceService implements OnModuleInit {
         }
 
         // Use exact name and date matching (with 1-day window) to identify the correct entry among weekly sessions.
-        const conferenceDate = toDateOnly(record.conference_date);
-        const akademicDate = toAkademicDate(conferenceDate);
-
-        const topicTrimmed = (topic || '').trim();
         let match =
             rows.find((r) => (r.name || '').trim() === topicTrimmed && isAkademicDateWithinDays(r.date, akademicDate, 1)) ??
             null;
 
-        // Fallback: search by date if courseCode search didn't yield a match.
-        if (!match && akademicDate) {
+        // Fallback: search by date if section/courseCode search didn't yield a match.
+        if (!match && !payloadSectionId && akademicDate) {
             const listing = await this.listAulaVirtualConferences(
                 context,
                 akademicDate,
