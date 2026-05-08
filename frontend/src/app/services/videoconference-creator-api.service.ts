@@ -15,6 +15,7 @@ export type ManualMeetingStatus =
 export interface ManualMeeting {
     id: string;
     created_by_user_id: string;
+    creator_display_name: string | null;
     zoom_group_id: string;
     assigned_zoom_user_id: string | null;
     backup_zoom_user_id: string | null;

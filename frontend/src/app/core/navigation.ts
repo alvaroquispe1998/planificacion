@@ -221,16 +221,6 @@ export const APP_NAV_GROUPS: NavGroup[] = [
               prefix: ['/videoconferences/creator/'],
             },
           },
-          {
-            label: 'Borradores sin host',
-            path: '/videoconferences/creator/drafts',
-            icon: 'history',
-            window: 'window.videoconference_creator',
-            permission: 'action.videoconference_creator.approve_backup',
-            match: {
-              exact: ['/videoconferences/creator/drafts'],
-            },
-          },
         ],
       },
     ],

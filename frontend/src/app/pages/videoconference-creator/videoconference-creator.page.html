@@ -1,41 +1,66 @@
-<div class="creator-page">
-  <!-- Loading / error state -->
-  <div *ngIf="loading" class="status-block">Cargando…</div>
-  <div *ngIf="error && !loading" class="status-block status-error">{{ error }}</div>
+﻿<div class="vc-page">
 
+  <!-- ── Cargando perfil ─────────────────────────────────────────────── -->
+  <div *ngIf="loading" class="full-loading">
+    <span class="spinner"></span>
+    <span>Cargando...</span>
+  </div>
+
+  <div *ngIf="!loading && error && !profile" class="full-error">
+    <div class="full-error-icon">⚠</div>
+    <p>{{ error }}</p>
+    <button class="btn btn-secondary" (click)="load()">Reintentar</button>
+  </div>
+
+  <!-- ── Contenido principal ─────────────────────────────────────────── -->
   <ng-container *ngIf="!loading && profile">
 
-    <!-- ── Creation Form ──────────────────────────────────────────────── -->
-    <section class="panel">
-      <h2 class="panel-title">Nueva videoconferencia</h2>
+    <!-- Formulario de creación -->
+    <div class="card form-card">
+      <div class="card-head">
+        <div>
+          <p class="section-eyebrow">NUEVA VIDEOCONFERENCIA</p>
+          <h2 class="card-title">Crear reunión Zoom</h2>
+        </div>
+      </div>
 
-      <div *ngIf="successMsg" class="alert alert-ok">{{ successMsg }}</div>
-      <div *ngIf="error && saving === false && successMsg === ''" class="alert alert-err">{{ error }}</div>
+      <div *ngIf="successMsg" class="alert alert-ok">
+        <strong>✓</strong> {{ successMsg }}
+      </div>
+      <div *ngIf="error && !saving" class="alert alert-err">
+        {{ error }}
+      </div>
 
-      <form (ngSubmit)="submit()" #f="ngForm" class="form-grid">
+      <form (ngSubmit)="submit()" class="form-grid">
 
-        <!-- Type selector -->
+        <!-- Tipo de reunión -->
         <div class="field field--full" *ngIf="profile.can_create_unique || profile.can_create_weekly">
-          <label class="field-label">Tipo de reunión</label>
-          <div class="toggle-group">
-            <button type="button"
-              class="toggle-btn"
+          <span class="field-label">Tipo de reunión</span>
+          <div class="type-tabs">
+            <button type="button" class="type-tab"
               [class.active]="formMode === 'UNIQUE'"
               [disabled]="!profile.can_create_unique"
               (click)="formMode = 'UNIQUE'">
-              Única
+              <span class="type-tab-icon">📅</span>
+              <span class="type-tab-text">
+                <strong>Única</strong>
+                <small>Una sola sesión</small>
+              </span>
             </button>
-            <button type="button"
-              class="toggle-btn"
+            <button type="button" class="type-tab"
               [class.active]="formMode === 'WEEKLY'"
               [disabled]="!profile.can_create_weekly"
               (click)="formMode = 'WEEKLY'">
-              Semanal recurrente
+              <span class="type-tab-icon">🔁</span>
+              <span class="type-tab-text">
+                <strong>Semanal recurrente</strong>
+                <small>Se repite cada semana</small>
+              </span>
             </button>
           </div>
         </div>
 
-        <!-- Zoom group -->
+        <!-- Grupo Zoom -->
         <div class="field">
           <label class="field-label" for="groupId">Grupo de hosts Zoom</label>
           <select id="groupId" [(ngModel)]="formGroupId" name="groupId" required class="input">
@@ -44,7 +69,7 @@
           </select>
         </div>
 
-        <!-- Topic -->
+        <!-- Tema -->
         <div class="field">
           <label class="field-label" for="topic">Tema</label>
           <input id="topic" type="text" [(ngModel)]="formTopic" name="topic" required
@@ -55,35 +80,39 @@
         <div class="field field--full">
           <label class="field-label" for="agenda">Agenda (opcional)</label>
           <textarea id="agenda" [(ngModel)]="formAgenda" name="agenda"
-            rows="3" maxlength="2000" placeholder="Descripción / puntos a tratar" class="input"></textarea>
+            rows="2" maxlength="2000" placeholder="Descripción o puntos a tratar" class="input"></textarea>
         </div>
 
-        <!-- Start time -->
+        <!-- Fecha y duración -->
         <div class="field">
           <label class="field-label" for="startTime">Fecha y hora de inicio</label>
           <input id="startTime" type="datetime-local" [(ngModel)]="formStartTime" name="startTime"
-            required class="input" />
+            required [min]="minDateTime" class="input"
+            [class.input--error]="formStartTime && startTimeError" />
+          <span *ngIf="formStartTime && startTimeError" class="field-error">{{ startTimeError }}</span>
         </div>
-
-        <!-- Duration -->
         <div class="field">
           <label class="field-label" for="duration">Duración (minutos)</label>
           <input id="duration" type="number" [(ngModel)]="formDuration" name="duration"
-            required min="15" max="720" class="input" />
+            required min="15" max="720" class="input"
+            [class.input--error]="formDuration < 15 || formDuration > 720" />
+          <span *ngIf="formDuration < 15 || formDuration > 720" class="field-error">La duración debe estar entre 15 y 720 minutos.</span>
         </div>
 
-        <!-- Weekly recurrence controls -->
+        <!-- Recurrencia semanal -->
         <ng-container *ngIf="formMode === 'WEEKLY'">
           <div class="field">
             <label class="field-label" for="recEndDate">Fecha fin de recurrencia</label>
             <input id="recEndDate" type="date" [(ngModel)]="formRecurrenceEndDate"
-              name="recEndDate" class="input" />
+              name="recEndDate" [min]="minRecurrenceDate" class="input"
+              [class.input--error]="formRecurrenceEndDate && recurrenceEndError" />
+            <span *ngIf="formRecurrenceEndDate && recurrenceEndError" class="field-error">{{ recurrenceEndError }}</span>
           </div>
-
           <div class="field">
-            <label class="field-label">Días de la semana</label>
+            <span class="field-label">Día de la semana</span>
             <div class="day-picker">
-              <label *ngFor="let d of weekdayOptions" class="day-option">
+              <label *ngFor="let d of weekdayOptions" class="day-chip"
+                [class.selected]="formRecurrenceWeeklyDays === d.value">
                 <input type="radio" [(ngModel)]="formRecurrenceWeeklyDays"
                   name="recWeeklyDays" [value]="d.value" />
                 {{ d.label }}
@@ -92,54 +121,74 @@
           </div>
         </ng-container>
 
-        <div class="field field--full form-actions">
-          <button type="submit" class="btn btn-primary"
-            [disabled]="saving || !canCreate || !formTopic || !formGroupId || !formStartTime">
-            {{ saving ? 'Creando…' : 'Crear videoconferencia' }}
+        <div class="field field--full">
+          <button type="submit" class="btn btn-primary btn-submit"
+            [disabled]="saving || !canCreate || !formTopic || !formGroupId || !formStartTime || !!startTimeError || !!recurrenceEndError || formDuration < 15 || formDuration > 720">
+            <span *ngIf="!saving">Crear videoconferencia</span>
+            <span *ngIf="saving" class="btn-saving">
+              <span class="spinner spinner--sm"></span> Creando...
+            </span>
           </button>
         </div>
       </form>
-    </section>
+    </div>
 
-    <!-- ── Meetings List ──────────────────────────────────────────────── -->
-    <section class="panel">
-      <h2 class="panel-title">Mis videoconferencias</h2>
-
-      <div *ngIf="meetings.length === 0" class="empty-state">
-        No hay videoconferencias registradas todavía.
+    <!-- Lista de reuniones -->
+    <div class="card list-card">
+      <div class="card-head">
+        <div>
+          <p class="section-eyebrow">HISTORIAL</p>
+          <h2 class="card-title">
+            Videoconferencias
+            <span class="badge-count" *ngIf="draftCount > 0">{{ draftCount }} borrador{{ draftCount > 1 ? 'es' : '' }}</span>
+          </h2>
+        </div>
+        <button type="button" class="btn btn-icon" (click)="refreshMeetings()" [disabled]="loadingMeetings" title="Recargar lista">
+          <span [class.spinning]="loadingMeetings">↻</span>
+        </button>
       </div>
 
-      <table *ngIf="meetings.length > 0" class="data-table">
-        <thead>
-          <tr>
-            <th>Tema</th>
-            <th>Tipo</th>
-            <th>Inicio</th>
-            <th>Duración</th>
-            <th>Estado</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let m of meetings">
-            <td>{{ m.topic }}</td>
-            <td>{{ m.type === 'WEEKLY' ? 'Semanal' : 'Única' }}</td>
-            <td>{{ m.start_time | date:'dd/MM/yyyy HH:mm' }}</td>
-            <td>{{ m.duration_minutes }} min</td>
-            <td>
-              <span class="badge" [ngClass]="statusClass(m.status)">
-                {{ statusLabel(m.status) }}
-              </span>
-            </td>
-            <td>
-              <button type="button" class="btn btn-sm" (click)="openDetail(m.id)">
-                Ver detalle
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+      <!-- Filtros por estado -->
+      <div class="filter-bar">
+        <button
+          *ngFor="let f of statusFilters"
+          type="button"
+          class="filter-chip"
+          [class.active]="statusFilter === f.value"
+          (click)="statusFilter = f.value">
+          {{ f.label }}
+        </button>
+      </div>
+
+      <div *ngIf="loadingMeetings" class="list-loading">
+        <span class="spinner spinner--sm"></span> Actualizando...
+      </div>
+
+      <div *ngIf="!loadingMeetings && filteredMeetings.length === 0" class="empty-state">
+        Aún no hay videoconferencias en esta categoría.
+      </div>
+
+      <div class="meeting-list" *ngIf="filteredMeetings.length > 0">
+        <div class="meeting-row" *ngFor="let m of filteredMeetings" (click)="openDetail(m.id)">
+          <div class="meeting-status-bar" [ngClass]="statusClass(m.status)"></div>
+          <div class="meeting-body">
+            <div class="meeting-main">
+              <span class="meeting-topic">{{ m.topic }}</span>
+              <span class="meeting-type-pill">{{ typeLabel(m.type) }}</span>
+              <span class="badge" [ngClass]="statusClass(m.status)">{{ statusLabel(m.status) }}</span>
+            </div>
+            <div class="meeting-meta">
+              <span>📅 {{ m.start_time | date:'dd/MM/yyyy HH:mm' }}</span>
+              <span>⏱ {{ m.duration_minutes }} min</span>
+              <span *ngIf="m.zoom_meeting_id" class="meeting-meta-id">🔗 {{ m.zoom_meeting_id }}</span>
+              <span *ngIf="m.creator_display_name" class="meeting-creator">👤 {{ m.creator_display_name }}</span>
+            </div>
+            <div *ngIf="m.error_message" class="meeting-error-msg">⚠ {{ m.error_message }}</div>
+          </div>
+          <span class="meeting-arrow">›</span>
+        </div>
+      </div>
+    </div>
 
   </ng-container>
 </div>

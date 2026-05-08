@@ -29,7 +29,6 @@ import { VideoconferencesPageComponent } from './pages/videoconferences/videocon
 import { VideoconferenceEspecialesPageComponent } from './pages/videoconference-especiales/videoconference-especiales.page';
 import { VideoconferenceCreatorPageComponent } from './pages/videoconference-creator/videoconference-creator.page';
 import { VideoconferenceCreatorDetailPageComponent } from './pages/videoconference-creator-detail/videoconference-creator-detail.page';
-import { VideoconferenceCreatorDraftsPageComponent } from './pages/videoconference-creator-drafts/videoconference-creator-drafts.page';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'planning' },
@@ -239,12 +238,8 @@ export const routes: Routes = [
   },
   {
     path: 'videoconferences/creator/drafts',
-    component: VideoconferenceCreatorDraftsPageComponent,
-    canActivate: [windowGuard, permissionGuard],
-    data: {
-      requiredWindow: 'window.videoconference_creator',
-      requiredPermission: 'action.videoconference_creator.approve_backup',
-    },
+    redirectTo: 'videoconferences/creator',
+    pathMatch: 'full',
   },
   {
     path: 'videoconferences/creator/:id',
