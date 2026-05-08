@@ -499,6 +499,10 @@ export class VideoconferenceService implements OnModuleInit {
         private readonly zoomAccountService: ZoomAccountService,
     ) { }
 
+    private _licenseSnapshotCache: ZoomPoolLicenseSnapshot | null = null;
+    private _licenseSnapshotCachedAt = 0;
+    private readonly _licenseSnapshotTtlMs = 5 * 60 * 1000; // 5 minutes
+
     async onModuleInit() {
         try {
             await this.ensureZoomGroupsBootstrap();
@@ -5756,6 +5760,10 @@ export class VideoconferenceService implements OnModuleInit {
     }
 
     private async loadZoomPoolLicenseSnapshot() {
+        const now = Date.now();
+        if (this._licenseSnapshotCache && now - this._licenseSnapshotCachedAt < this._licenseSnapshotTtlMs) {
+            return this._licenseSnapshotCache;
+        }
         try {
             const zoomUsers = await this.zoomAccountService.listAccountUsers();
             const byEmail = new Map(
@@ -5768,13 +5776,17 @@ export class VideoconferenceService implements OnModuleInit {
                     .filter((item) => item.id?.trim())
                     .map((item) => [item.id.trim().toLowerCase(), item] as const),
             );
-            return {
+            const snapshot = {
                 ok: true,
                 error: null,
                 byEmail,
                 byId,
             } satisfies ZoomPoolLicenseSnapshot;
+            this._licenseSnapshotCache = snapshot;
+            this._licenseSnapshotCachedAt = Date.now();
+            return snapshot;
         } catch (error) {
+            // Don't cache errors — retry next time
             return {
                 ok: false,
                 error: toErrorMessage(error),
