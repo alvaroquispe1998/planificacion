@@ -1,9 +1,8 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { NavigationEnd, Router } from '@angular/router';
-import { Subject } from 'rxjs';
-import { filter, takeUntil, timeout, catchError } from 'rxjs/operators';
+import { Router } from '@angular/router';
+import { timeout, catchError } from 'rxjs/operators';
 import { of } from 'rxjs';
 import {
     CreateMeetingDto,
@@ -24,7 +23,7 @@ type StatusFilter = 'ALL' | ManualMeetingStatus;
     templateUrl: './videoconference-creator.page.html',
     styleUrl: './videoconference-creator.page.css',
 })
-export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
+export class VideoconferenceCreatorPageComponent implements OnInit {
     profile: CreatorProfile | null = null;
     meetings: ManualMeeting[] = [];
     loading = true;
@@ -33,6 +32,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
     error = '';
     successMsg = '';
     statusFilter: StatusFilter = 'ALL';
+    view: 'list' | 'form' = 'list';
 
     formMode: FormMode = 'UNIQUE';
     formGroupId = '';
@@ -62,8 +62,6 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         { value: 'CANCELLED', label: 'Canceladas' },
     ];
 
-    private readonly destroy$ = new Subject<void>();
-
     constructor(
         private readonly api: VideoconferenceCreatorApiService,
         private readonly router: Router,
@@ -71,22 +69,6 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
 
     ngOnInit(): void {
         this.load();
-        this.router.events.pipe(
-            filter((e): e is NavigationEnd => e instanceof NavigationEnd),
-            filter((e) => e.urlAfterRedirects === '/videoconferences/creator'),
-            takeUntil(this.destroy$),
-        ).subscribe(() => {
-            if (this.profile) {
-                this.refreshMeetings();
-            } else {
-                this.load();
-            }
-        });
-    }
-
-    ngOnDestroy(): void {
-        this.destroy$.next();
-        this.destroy$.complete();
     }
 
     load(): void {
@@ -227,6 +209,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
                 }
                 this.resetForm();
                 this.refreshMeetings();
+                this.view = 'list';
             },
             error: (err) => {
                 this.saving = false;

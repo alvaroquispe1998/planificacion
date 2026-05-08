@@ -60,6 +60,47 @@
   border-bottom: 1px solid #eef4fb;
 }
 
+/* ── Page header (outside card) ───────────────────────────────────── */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #1e3458;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.btn-new {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── List toolbar (filters + refresh button) ──────────────────────── */
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.85rem 1.25rem 0;
+  flex-wrap: wrap;
+}
+
+/* ── Form actions row ─────────────────────────────────────────────── */
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+}
+
 .section-eyebrow {
   margin: 0 0 0.2rem;
   font-size: 0.68rem;
@@ -254,8 +295,6 @@ select.input { cursor: pointer; }
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  padding: 0.9rem 1.5rem 0.75rem;
-  border-bottom: 1px solid #eef4fb;
 }
 
 .filter-chip {
