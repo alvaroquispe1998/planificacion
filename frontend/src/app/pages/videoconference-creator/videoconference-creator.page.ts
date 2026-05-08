@@ -91,14 +91,12 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     }
 
     private loadMeetings(): void {
-        this.api.listMeetings().subscribe({
-            next: (meetings) => {
-                this.meetings = meetings;
-                this.loading = false;
-            },
-            error: () => {
-                this.loading = false;
-            },
+        this.api.listMeetings().pipe(
+            timeout(15000),
+            catchError(() => of([] as ManualMeeting[])),
+        ).subscribe((meetings) => {
+            this.meetings = meetings;
+            this.loading = false;
         });
     }
 
