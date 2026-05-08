@@ -1,8 +1,8 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { Subject, of } from 'rxjs';
+import { takeUntil, timeout, catchError } from 'rxjs/operators';
 import {
     MeetingDetail,
     ManualMeeting,
@@ -62,15 +62,17 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     private load(id: string): void {
         this.loading = true;
         this.error = '';
-        this.api.getMeeting(id).subscribe({
-            next: (detail) => {
-                this.detail = detail;
+        this.api.getMeeting(id).pipe(
+            timeout(15000),
+            catchError(() => {
+                this.error = 'No se pudo cargar la videoconferencia. Verifica tu conexión o intenta de nuevo.';
                 this.loading = false;
-            },
-            error: () => {
-                this.error = 'No se pudo cargar la videoconferencia.';
-                this.loading = false;
-            },
+                return of(null);
+            }),
+        ).subscribe((detail) => {
+            if (!detail) return;
+            this.detail = detail;
+            this.loading = false;
         });
     }
 

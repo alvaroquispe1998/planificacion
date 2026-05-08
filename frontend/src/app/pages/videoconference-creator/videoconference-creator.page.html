@@ -1,194 +1,227 @@
-﻿<div class="vc-page">
+<div class="vc-page">
 
-  <!-- ── Cargando perfil ─────────────────────────────────────────────── -->
+  <!-- Cargando perfil -->
   <div *ngIf="loading" class="full-loading">
     <span class="spinner"></span>
     <span>Cargando...</span>
   </div>
 
   <div *ngIf="!loading && error && !profile" class="full-error">
-    <div class="full-error-icon">⚠</div>
+    <div class="full-error-icon">&#9888;</div>
     <p>{{ error }}</p>
     <button class="btn btn-secondary" (click)="load()">Reintentar</button>
   </div>
 
-  <!-- ── Contenido principal ─────────────────────────────────────────── -->
   <ng-container *ngIf="!loading && profile">
 
-    <!-- Formulario de creación -->
-    <div class="card form-card">
-      <div class="card-head">
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- VISTA: HISTORIAL                                   -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <ng-container *ngIf="view === 'list'">
+
+      <div class="page-header">
         <div>
-          <p class="section-eyebrow">NUEVA VIDEOCONFERENCIA</p>
-          <h2 class="card-title">Crear reunión Zoom</h2>
-        </div>
-      </div>
-
-      <div *ngIf="successMsg" class="alert alert-ok">
-        <strong>✓</strong> {{ successMsg }}
-      </div>
-      <div *ngIf="error && !saving" class="alert alert-err">
-        {{ error }}
-      </div>
-
-      <form (ngSubmit)="submit()" class="form-grid">
-
-        <!-- Tipo de reunión -->
-        <div class="field field--full" *ngIf="profile.can_create_unique || profile.can_create_weekly">
-          <span class="field-label">Tipo de reunión</span>
-          <div class="type-tabs">
-            <button type="button" class="type-tab"
-              [class.active]="formMode === 'UNIQUE'"
-              [disabled]="!profile.can_create_unique"
-              (click)="formMode = 'UNIQUE'">
-              <span class="type-tab-icon">📅</span>
-              <span class="type-tab-text">
-                <strong>Única</strong>
-                <small>Una sola sesión</small>
-              </span>
-            </button>
-            <button type="button" class="type-tab"
-              [class.active]="formMode === 'WEEKLY'"
-              [disabled]="!profile.can_create_weekly"
-              (click)="formMode = 'WEEKLY'">
-              <span class="type-tab-icon">🔁</span>
-              <span class="type-tab-text">
-                <strong>Semanal recurrente</strong>
-                <small>Se repite cada semana</small>
-              </span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Grupo Zoom -->
-        <div class="field">
-          <label class="field-label" for="groupId">Grupo de hosts Zoom</label>
-          <select id="groupId" [(ngModel)]="formGroupId" name="groupId" required class="input">
-            <option value="">— Selecciona un grupo —</option>
-            <option *ngFor="let g of availableGroups" [value]="g.id">{{ g.name }}</option>
-          </select>
-        </div>
-
-        <!-- Tema -->
-        <div class="field">
-          <label class="field-label" for="topic">Tema</label>
-          <input id="topic" type="text" [(ngModel)]="formTopic" name="topic" required
-            maxlength="300" placeholder="Título de la reunión" class="input" />
-        </div>
-
-        <!-- Agenda -->
-        <div class="field field--full">
-          <label class="field-label" for="agenda">Agenda (opcional)</label>
-          <textarea id="agenda" [(ngModel)]="formAgenda" name="agenda"
-            rows="2" maxlength="2000" placeholder="Descripción o puntos a tratar" class="input"></textarea>
-        </div>
-
-        <!-- Fecha y duración -->
-        <div class="field">
-          <label class="field-label" for="startTime">Fecha y hora de inicio</label>
-          <input id="startTime" type="datetime-local" [(ngModel)]="formStartTime" name="startTime"
-            required [min]="minDateTime" class="input"
-            [class.input--error]="formStartTime && startTimeError" />
-          <span *ngIf="formStartTime && startTimeError" class="field-error">{{ startTimeError }}</span>
-        </div>
-        <div class="field">
-          <label class="field-label" for="duration">Duración (minutos)</label>
-          <input id="duration" type="number" [(ngModel)]="formDuration" name="duration"
-            required min="15" max="720" class="input"
-            [class.input--error]="formDuration < 15 || formDuration > 720" />
-          <span *ngIf="formDuration < 15 || formDuration > 720" class="field-error">La duración debe estar entre 15 y 720 minutos.</span>
-        </div>
-
-        <!-- Recurrencia semanal -->
-        <ng-container *ngIf="formMode === 'WEEKLY'">
-          <div class="field">
-            <label class="field-label" for="recEndDate">Fecha fin de recurrencia</label>
-            <input id="recEndDate" type="date" [(ngModel)]="formRecurrenceEndDate"
-              name="recEndDate" [min]="minRecurrenceDate" class="input"
-              [class.input--error]="formRecurrenceEndDate && recurrenceEndError" />
-            <span *ngIf="formRecurrenceEndDate && recurrenceEndError" class="field-error">{{ recurrenceEndError }}</span>
-          </div>
-          <div class="field">
-            <span class="field-label">Día de la semana</span>
-            <div class="day-picker">
-              <label *ngFor="let d of weekdayOptions" class="day-chip"
-                [class.selected]="formRecurrenceWeeklyDays === d.value">
-                <input type="radio" [(ngModel)]="formRecurrenceWeeklyDays"
-                  name="recWeeklyDays" [value]="d.value" />
-                {{ d.label }}
-              </label>
-            </div>
-          </div>
-        </ng-container>
-
-        <div class="field field--full">
-          <button type="submit" class="btn btn-primary btn-submit"
-            [disabled]="saving || !canCreate || !formTopic || !formGroupId || !formStartTime || !!startTimeError || !!recurrenceEndError || formDuration < 15 || formDuration > 720">
-            <span *ngIf="!saving">Crear videoconferencia</span>
-            <span *ngIf="saving" class="btn-saving">
-              <span class="spinner spinner--sm"></span> Creando...
+          <p class="section-eyebrow">VIDEOCONFERENCIAS</p>
+          <h1 class="page-title">
+            Mis reuniones
+            <span class="badge-count" *ngIf="draftCount > 0">
+              {{ draftCount }} borrador{{ draftCount > 1 ? 'es' : '' }}
             </span>
+          </h1>
+        </div>
+        <button type="button" class="btn btn-primary btn-new" (click)="view = 'form'">
+          + Nueva videoconferencia
+        </button>
+      </div>
+
+      <div class="card list-card">
+
+        <div class="list-toolbar">
+          <div class="filter-bar">
+            <button
+              *ngFor="let f of statusFilters"
+              type="button"
+              class="filter-chip"
+              [class.active]="statusFilter === f.value"
+              (click)="statusFilter = f.value">
+              {{ f.label }}
+            </button>
+          </div>
+          <button type="button" class="btn btn-icon" (click)="refreshMeetings()"
+            [disabled]="loadingMeetings" title="Recargar lista">
+            <span [class.spinning]="loadingMeetings">&#8635;</span>
           </button>
         </div>
-      </form>
-    </div>
 
-    <!-- Lista de reuniones -->
-    <div class="card list-card">
-      <div class="card-head">
-        <div>
-          <p class="section-eyebrow">HISTORIAL</p>
-          <h2 class="card-title">
-            Videoconferencias
-            <span class="badge-count" *ngIf="draftCount > 0">{{ draftCount }} borrador{{ draftCount > 1 ? 'es' : '' }}</span>
-          </h2>
+        <div *ngIf="loadingMeetings" class="list-loading">
+          <span class="spinner spinner--sm"></span> Actualizando...
         </div>
-        <button type="button" class="btn btn-icon" (click)="refreshMeetings()" [disabled]="loadingMeetings" title="Recargar lista">
-          <span [class.spinning]="loadingMeetings">↻</span>
-        </button>
-      </div>
 
-      <!-- Filtros por estado -->
-      <div class="filter-bar">
-        <button
-          *ngFor="let f of statusFilters"
-          type="button"
-          class="filter-chip"
-          [class.active]="statusFilter === f.value"
-          (click)="statusFilter = f.value">
-          {{ f.label }}
-        </button>
-      </div>
+        <div *ngIf="!loadingMeetings && filteredMeetings.length === 0" class="empty-state">
+          <p>No hay videoconferencias en esta categor&#237;a.</p>
+          <button type="button" class="btn btn-primary" style="margin-top:0.75rem"
+            (click)="view = 'form'">
+            Crear primera reuni&#243;n
+          </button>
+        </div>
 
-      <div *ngIf="loadingMeetings" class="list-loading">
-        <span class="spinner spinner--sm"></span> Actualizando...
-      </div>
-
-      <div *ngIf="!loadingMeetings && filteredMeetings.length === 0" class="empty-state">
-        Aún no hay videoconferencias en esta categoría.
-      </div>
-
-      <div class="meeting-list" *ngIf="filteredMeetings.length > 0">
-        <div class="meeting-row" *ngFor="let m of filteredMeetings" (click)="openDetail(m.id)">
-          <div class="meeting-status-bar" [ngClass]="statusClass(m.status)"></div>
-          <div class="meeting-body">
-            <div class="meeting-main">
-              <span class="meeting-topic">{{ m.topic }}</span>
-              <span class="meeting-type-pill">{{ typeLabel(m.type) }}</span>
-              <span class="badge" [ngClass]="statusClass(m.status)">{{ statusLabel(m.status) }}</span>
+        <div class="meeting-list" *ngIf="filteredMeetings.length > 0">
+          <div class="meeting-row" *ngFor="let m of filteredMeetings" (click)="openDetail(m.id)">
+            <div class="meeting-status-bar" [ngClass]="statusClass(m.status)"></div>
+            <div class="meeting-body">
+              <div class="meeting-main">
+                <span class="meeting-topic">{{ m.topic }}</span>
+                <span class="meeting-type-pill">{{ typeLabel(m.type) }}</span>
+                <span class="badge" [ngClass]="statusClass(m.status)">{{ statusLabel(m.status) }}</span>
+              </div>
+              <div class="meeting-meta">
+                <span>{{ m.start_time | date:'dd/MM/yyyy HH:mm' }}</span>
+                <span>{{ m.duration_minutes }} min</span>
+                <span *ngIf="m.zoom_meeting_id" class="meeting-meta-id">ID: {{ m.zoom_meeting_id }}</span>
+                <span *ngIf="m.creator_display_name" class="meeting-creator">{{ m.creator_display_name }}</span>
+              </div>
+              <div *ngIf="m.error_message" class="meeting-error-msg">{{ m.error_message }}</div>
             </div>
-            <div class="meeting-meta">
-              <span>📅 {{ m.start_time | date:'dd/MM/yyyy HH:mm' }}</span>
-              <span>⏱ {{ m.duration_minutes }} min</span>
-              <span *ngIf="m.zoom_meeting_id" class="meeting-meta-id">🔗 {{ m.zoom_meeting_id }}</span>
-              <span *ngIf="m.creator_display_name" class="meeting-creator">👤 {{ m.creator_display_name }}</span>
-            </div>
-            <div *ngIf="m.error_message" class="meeting-error-msg">⚠ {{ m.error_message }}</div>
+            <span class="meeting-arrow">&#8250;</span>
           </div>
-          <span class="meeting-arrow">›</span>
         </div>
+
       </div>
-    </div>
+    </ng-container>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- VISTA: FORMULARIO                                  -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <ng-container *ngIf="view === 'form'">
+
+      <div class="page-header">
+        <div>
+          <p class="section-eyebrow">NUEVA VIDEOCONFERENCIA</p>
+          <h1 class="page-title">Crear reuni&#243;n Zoom</h1>
+        </div>
+        <button type="button" class="btn btn-secondary" (click)="view = 'list'">
+          &#8592; Volver al historial
+        </button>
+      </div>
+
+      <div class="card form-card">
+        <div *ngIf="successMsg" class="alert alert-ok">
+          <strong>&#10003;</strong> {{ successMsg }}
+        </div>
+        <div *ngIf="error && !saving" class="alert alert-err">
+          {{ error }}
+        </div>
+
+        <form (ngSubmit)="submit()" class="form-grid">
+
+          <!-- Tipo -->
+          <div class="field field--full" *ngIf="profile.can_create_unique || profile.can_create_weekly">
+            <span class="field-label">Tipo de reuni&#243;n</span>
+            <div class="type-tabs">
+              <button type="button" class="type-tab"
+                [class.active]="formMode === 'UNIQUE'"
+                [disabled]="!profile.can_create_unique"
+                (click)="formMode = 'UNIQUE'">
+                <span class="type-tab-icon">&#128197;</span>
+                <span class="type-tab-text">
+                  <strong>&#218;nica</strong>
+                  <small>Una sola sesi&#243;n</small>
+                </span>
+              </button>
+              <button type="button" class="type-tab"
+                [class.active]="formMode === 'WEEKLY'"
+                [disabled]="!profile.can_create_weekly"
+                (click)="formMode = 'WEEKLY'">
+                <span class="type-tab-icon">&#128257;</span>
+                <span class="type-tab-text">
+                  <strong>Semanal recurrente</strong>
+                  <small>Se repite cada semana</small>
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Grupo -->
+          <div class="field">
+            <label class="field-label" for="groupId">Grupo de hosts Zoom</label>
+            <select id="groupId" [(ngModel)]="formGroupId" name="groupId" required class="input">
+              <option value="">&#8212; Selecciona un grupo &#8212;</option>
+              <option *ngFor="let g of availableGroups" [value]="g.id">{{ g.name }}</option>
+            </select>
+          </div>
+
+          <!-- Tema -->
+          <div class="field">
+            <label class="field-label" for="topic">Tema</label>
+            <input id="topic" type="text" [(ngModel)]="formTopic" name="topic" required
+              maxlength="300" placeholder="T&#237;tulo de la reuni&#243;n" class="input" />
+          </div>
+
+          <!-- Agenda -->
+          <div class="field field--full">
+            <label class="field-label" for="agenda">Agenda (opcional)</label>
+            <textarea id="agenda" [(ngModel)]="formAgenda" name="agenda"
+              rows="2" maxlength="2000" placeholder="Descripci&#243;n o puntos a tratar" class="input"></textarea>
+          </div>
+
+          <!-- Fecha y duraci&#243;n -->
+          <div class="field">
+            <label class="field-label" for="startTime">Fecha y hora de inicio</label>
+            <input id="startTime" type="datetime-local" [(ngModel)]="formStartTime" name="startTime"
+              required [min]="minDateTime" class="input"
+              [class.input--error]="formStartTime && startTimeError" />
+            <span *ngIf="formStartTime && startTimeError" class="field-error">{{ startTimeError }}</span>
+          </div>
+          <div class="field">
+            <label class="field-label" for="duration">Duraci&#243;n (minutos)</label>
+            <input id="duration" type="number" [(ngModel)]="formDuration" name="duration"
+              required min="15" max="720" class="input"
+              [class.input--error]="formDuration < 15 || formDuration > 720" />
+            <span *ngIf="formDuration < 15 || formDuration > 720" class="field-error">
+              La duraci&#243;n debe estar entre 15 y 720 minutos.
+            </span>
+          </div>
+
+          <!-- Recurrencia semanal -->
+          <ng-container *ngIf="formMode === 'WEEKLY'">
+            <div class="field">
+              <label class="field-label" for="recEndDate">Fecha fin de recurrencia</label>
+              <input id="recEndDate" type="date" [(ngModel)]="formRecurrenceEndDate"
+                name="recEndDate" [min]="minRecurrenceDate" class="input"
+                [class.input--error]="formRecurrenceEndDate && recurrenceEndError" />
+              <span *ngIf="formRecurrenceEndDate && recurrenceEndError" class="field-error">
+                {{ recurrenceEndError }}
+              </span>
+            </div>
+            <div class="field">
+              <span class="field-label">D&#237;a de la semana</span>
+              <div class="day-picker">
+                <label *ngFor="let d of weekdayOptions" class="day-chip"
+                  [class.selected]="formRecurrenceWeeklyDays === d.value">
+                  <input type="radio" [(ngModel)]="formRecurrenceWeeklyDays"
+                    name="recWeeklyDays" [value]="d.value" />
+                  {{ d.label }}
+                </label>
+              </div>
+            </div>
+          </ng-container>
+
+          <div class="field field--full form-actions">
+            <button type="button" class="btn btn-secondary" (click)="view = 'list'" [disabled]="saving">
+              Cancelar
+            </button>
+            <button type="submit" class="btn btn-primary btn-submit"
+              [disabled]="saving || !canCreate || !formTopic || !formGroupId || !formStartTime || !!startTimeError || !!recurrenceEndError || formDuration < 15 || formDuration > 720">
+              <span *ngIf="!saving">Crear videoconferencia</span>
+              <span *ngIf="saving" class="btn-saving">
+                <span class="spinner spinner--sm"></span> Creando...
+              </span>
+            </button>
+          </div>
+
+        </form>
+      </div>
+    </ng-container>
 
   </ng-container>
 </div>
