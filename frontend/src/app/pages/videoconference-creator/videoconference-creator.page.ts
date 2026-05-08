@@ -1,18 +1,21 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
-import { timeout, catchError } from 'rxjs/operators';
+import { NavigationEnd, Router } from '@angular/router';
+import { Subject } from 'rxjs';
+import { filter, takeUntil, timeout, catchError } from 'rxjs/operators';
 import { of } from 'rxjs';
 import {
     CreateMeetingDto,
     CreatorProfile,
     ManualMeeting,
+    ManualMeetingStatus,
     VideoconferenceCreatorApiService,
     ZoomGroupSummary,
 } from '../../services/videoconference-creator-api.service';
 
 type FormMode = 'UNIQUE' | 'WEEKLY';
+type StatusFilter = 'ALL' | ManualMeetingStatus;
 
 @Component({
     selector: 'app-videoconference-creator-page',
@@ -21,15 +24,16 @@ type FormMode = 'UNIQUE' | 'WEEKLY';
     templateUrl: './videoconference-creator.page.html',
     styleUrl: './videoconference-creator.page.css',
 })
-export class VideoconferenceCreatorPageComponent implements OnInit {
+export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
     profile: CreatorProfile | null = null;
     meetings: ManualMeeting[] = [];
     loading = true;
+    loadingMeetings = false;
     saving = false;
     error = '';
     successMsg = '';
+    statusFilter: StatusFilter = 'ALL';
 
-    // Form state
     formMode: FormMode = 'UNIQUE';
     formGroupId = '';
     formTopic = '';
@@ -37,17 +41,28 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     formStartTime = '';
     formDuration = 60;
     formRecurrenceEndDate = '';
-    formRecurrenceWeeklyDays = '2'; // Monday
+    formRecurrenceWeeklyDays = '2';
 
     readonly weekdayOptions = [
         { value: '1', label: 'Dom' },
         { value: '2', label: 'Lun' },
         { value: '3', label: 'Mar' },
-        { value: '4', label: 'Mié' },
+        { value: '4', label: 'Mi\u00e9' },
         { value: '5', label: 'Jue' },
         { value: '6', label: 'Vie' },
-        { value: '7', label: 'Sáb' },
+        { value: '7', label: 'S\u00e1b' },
     ];
+
+    readonly statusFilters: Array<{ value: StatusFilter; label: string }> = [
+        { value: 'ALL', label: 'Todas' },
+        { value: 'CREATED', label: 'Creadas' },
+        { value: 'DRAFT_NO_HOST', label: 'Borradores' },
+        { value: 'APPROVED_WITH_BACKUP', label: 'Aprobadas' },
+        { value: 'ERROR', label: 'Error' },
+        { value: 'CANCELLED', label: 'Canceladas' },
+    ];
+
+    private readonly destroy$ = new Subject<void>();
 
     constructor(
         private readonly api: VideoconferenceCreatorApiService,
@@ -56,6 +71,22 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
 
     ngOnInit(): void {
         this.load();
+        this.router.events.pipe(
+            filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+            filter((e) => e.urlAfterRedirects === '/videoconferences/creator'),
+            takeUntil(this.destroy$),
+        ).subscribe(() => {
+            if (this.profile) {
+                this.refreshMeetings();
+            } else {
+                this.load();
+            }
+        });
+    }
+
+    ngOnDestroy(): void {
+        this.destroy$.next();
+        this.destroy$.complete();
     }
 
     load(): void {
@@ -66,9 +97,9 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
             catchError((err) => {
                 const status = err?.status;
                 if (status === 403) {
-                    this.error = 'No tienes permisos para acceder a este módulo. Contacta al administrador.';
+                    this.error = 'No tienes permisos para acceder a este m\u00f3dulo.';
                 } else if (status === 0 || err?.name === 'TimeoutError') {
-                    this.error = 'No se pudo conectar con el servidor. Verifica tu conexión o intenta más tarde.';
+                    this.error = 'No se pudo conectar con el servidor.';
                 } else {
                     this.error = 'No se pudo cargar el perfil. Verifica tus permisos.';
                 }
@@ -97,7 +128,22 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
         ).subscribe((meetings) => {
             this.meetings = meetings;
             this.loading = false;
+            this.loadingMeetings = false;
         });
+    }
+
+    refreshMeetings(): void {
+        this.loadingMeetings = true;
+        this.loadMeetings();
+    }
+
+    get filteredMeetings(): ManualMeeting[] {
+        if (this.statusFilter === 'ALL') return this.meetings;
+        return this.meetings.filter((m) => m.status === this.statusFilter);
+    }
+
+    get draftCount(): number {
+        return this.meetings.filter((m) => m.status === 'DRAFT_NO_HOST').length;
     }
 
     get canCreate(): boolean {
@@ -110,8 +156,47 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
         return this.profile?.assigned_groups ?? [];
     }
 
+    /** Mínimo permitido para datetime-local: ahora + 5 min en formato YYYY-MM-DDTHH:mm */
+    get minDateTime(): string {
+        const d = new Date();
+        d.setMinutes(d.getMinutes() + 5);
+        const p = (n: number) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    /** Mínimo para la fecha fin de recurrencia: la fecha de inicio o hoy */
+    get minRecurrenceDate(): string {
+        if (this.formStartTime) return this.formStartTime.slice(0, 10);
+        const d = new Date();
+        const p = (n: number) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    }
+
+    get startTimeError(): string {
+        if (!this.formStartTime) return '';
+        const selected = new Date(this.formStartTime);
+        const min = new Date();
+        min.setMinutes(min.getMinutes() + 5);
+        if (selected < min) return 'La fecha y hora deben ser al menos 5 minutos en el futuro.';
+        return '';
+    }
+
+    get recurrenceEndError(): string {
+        if (this.formMode !== 'WEEKLY' || !this.formRecurrenceEndDate) return '';
+        const end = new Date(this.formRecurrenceEndDate + 'T00:00');
+        const start = this.formStartTime ? new Date(this.formStartTime) : new Date();
+        if (end <= start) return 'La fecha de fin debe ser posterior a la fecha de inicio.';
+        return '';
+    }
+
     submit(): void {
         if (!this.formTopic.trim() || !this.formGroupId || !this.formStartTime) return;
+        if (this.startTimeError) { this.error = this.startTimeError; return; }
+        if (this.recurrenceEndError) { this.error = this.recurrenceEndError; return; }
+        if (this.formDuration < 15 || this.formDuration > 720) {
+            this.error = 'La duración debe estar entre 15 y 720 minutos.';
+            return;
+        }
         this.saving = true;
         this.error = '';
         this.successMsg = '';
@@ -133,14 +218,15 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
         this.api.createMeeting(dto).subscribe({
             next: (result) => {
                 this.saving = false;
-                this.successMsg =
-                    result.status === 'DRAFT_NO_HOST'
-                        ? 'Sin host disponible: videoconferencia guardada como borrador. TI será notificado.'
-                        : result.status === 'ERROR'
-                            ? `Creada pero con error en Zoom: ${result.error_message}`
-                            : `Videoconferencia creada exitosamente (Zoom ID: ${result.zoom_meeting_id}).`;
+                if (result.status === 'DRAFT_NO_HOST') {
+                    this.successMsg = 'Sin host disponible: guardada como borrador. TI ser\u00e1 notificado.';
+                } else if (result.status === 'ERROR') {
+                    this.successMsg = 'Creada pero con error en Zoom: ' + result.error_message;
+                } else {
+                    this.successMsg = 'Videoconferencia creada (Zoom ID: ' + result.zoom_meeting_id + ').';
+                }
                 this.resetForm();
-                this.loadMeetings();
+                this.refreshMeetings();
             },
             error: (err) => {
                 this.saving = false;
@@ -173,6 +259,10 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
             CANCELLED: 'badge-cancelled',
         };
         return map[status] ?? '';
+    }
+
+    typeLabel(type: ManualMeeting['type']): string {
+        return type === 'WEEKLY' ? 'Semanal' : '\u00danica';
     }
 
     private resetForm(): void {

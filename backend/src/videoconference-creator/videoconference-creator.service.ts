@@ -12,6 +12,7 @@ import {
     MeetingParticipantEntity,
     ZoomUserEntity,
 } from '../entities/audit.entities';
+import { AuthUserEntity } from '../entities/auth.entities';
 import {
     ManualVideoconferenceEntity,
     ManualVideoconferenceUserZoomGroupEntity,
@@ -55,6 +56,9 @@ export class VideoconferenceCreatorService {
         @InjectRepository(ZoomConfigEntity)
         private readonly zoomConfigRepo: Repository<ZoomConfigEntity>,
 
+        @InjectRepository(AuthUserEntity)
+        private readonly authUserRepo: Repository<AuthUserEntity>,
+
         private readonly zoomService: ZoomAccountService,
         private readonly dataSource: DataSource,
     ) { }
@@ -95,7 +99,19 @@ export class VideoconferenceCreatorService {
         if (!isAdminOrTI) {
             qb.where('mv.created_by_user_id = :userId', { userId });
         }
-        return qb.getMany();
+        const meetings = await qb.getMany();
+
+        // Enrich with creator display names
+        const creatorIds = [...new Set(meetings.map((m) => m.created_by_user_id))];
+        const creators = creatorIds.length
+            ? await this.authUserRepo.find({ where: { id: In(creatorIds) }, select: ['id', 'display_name', 'username'] })
+            : [];
+        const creatorMap = new Map(creators.map((u) => [u.id, u.display_name || u.username]));
+
+        return meetings.map((m) => ({
+            ...m,
+            creator_display_name: creatorMap.get(m.created_by_user_id) ?? null,
+        }));
     }
 
     // ── Get single meeting ─────────────────────────────────────────────────────

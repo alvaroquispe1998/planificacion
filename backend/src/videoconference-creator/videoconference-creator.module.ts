@@ -5,6 +5,7 @@ import {
     MeetingParticipantEntity,
     ZoomUserEntity,
 } from '../entities/audit.entities';
+import { AuthUserEntity } from '../entities/auth.entities';
 import {
     ManualVideoconferenceEntity,
     ManualVideoconferenceUserZoomGroupEntity,
@@ -32,6 +33,7 @@ import { VideoconferenceCreatorService } from './videoconference-creator.service
             MeetingInstanceEntity,
             MeetingParticipantEntity,
             ZoomConfigEntity,
+            AuthUserEntity,
         ]),
     ],
     controllers: [VideoconferenceCreatorController],

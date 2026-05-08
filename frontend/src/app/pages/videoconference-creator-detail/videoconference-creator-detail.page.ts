@@ -1,6 +1,8 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
+import { Subject } from 'rxjs';
+import { takeUntil } from 'rxjs/operators';
 import {
     MeetingDetail,
     ManualMeeting,
@@ -17,12 +19,14 @@ import { AuthService } from '../../core/auth.service';
     templateUrl: './videoconference-creator-detail.page.html',
     styleUrl: './videoconference-creator-detail.page.css',
 })
-export class VideoconferenceCreatorDetailPageComponent implements OnInit {
+export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDestroy {
     loading = true;
     syncing = false;
     approving = false;
     error = '';
     detail: MeetingDetail | null = null;
+    private currentId = '';
+    private readonly destroy$ = new Subject<void>();
 
     get meeting(): ManualMeeting | null {
         return this.detail?.meeting ?? null;
@@ -40,8 +44,19 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit {
     ) { }
 
     ngOnInit(): void {
-        const id = this.route.snapshot.paramMap.get('id') ?? '';
-        this.load(id);
+        // Subscribe to param changes so navigating directly to a different ID works
+        this.route.paramMap.pipe(takeUntil(this.destroy$)).subscribe((params) => {
+            const id = params.get('id') ?? '';
+            if (id && id !== this.currentId) {
+                this.currentId = id;
+                this.load(id);
+            }
+        });
+    }
+
+    ngOnDestroy(): void {
+        this.destroy$.next();
+        this.destroy$.complete();
     }
 
     private load(id: string): void {
@@ -63,7 +78,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit {
         if (!this.meeting) return;
         this.syncing = true;
         this.api.syncMeeting(this.meeting.id).subscribe({
-            next: (res) => {
+            next: () => {
                 this.syncing = false;
                 this.load(this.meeting!.id);
             },
@@ -114,3 +129,4 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit {
         return map[status] ?? '';
     }
 }
+
