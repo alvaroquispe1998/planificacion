@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subject, of } from 'rxjs';
 import { takeUntil, timeout, catchError, retry } from 'rxjs/operators';
@@ -46,6 +46,8 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         private readonly router: Router,
         private readonly api: VideoconferenceCreatorApiService,
         private readonly auth: AuthService,
+        private readonly cdr: ChangeDetectorRef,
+        private readonly zone: NgZone,
     ) { }
 
     ngOnInit(): void {
@@ -68,18 +70,28 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         this.loading = true;
         this.error = '';
         this.detail = null;
+        this.cdr.markForCheck();
         this.api.getMeeting(id).pipe(
             timeout(15000),
             retry({ count: 1, delay: 400 }),
             catchError(() => {
-                this.error = 'No se pudo cargar la videoconferencia. Verifica tu conexión o intenta de nuevo.';
-                this.loading = false;
+                this.zone.run(() => {
+                    this.error = 'No se pudo cargar la videoconferencia. Verifica tu conexión o intenta de nuevo.';
+                    this.loading = false;
+                    this.cdr.markForCheck();
+                });
                 return of(null);
             }),
         ).subscribe((detail) => {
-            if (!detail) return;
-            this.detail = detail;
-            this.loading = false;
+            this.zone.run(() => {
+                if (!detail) {
+                    this.cdr.markForCheck();
+                    return;
+                }
+                this.detail = detail;
+                this.loading = false;
+                this.cdr.markForCheck();
+            });
         });
     }
 

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, NgZone, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { timeout, catchError } from 'rxjs/operators';
@@ -65,6 +65,8 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     constructor(
         private readonly api: VideoconferenceCreatorApiService,
         private readonly router: Router,
+        private readonly cdr: ChangeDetectorRef,
+        private readonly zone: NgZone,
     ) { }
 
     ngOnInit(): void {
@@ -74,32 +76,42 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     load(): void {
         this.loading = true;
         this.error = '';
+        this.cdr.markForCheck();
         this.api.getProfile().pipe(
             timeout(15000),
             catchError((err) => {
                 const status = err?.status;
-                if (status === 403) {
-                    this.error = 'No tienes permisos para acceder a este m\u00f3dulo.';
-                } else if (status === 0 || err?.name === 'TimeoutError') {
-                    this.error = 'No se pudo conectar con el servidor.';
-                } else {
-                    this.error = 'No se pudo cargar el perfil. Verifica tus permisos.';
-                }
-                this.loading = false;
+                this.zone.run(() => {
+                    if (status === 403) {
+                        this.error = 'No tienes permisos para acceder a este m\u00f3dulo.';
+                    } else if (status === 0 || err?.name === 'TimeoutError') {
+                        this.error = 'No se pudo conectar con el servidor.';
+                    } else {
+                        this.error = 'No se pudo cargar el perfil. Verifica tus permisos.';
+                    }
+                    this.loading = false;
+                    this.cdr.markForCheck();
+                });
                 return of(null);
             }),
         ).subscribe((profile) => {
-            if (!profile) return;
-            this.profile = profile;
-            if (profile.can_create_unique && !profile.can_create_weekly) {
-                this.formMode = 'UNIQUE';
-            } else if (!profile.can_create_unique && profile.can_create_weekly) {
-                this.formMode = 'WEEKLY';
-            }
-            if (profile.assigned_groups.length > 0) {
-                this.formGroupId = profile.assigned_groups[0].id;
-            }
-            this.loadMeetings();
+            this.zone.run(() => {
+                if (!profile) {
+                    this.cdr.markForCheck();
+                    return;
+                }
+                this.profile = profile;
+                if (profile.can_create_unique && !profile.can_create_weekly) {
+                    this.formMode = 'UNIQUE';
+                } else if (!profile.can_create_unique && profile.can_create_weekly) {
+                    this.formMode = 'WEEKLY';
+                }
+                if (profile.assigned_groups.length > 0) {
+                    this.formGroupId = profile.assigned_groups[0].id;
+                }
+                this.cdr.markForCheck();
+                this.loadMeetings();
+            });
         });
     }
 
@@ -108,9 +120,12 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
             timeout(15000),
             catchError(() => of([] as ManualMeeting[])),
         ).subscribe((meetings) => {
-            this.meetings = meetings;
-            this.loading = false;
-            this.loadingMeetings = false;
+            this.zone.run(() => {
+                this.meetings = meetings;
+                this.loading = false;
+                this.loadingMeetings = false;
+                this.cdr.markForCheck();
+            });
         });
     }
 
@@ -219,7 +234,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     }
 
     openDetail(id: string): void {
-        if (this.loading || this.loadingMeetings) {
+        if (this.loading) {
             return;
         }
         this.router.navigate(['/videoconferences/creator', id]);
