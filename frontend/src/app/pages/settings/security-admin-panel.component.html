@@ -168,6 +168,30 @@
           {{ isSavingUser ? 'Guardando...' : 'Guardar usuario' }}
         </button>
       </div>
+
+      <!-- Zoom groups for Videoconference Creator -->
+      <div class="zoom-groups-section" *ngIf="selectedUserId">
+        <h4 class="section-subtitle">Grupos Zoom — Crear Videoconferencias</h4>
+        <p class="section-hint">Selecciona los grupos Zoom a los que este usuario puede asignar reuniones.</p>
+        <div class="zoom-groups-list" *ngIf="availableZoomGroups.length > 0; else noZoomGroups">
+          <label class="zoom-group-item" *ngFor="let group of availableZoomGroups">
+            <input
+              type="checkbox"
+              [checked]="isZoomGroupSelected(group.id)"
+              (change)="toggleZoomGroup(group.id, $any($event.target).checked)"
+            />
+            <span>{{ group.name }}<small *ngIf="group.code"> ({{ group.code }})</small></span>
+          </label>
+        </div>
+        <ng-template #noZoomGroups>
+          <p class="scope-empty">No hay grupos Zoom configurados.</p>
+        </ng-template>
+        <div class="actions" style="margin-top: 8px;">
+          <button type="button" (click)="saveZoomGroups()" [disabled]="isSavingZoomGroups">
+            {{ isSavingZoomGroups ? 'Guardando...' : 'Guardar grupos Zoom' }}
+          </button>
+        </div>
+      </div>
     </article>
   </div>
 
@@ -218,90 +242,84 @@
         </label>
       </div>
 
-      <div class="permission-summary">
-        <div class="summary-chip">
-          <strong>{{ selectedRolePermissionSummary.windowCount }}</strong>
-          <span>ventanas</span>
-        </div>
-        <div class="summary-chip">
-          <strong>{{ selectedRolePermissionSummary.actionCount }}</strong>
-          <span>acciones</span>
-        </div>
+      <div class="perm-summary-bar">
+        <span><strong>{{ selectedRolePermissionSummary.windowCount }}</strong> módulos</span>
+        <span><strong>{{ selectedRolePermissionSummary.actionCount }}</strong> acciones</span>
       </div>
 
-      <section class="permission-section">
-        <div class="permission-section-head">
-          <div>
-            <h4>Ventanas y acciones relacionadas</h4>
-            <p>Si activas una accion, su ventana principal se marca automaticamente.</p>
-          </div>
-        </div>
+      <div class="perm-table-wrap">
+        <table class="perm-table">
+          <thead>
+            <tr>
+              <th class="perm-th-module">MÓDULO</th>
+              <th class="perm-th-access">ACCESO</th>
+              <th class="perm-th-actions">ACCIONES</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="perm-row" *ngFor="let group of windowPermissionGroups">
+              <td class="perm-td-module">
+                <div class="perm-module-name">{{ permissionLabel(group.windowPermission) }}</div>
+                <div class="perm-module-code">{{ permissionSecondaryLabel(group.windowPermission) }}</div>
+              </td>
+              <td class="perm-td-access">
+                <label class="perm-toggle">
+                  <input
+                    type="checkbox"
+                    [checked]="rolePermissionIds.has(group.windowPermission.id)"
+                    (change)="toggleRolePermission(group.windowPermission.id, $any($event.target).checked)"
+                  />
+                  <span class="perm-toggle-track"></span>
+                </label>
+              </td>
+              <td class="perm-td-actions">
+                <span class="perm-no-actions" *ngIf="group.actions.length === 0">—</span>
+                <label
+                  class="perm-action-chip"
+                  *ngFor="let action of group.actions"
+                  [class.active]="rolePermissionIds.has(action.id)"
+                  [title]="action.description"
+                >
+                  <input
+                    type="checkbox"
+                    [checked]="rolePermissionIds.has(action.id)"
+                    (change)="toggleRolePermission(action.id, $any($event.target).checked)"
+                  />
+                  {{ permissionLabel(action) }}
+                </label>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-        <div class="permission-groups">
-          <article class="permission-group-card" *ngFor="let group of windowPermissionGroups">
-            <label class="permission-group-head">
-              <div class="permission-check">
-                <input
-                  type="checkbox"
-                  [checked]="rolePermissionIds.has(group.windowPermission.id)"
-                  (change)="toggleRolePermission(group.windowPermission.id, $any($event.target).checked)"
-                />
-              </div>
-              <div class="permission-copy">
-                <strong>{{ permissionLabel(group.windowPermission) }}</strong>
-                <span>{{ permissionSecondaryLabel(group.windowPermission) }}</span>
-                <small>{{ group.windowPermission.description }}</small>
-              </div>
-            </label>
-
-            <div class="permission-actions" *ngIf="group.actions.length > 0">
-              <label class="permission-action-card" *ngFor="let permission of group.actions">
-                <div class="permission-check">
+      <div class="perm-table-wrap" *ngIf="globalActionPermissions.length > 0">
+        <table class="perm-table">
+          <thead>
+            <tr>
+              <th class="perm-th-module" colspan="3">ACCIONES GLOBALES</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="perm-row">
+              <td class="perm-td-access" style="width: auto;" colspan="3">
+                <label
+                  class="perm-action-chip"
+                  *ngFor="let permission of globalActionPermissions"
+                  [class.active]="rolePermissionIds.has(permission.id)"
+                  [title]="permission.description"
+                >
                   <input
                     type="checkbox"
                     [checked]="rolePermissionIds.has(permission.id)"
                     (change)="toggleRolePermission(permission.id, $any($event.target).checked)"
                   />
-                </div>
-                <div class="permission-copy">
-                  <strong>{{ permissionLabel(permission) }}</strong>
-                  <span>{{ permissionSecondaryLabel(permission) }}</span>
-                  <small>{{ permission.description }}</small>
-                </div>
-              </label>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <section class="permission-section" *ngIf="globalActionPermissions.length > 0">
-        <div class="permission-section-head">
-          <div>
-            <h4>Acciones sin ventana</h4>
-            <p>Solo se muestran aqui si todavia no dependen de un modulo especifico.</p>
-          </div>
-        </div>
-
-        <div class="permission-actions permission-actions-global">
-          <label class="permission-action-card" *ngFor="let permission of globalActionPermissions">
-            <div class="permission-check">
-              <input
-                type="checkbox"
-                [checked]="rolePermissionIds.has(permission.id)"
-                (change)="toggleRolePermission(permission.id, $any($event.target).checked)"
-              />
-            </div>
-            <div class="permission-copy">
-              <strong>{{ permissionLabel(permission) }}</strong>
-              <span>{{ permissionSecondaryLabel(permission) }}</span>
-              <small>{{ permission.description }}</small>
-            </div>
-          </label>
-        </div>
-      </section>
-
-      <div class="permission-help">
-        Marca primero lo que el rol debe ver y luego las acciones que puede ejecutar dentro de cada ventana.
+                  {{ permissionLabel(permission) }}
+                </label>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div class="actions">
