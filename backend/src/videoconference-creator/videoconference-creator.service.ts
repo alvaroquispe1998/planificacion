@@ -10,6 +10,7 @@ import { newId } from '../common';
 import {
     MeetingInstanceEntity,
     MeetingParticipantEntity,
+    MeetingRecordingEntity,
     ZoomUserEntity,
 } from '../entities/audit.entities';
 import { AuthUserEntity } from '../entities/auth.entities';
@@ -52,6 +53,9 @@ export class VideoconferenceCreatorService {
 
         @InjectRepository(MeetingParticipantEntity)
         private readonly participantRepo: Repository<MeetingParticipantEntity>,
+
+        @InjectRepository(MeetingRecordingEntity)
+        private readonly recordingRepo: Repository<MeetingRecordingEntity>,
 
         @InjectRepository(ZoomConfigEntity)
         private readonly zoomConfigRepo: Repository<ZoomConfigEntity>,
@@ -124,8 +128,20 @@ export class VideoconferenceCreatorService {
             })
             : [];
 
+        // Only return MP4 recordings (the ones users can actually watch)
+        const recordings = instances.length > 0
+            ? await this.recordingRepo.find({
+                where: {
+                    meeting_instance_id: In(instances.map((i) => i.id)),
+                    recording_type: 'MP4',
+                    status: 'AVAILABLE',
+                },
+                order: { start_time: 'ASC' },
+            })
+            : [];
+
         const [meeting] = await this.enrichMeetings([mv]);
-        return { meeting, instances, participants };
+        return { meeting, instances, participants, recordings };
     }
 
     async cancelMeeting(id: string, userId: string, isAdminOrTI: boolean) {

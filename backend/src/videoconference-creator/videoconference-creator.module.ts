@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import {
     MeetingInstanceEntity,
     MeetingParticipantEntity,
+    MeetingRecordingEntity,
     ZoomUserEntity,
 } from '../entities/audit.entities';
 import { AuthUserEntity } from '../entities/auth.entities';
@@ -32,6 +33,7 @@ import { VideoconferenceCreatorService } from './videoconference-creator.service
             ZoomUserEntity,
             MeetingInstanceEntity,
             MeetingParticipantEntity,
+            MeetingRecordingEntity,
             ZoomConfigEntity,
             AuthUserEntity,
         ]),

@@ -8,6 +8,7 @@ import {
     ManualMeeting,
     MeetingInstance,
     MeetingParticipant,
+    MeetingRecording,
     VideoconferenceCreatorApiService,
 } from '../../services/videoconference-creator-api.service';
 import { AuthService } from '../../core/auth.service';
@@ -51,26 +52,39 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         return Boolean(this.meeting?.zoom_meeting_id) && this.meeting?.status !== 'CANCELLED';
     }
 
-    /** Etiqueta legible de recurrencia (días + hasta). */
-    get recurrenceLabel(): string | null {
+    /** Días de la semana legibles (nombre completo). */
+    get recurrenceDays(): string | null {
         const r = this.meeting?.recurrence_json;
         if (!r) return null;
         const dayNames: Record<string, string> = {
-            '1': 'Dom', '2': 'Lun', '3': 'Mar', '4': 'Mié',
-            '5': 'Jue', '6': 'Vie', '7': 'Sáb',
+            '1': 'Domingo', '2': 'Lunes', '3': 'Martes', '4': 'Miércoles',
+            '5': 'Jueves', '6': 'Viernes', '7': 'Sábado',
         };
         const weeklyDays = r['weekly_days'] as string | undefined;
-        const dayLabels = weeklyDays
+        return weeklyDays
             ? weeklyDays.split(',').map((d) => dayNames[d.trim()] ?? d).join(', ')
-            : '';
+            : null;
+    }
+
+    /** Fecha fin de recurrencia formateada. */
+    get recurrenceEndDate(): string | null {
+        const r = this.meeting?.recurrence_json;
+        if (!r) return null;
         const endDt = r['end_date_time'] as string | undefined;
-        const endLabel = endDt
+        return endDt
             ? new Date(endDt).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
             : null;
+    }
+
+    /** @deprecated — mantener para compatibilidad temporal */
+    get recurrenceLabel(): string | null {
+        const days = this.recurrenceDays;
+        const end = this.recurrenceEndDate;
+        if (!days && !end) return null;
         const parts: string[] = [];
-        if (dayLabels) parts.push(`Cada semana los: ${dayLabels}`);
-        if (endLabel) parts.push(`Hasta el ${endLabel}`);
-        return parts.length ? parts.join(' · ') : null;
+        if (days) parts.push(`Cada semana los: ${days}`);
+        if (end) parts.push(`Hasta el ${end}`);
+        return parts.join(' · ');
     }
 
     constructor(
@@ -204,6 +218,27 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
 
     back(): void {
         this.router.navigate(['/videoconferences/creator']);
+    }
+
+    get recordings(): MeetingRecording[] {
+        return this.detail?.recordings ?? [];
+    }
+
+    instanceStatusLabel(status: string | undefined): string {
+        const map: Record<string, string> = {
+            ENDED: 'Finalizada',
+            IN_PROGRESS: 'En curso',
+            CREATED: 'Creada',
+            ERROR: 'Error',
+        };
+        return status ? (map[status] ?? status) : '—';
+    }
+
+    formatBytes(bytes: string | null | undefined): string {
+        const n = Number(bytes);
+        if (!bytes || isNaN(n)) return '';
+        if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+        return `${(n / (1024 * 1024)).toFixed(1)} MB`;
     }
 
     statusLabel(status: ManualMeeting['status']): string {

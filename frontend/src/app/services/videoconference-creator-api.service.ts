@@ -77,10 +77,24 @@ export interface MeetingParticipant {
     [key: string]: unknown;
 }
 
+export interface MeetingRecording {
+    id: string;
+    meeting_instance_id: string;
+    recording_type: string;
+    file_extension: string | null;
+    file_size_bytes: string | null;
+    download_url: string | null;
+    play_url: string | null;
+    start_time: string | null;
+    end_time: string | null;
+    status: string;
+}
+
 export interface MeetingDetail {
     meeting: ManualMeeting;
     instances: MeetingInstance[];
     participants: MeetingParticipant[];
+    recordings: MeetingRecording[];
 }
 
 export interface ApproveDraftDto {

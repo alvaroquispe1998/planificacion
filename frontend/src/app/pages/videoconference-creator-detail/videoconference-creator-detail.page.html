@@ -59,6 +59,8 @@
 
     <!-- ── Info grid ────────────────────────────────────────────────── -->
     <div class="info-grid">
+
+      <!-- Fila 1: datos básicos -->
       <div class="info-card">
         <p class="info-label">Inicio</p>
         <p class="info-value">{{ meeting.start_time | date:'dd/MM/yyyy HH:mm' }}</p>
@@ -67,33 +69,36 @@
         <p class="info-label">Duración</p>
         <p class="info-value">{{ meeting.duration_minutes }} min</p>
       </div>
-      <div class="info-card" *ngIf="meeting.zoom_meeting_id">
+      <div class="info-card" *ngIf="meeting.zoom_meeting_id; else emptyCell1">
         <p class="info-label">Zoom Meeting ID</p>
         <p class="info-value mono">{{ meeting.zoom_meeting_id }}</p>
       </div>
-      <div class="info-card info-card--links" *ngIf="meeting.start_url || meeting.join_url">
+      <ng-template #emptyCell1><div class="info-card info-card--empty"></div></ng-template>
+
+      <!-- Fila 2: enlaces (ancho completo) -->
+      <div class="info-card info-card--full" *ngIf="meeting.start_url || meeting.join_url">
         <p class="info-label">Enlaces</p>
-        <div class="link-row" *ngIf="meeting.start_url">
-          <a class="info-link info-link--action" [href]="meeting.start_url" target="_blank" rel="noopener noreferrer">
-            <span class="info-link-icon">🎥</span>
-            <span>Iniciar como host</span>
-            <span class="info-link-arrow">↗</span>
-          </a>
-          <button type="button" class="btn-copy" title="Copiar enlace" (click)="copyToClipboard(meeting.start_url)">
-            📋
-          </button>
-        </div>
-        <div class="link-row" *ngIf="meeting.join_url">
-          <a class="info-link info-link--action" [href]="meeting.join_url" target="_blank" rel="noopener noreferrer">
-            <span class="info-link-icon">🎓</span>
-            <span>Entrar como participante</span>
-            <span class="info-link-arrow">↗</span>
-          </a>
-          <button type="button" class="btn-copy" title="Copiar enlace" (click)="copyToClipboard(meeting.join_url)">
-            📋
-          </button>
+        <div class="links-row">
+          <div class="link-item" *ngIf="meeting.start_url">
+            <a class="info-link info-link--action" [href]="meeting.start_url" target="_blank" rel="noopener noreferrer">
+              <span class="info-link-icon">🎥</span>
+              <span>Iniciar como host</span>
+              <span class="info-link-arrow">↗</span>
+            </a>
+            <button type="button" class="btn-copy" title="Copiar enlace" (click)="copyToClipboard(meeting.start_url)">📋</button>
+          </div>
+          <div class="link-item" *ngIf="meeting.join_url">
+            <a class="info-link info-link--action" [href]="meeting.join_url" target="_blank" rel="noopener noreferrer">
+              <span class="info-link-icon">🎓</span>
+              <span>Entrar como participante</span>
+              <span class="info-link-arrow">↗</span>
+            </a>
+            <button type="button" class="btn-copy" title="Copiar enlace" (click)="copyToClipboard(meeting.join_url)">📋</button>
+          </div>
         </div>
       </div>
+
+      <!-- Fila 3: host + recurrencia -->
       <div class="info-card" *ngIf="meeting.assigned_zoom_user_name">
         <p class="info-label">Host Zoom asignado</p>
         <div class="host-row">
@@ -101,10 +106,15 @@
           <span class="info-value">{{ meeting.assigned_zoom_user_name }}</span>
         </div>
       </div>
-      <div class="info-card" *ngIf="recurrenceLabel">
-        <p class="info-label">Recurrencia</p>
-        <p class="info-value">{{ recurrenceLabel }}</p>
+      <div class="info-card" *ngIf="recurrenceDays">
+        <p class="info-label">Días de recurrencia</p>
+        <p class="info-value">{{ recurrenceDays }}</p>
       </div>
+      <div class="info-card" *ngIf="recurrenceEndDate">
+        <p class="info-label">Fin de recurrencia</p>
+        <p class="info-value">{{ recurrenceEndDate }}</p>
+      </div>
+
     </div>
 
     <!-- Error message -->
@@ -115,60 +125,74 @@
     <!-- ── Instancias pasadas ────────────────────────────────────────── -->
     <div class="panel" *ngIf="detail">
       <div class="panel-head">
-        <h2 class="panel-title">Instancias pasadas</h2>
+        <h2 class="panel-title">Sesiones realizadas</h2>
         <span class="count-chip">{{ detail.instances.length }}</span>
       </div>
 
       <div *ngIf="detail.instances.length === 0" class="empty-state">
-        Ninguna instancia encontrada. Usa "Sincronizar desde Zoom" para descargar datos.
+        Ninguna sesión registrada. Usa "Sincronizar desde Zoom" para descargar datos.
       </div>
 
-      <div class="table-wrap" *ngIf="detail.instances.length > 0">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>UUID Zoom</th>
-              <th>Inicio real</th>
-              <th>Duración</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let inst of detail.instances">
-              <td class="mono">{{ inst.zoom_meeting_uuid ?? '—' }}</td>
-              <td>{{ inst.actual_start ? (inst.actual_start | date:'dd/MM/yyyy HH:mm') : '—' }}</td>
-              <td>{{ inst.duration_minutes != null ? inst.duration_minutes + ' min' : '—' }}</td>
-              <td>{{ inst.status ?? '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="session-list" *ngIf="detail.instances.length > 0">
+        <div class="session-row" *ngFor="let inst of detail.instances">
+          <div class="session-date">
+            <span class="session-icon">📅</span>
+            <span>{{ inst.actual_start ? (inst.actual_start | date:'dd/MM/yyyy HH:mm') : '—' }}</span>
+          </div>
+          <div class="session-meta">
+            <span *ngIf="inst.duration_minutes != null" class="session-chip">⏱ {{ inst.duration_minutes }} min</span>
+            <span class="session-chip session-chip--status" [ngClass]="'session-' + (inst.status ?? 'unknown')">
+              {{ instanceStatusLabel(inst.status) }}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- ── Participantes ────────────────────────────────────────────── -->
-    <div class="panel" *ngIf="detail && detail.participants.length > 0">
-      <div class="panel-head">
-        <h2 class="panel-title">Participantes</h2>
-        <span class="count-chip">{{ detail.participants.length }}</span>
+    <!-- ── Grabaciones + Participantes ──────────────────────────────── -->
+    <div class="bottom-panels" *ngIf="detail && (recordings.length > 0 || detail.participants.length > 0)">
+
+      <!-- Participantes -->
+      <div class="panel panel--participants" *ngIf="detail.participants.length > 0">
+        <div class="panel-head">
+          <h2 class="panel-title">Participantes</h2>
+          <span class="count-chip">{{ detail.participants.length }}</span>
+        </div>
+        <div class="participant-list">
+          <div class="participant-row" *ngFor="let p of detail.participants">
+            <span class="participant-avatar">👤</span>
+            <div class="participant-info">
+              <p class="participant-name">{{ p.display_name || '—' }}</p>
+              <p class="participant-email" *ngIf="p.email">{{ p.email }}</p>
+            </div>
+            <span class="participant-role" *ngIf="p.role && p.role !== 'NO_ROLE'">{{ p.role }}</span>
+          </div>
+        </div>
       </div>
-      <div class="table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Email</th>
-              <th>Rol</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let p of detail.participants">
-              <td>{{ p.display_name ?? '—' }}</td>
-              <td>{{ p.email ?? '—' }}</td>
-              <td>{{ p.role ?? '—' }}</td>
-            </tr>
-          </tbody>
-        </table>
+
+      <!-- Grabaciones MP4 -->
+      <div class="panel panel--recordings" *ngIf="recordings.length > 0">
+        <div class="panel-head">
+          <h2 class="panel-title">Grabaciones</h2>
+          <span class="count-chip">{{ recordings.length }}</span>
+        </div>
+        <div class="recording-list">
+          <div class="recording-row" *ngFor="let rec of recordings">
+            <div class="recording-icon">🎬</div>
+            <div class="recording-meta">
+              <p class="recording-date">{{ rec.start_time ? (rec.start_time | date:'dd/MM/yyyy HH:mm') : 'Grabación' }}</p>
+              <p class="recording-size" *ngIf="rec.file_size_bytes">{{ formatBytes(rec.file_size_bytes) }}</p>
+            </div>
+            <div class="recording-actions">
+              <a *ngIf="rec.play_url" [href]="rec.play_url" target="_blank" rel="noopener noreferrer"
+                class="btn-rec btn-rec--play">▶ Ver</a>
+              <a *ngIf="rec.download_url" [href]="rec.download_url" target="_blank" rel="noopener noreferrer"
+                class="btn-rec btn-rec--dl">⬇ Descargar</a>
+            </div>
+          </div>
+        </div>
       </div>
+
     </div>
 
   </ng-container>
