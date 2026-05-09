@@ -13,6 +13,7 @@ services:
       DB_PORT: 3306
       PORT: 3000
       DB_SYNCHRONIZE: 'false'
+      DB_MIGRATIONS_RUN: 'true'
       SYNC_TLS_ALLOW_INSECURE: 'false'
     ports: []
 

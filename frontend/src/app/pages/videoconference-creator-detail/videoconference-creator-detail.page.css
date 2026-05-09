@@ -118,7 +118,7 @@
 /* ── Info grid ───────────────────────────────────────────────── */
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.75rem;
 }
 
@@ -174,9 +174,28 @@
   color: #1f5fbf;
 }
 
-/* ── Link row (host + join en la misma card) ────────────────── */
-.info-card--links {
-  grid-column: span 2;
+/* ── Link row (host + join en la misma card) ───────────────── */
+.info-card--full {
+  grid-column: 1 / -1;
+}
+
+.info-card--empty {
+  border: none;
+  background: transparent;
+  pointer-events: none;
+}
+
+.links-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  align-items: center;
+}
+
+.link-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .link-row {
@@ -295,6 +314,160 @@
   color: #9aa8bc;
   font-size: 0.9rem;
 }
+
+/* ── Sesiones (instancias) ───────────────────────────────────── */
+.session-list { display: grid; gap: 0; }
+
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid #f0f5fb;
+}
+.session-row:last-child { border-bottom: none; }
+.session-row:hover { background: #f7fafd; }
+
+.session-date {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1e3458;
+}
+.session-icon { font-size: 0.95rem; }
+
+.session-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+
+.session-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: #eef4fb;
+  color: #3b6ea8;
+}
+.session-ENDED    { background: #e3f8ee; color: #1a6b40; }
+.session-IN_PROGRESS { background: #fff4da; color: #8a5b00; }
+.session-ERROR    { background: #ffe4e4; color: #9b1a1a; }
+
+/* ── Bottom panels (participantes + grabaciones side by side) ── */
+.bottom-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+@media (max-width: 640px) { .bottom-panels { grid-template-columns: 1fr; } }
+
+.panel--participants,
+.panel--recordings { min-width: 0; }
+
+/* Participantes */
+.participant-list { display: grid; }
+
+.participant-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid #f0f5fb;
+}
+.participant-row:last-child { border-bottom: none; }
+.participant-row:hover { background: #f7fafd; }
+
+.participant-avatar {
+  width: 2rem; height: 2rem;
+  border-radius: 50%;
+  background: #eef4fb;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.participant-info { flex: 1; min-width: 0; }
+.participant-name {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #1e3458;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.participant-email {
+  margin: 0.1rem 0 0;
+  font-size: 0.78rem;
+  color: #6688aa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.participant-role {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: #e8efff;
+  color: #2a4aaa;
+  flex-shrink: 0;
+}
+
+/* Grabaciones */
+.recording-list { display: grid; }
+
+.recording-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid #f0f5fb;
+}
+.recording-row:last-child { border-bottom: none; }
+.recording-row:hover { background: #f7fafd; }
+
+.recording-icon {
+  width: 2.2rem; height: 2.2rem;
+  border-radius: 10px;
+  background: #fff0e8;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.recording-meta { flex: 1; min-width: 0; }
+.recording-date {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #1e3458;
+}
+.recording-size {
+  margin: 0.1rem 0 0;
+  font-size: 0.78rem;
+  color: #6688aa;
+}
+
+.recording-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+
+.btn-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+.btn-rec:hover { opacity: 0.82; }
+.btn-rec--play { background: #e8efff; color: #2a4aaa; }
+.btn-rec--dl   { background: #e3f8ee; color: #1a6b40; }
 
 /* ── Badges ──────────────────────────────────────────────────── */
 .badge {

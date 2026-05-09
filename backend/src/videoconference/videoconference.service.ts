@@ -3639,7 +3639,9 @@ export class VideoconferenceService implements OnModuleInit {
         const conferenceDate = toDateOnly(record.conference_date);
         const akademicDate = toAkademicDate(conferenceDate);
 
-        // Prefer the section-scoped endpoint when sectionId is available in payload_json.
+        // Always fetch the live list from Aula Virtual and match by title + date.
+        // Using storedAvId directly is unreliable when duplicates exist (same topic+date)
+        // because the stored id may belong to a sibling record, not this one.
         const payloadSectionId = String(
             (record.payload_json as Record<string, unknown> | null)?.['sectionId'] ?? '',
         ).trim();
@@ -3651,21 +3653,20 @@ export class VideoconferenceService implements OnModuleInit {
             rows = await this.listAllAulaVirtualConferences(context, null, null, topic);
         }
 
+        // Match by title (AV row.name) against topic (DB) AND by date (AV row.date) against
+        // conference_date (DB). When duplicates exist, take only ONE (TOP 1) so that sibling
+        // records that share the same topic+date each get to delete their own entry separately.
         const matches = rows.filter(
             (row) =>
                 row.name.trim() === topic &&
                 isAkademicDateWithinDays(row.date, akademicDate, 1),
         );
-        const byId = new Map(matches.filter((row) => row.id.trim()).map((row) => [row.id, row] as const));
-
-        if (storedAvId && !byId.has(storedAvId)) {
-            byId.set(storedAvId, { id: storedAvId, name: topic, sectionId: '', date: akademicDate });
-        }
+        const firstMatch = matches.find((row) => row.id.trim()) ?? null;
 
         console.log(
-            `[deleteVideoconference] AV delete lookup local=${record.id} topic="${topic}" date=${akademicDate} sectionId=${payloadSectionId || 'none'} rows=${rows.length} matches=${byId.size} rowsSample=${JSON.stringify(rows.slice(0, 3))}`,
+            `[deleteVideoconference] AV delete lookup local=${record.id} topic="${topic}" date=${akademicDate} storedAvId=${storedAvId ?? 'none'} sectionId=${payloadSectionId || 'none'} rows=${rows.length} totalMatches=${matches.length} using=${firstMatch?.id ?? 'none'} rowsSample=${JSON.stringify(rows.slice(0, 3))}`,
         );
-        return [...byId.values()];
+        return firstMatch ? [firstMatch] : [];
     }
 
     private async listAulaVirtualConferencesBySection(
