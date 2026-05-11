@@ -1039,15 +1039,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         }
       : {
           zoomGroupId: this.selectedZoomGroupId,
-          scheduleIds: Array.from(
-            new Set(
-              selected.flatMap((item) =>
-                item.grouped_schedule_ids?.length
-                  ? item.grouped_schedule_ids
-                  : [item.schedule_id],
-              ),
-            ),
-          ),
+          scheduleIds: this.getOwnerScheduleIdsForRows(selected),
           startDate: this.startDate,
           endDate: this.endDate,
           mergeTheoryPracticeBlocks: this.mergeTheoryPracticeBlocks || undefined,
@@ -1710,11 +1702,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         resolve();
         return;
       }
-      const scheduleIds = [...new Set(
-        this.previewData
-          .filter((item) => item.selectable)
-          .flatMap((item) => item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id]),
-      )];
+      const scheduleIds = this.getOwnerScheduleIdsForRows(this.previewData.filter((item) => item.selectable));
       if (!scheduleIds.length) {
         this.existingByOccurrenceKey = new Map();
         resolve();
@@ -1756,11 +1744,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       return;
     }
 
-    const scheduleIds = [...new Set(
-      this.previewData
-        .filter((item) => item.selectable)
-        .flatMap((item) => item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id]),
-    )];
+    const scheduleIds = this.getOwnerScheduleIdsForRows(this.previewData.filter((item) => item.selectable));
 
     if (!scheduleIds.length) {
       this.existingByOccurrenceKey = new Map();
@@ -1810,8 +1794,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
         if (sep >= 0) existingScheduleIds.add(key.slice(0, sep));
       }
       this.previewData.forEach((item) => {
-        const ids = item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id];
-        if (ids.some((id) => existingScheduleIds.has(id))) {
+        if (existingScheduleIds.has(this.getOwnerScheduleId(item))) {
           item.selected = false;
         }
       });
@@ -1822,11 +1805,11 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
 
   /** Count conferences already created for a base schedule in the current date range */
   getExistingCountForSchedule(item: PreviewSelectionItem): number {
-    const ids = new Set(item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id]);
+    const ownerScheduleId = this.getOwnerScheduleId(item);
     let count = 0;
     for (const key of this.existingByOccurrenceKey.keys()) {
       const sep = key.lastIndexOf('::');
-      if (sep >= 0 && ids.has(key.slice(0, sep))) {
+      if (sep >= 0 && key.slice(0, sep) === ownerScheduleId) {
         count++;
       }
     }
@@ -1843,9 +1826,7 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   isAnyCreatedForSchedule(item: PreviewSelectionItem): boolean {
-    const ids = new Set(item.grouped_schedule_ids?.length ? item.grouped_schedule_ids : [item.schedule_id]);
-    const existing = this.existingScheduleIds;
-    return [...ids].some((id) => existing.has(id));
+    return this.existingScheduleIds.has(this.getOwnerScheduleId(item));
   }
 
   async retryFailed() {
@@ -2054,6 +2035,14 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       keys.add(`${ownerScheduleId}::${baseDate}`);
     }
     return Array.from(keys);
+  }
+
+  private getOwnerScheduleId(row: PreviewSelectionItem) {
+    return row.inheritance?.family_owner_schedule_id || row.schedule_id;
+  }
+
+  private getOwnerScheduleIdsForRows(rows: PreviewSelectionItem[]) {
+    return Array.from(new Set(rows.map((row) => this.getOwnerScheduleId(row)).filter(Boolean)));
   }
 
   private normalizeOccurrenceKeysForGeneration(occurrenceKeys: string[] | undefined) {
