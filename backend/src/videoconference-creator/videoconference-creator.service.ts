@@ -30,6 +30,9 @@ import {
     SetUserZoomGroupsDto,
 } from './videoconference-creator.dto';
 
+const MEETING_MARGIN_MINUTES = 10;
+const DEFAULT_MAX_CONCURRENT_MEETINGS = 2;
+
 @Injectable()
 export class VideoconferenceCreatorService {
     constructor(
@@ -193,6 +196,7 @@ export class VideoconferenceCreatorService {
         // 2. Compute end time
         const startDate = new Date(dto.start_time);
         const endDate = new Date(startDate.getTime() + dto.duration_minutes * 60 * 1000);
+        const maxConcurrent = await this.getMaxConcurrentMeetings();
 
         // 3. Find an available host in the group
         const groupUsers = await this.zoomGroupUserRepo.find({
@@ -207,8 +211,8 @@ export class VideoconferenceCreatorService {
             const zoomUser = await this.zoomUserRepo.findOne({ where: { id: gu.zoom_user_id } });
             if (!zoomUser) continue;
 
-            const conflict = await this.hasConflict(zoomUser.id, startDate, endDate, null);
-            if (!conflict) {
+            const hasCapacity = await this.hasHostCapacity(zoomUser.id, startDate, endDate, maxConcurrent, null);
+            if (hasCapacity) {
                 availableHostId = zoomUser.id;
                 availableHostEmail = zoomUser.email;
                 break;
@@ -537,25 +541,37 @@ export class VideoconferenceCreatorService {
         return Boolean(endDateTime && now > endDateTime);
     }
 
-    private async hasConflict(
+    private async hasHostCapacity(
         zoomUserId: string,
         start: Date,
         end: Date,
+        maxConcurrent: number,
         excludeId: string | null,
     ): Promise<boolean> {
+        const windowStart = addMinutes(start, -MEETING_MARGIN_MINUTES);
+        const windowEnd = addMinutes(end, MEETING_MARGIN_MINUTES);
         const qb = this.mvRepo
             .createQueryBuilder('mv')
             .where('mv.assigned_zoom_user_id = :zoomUserId', { zoomUserId })
             .andWhere("mv.status NOT IN ('CANCELLED', 'ERROR', 'DRAFT_NO_HOST')")
-            .andWhere('mv.start_time < :end', { end })
-            .andWhere('mv.end_time > :start', { start });
+            .andWhere('mv.start_time < :windowEnd', { windowEnd })
+            .andWhere('mv.end_time > :windowStart', { windowStart });
 
         if (excludeId) {
             qb.andWhere('mv.id != :excludeId', { excludeId });
         }
 
         const count = await qb.getCount();
-        return count > 0;
+        return count < maxConcurrent;
+    }
+
+    private async getMaxConcurrentMeetings(): Promise<number> {
+        const config = await this.zoomConfigRepo.find({ order: { created_at: 'ASC' }, take: 1 });
+        const value = Number(config[0]?.maxConcurrent ?? DEFAULT_MAX_CONCURRENT_MEETINGS);
+        if (!Number.isFinite(value)) {
+            return DEFAULT_MAX_CONCURRENT_MEETINGS;
+        }
+        return Math.max(1, Math.floor(value));
     }
 
     private buildRecurrenceJson(dto: CreateManualVideoconferenceDto): Record<string, unknown> | null {
@@ -581,7 +597,7 @@ export class VideoconferenceCreatorService {
         const payload: Record<string, unknown> = {
             topic: dto.topic,
             type: isWeekly ? 8 : 2, // 2 = scheduled, 8 = recurring fixed-time
-            start_time: dto.start_time,
+            start_time: toZoomLocalDateTime(dto.start_time),
             duration: dto.duration_minutes,
             agenda: dto.agenda ?? '',
             timezone: 'America/Lima',
@@ -627,4 +643,29 @@ export class VideoconferenceCreatorService {
             // Non-critical: do not throw
         }
     }
+}
+
+function toZoomLocalDateTime(value: string) {
+    const raw = `${value ?? ''}`.trim();
+    const localMatch = raw.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::(\d{2}))?$/);
+    if (localMatch) {
+        return `${localMatch[1]}T${localMatch[2]}:${localMatch[3] ?? '00'}`;
+    }
+
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) {
+        return raw;
+    }
+
+    const limaTime = new Date(parsed.getTime() - 5 * 60 * 60 * 1000);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return [
+        limaTime.getUTCFullYear(),
+        p(limaTime.getUTCMonth() + 1),
+        p(limaTime.getUTCDate()),
+    ].join('-') + `T${p(limaTime.getUTCHours())}:${p(limaTime.getUTCMinutes())}:${p(limaTime.getUTCSeconds())}`;
+}
+
+function addMinutes(value: Date, minutes: number) {
+    return new Date(value.getTime() + minutes * 60 * 1000);
 }
