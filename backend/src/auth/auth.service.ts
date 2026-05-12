@@ -34,7 +34,7 @@ import {
   ROLE_CODES,
   ROLE_SEEDS,
 } from './auth.constants';
-import { LoginDto, RefreshTokenDto } from './dto/auth.dto';
+import { ChangePasswordDto, LoginDto, RefreshTokenDto } from './dto/auth.dto';
 
 type JwtAccessPayload = {
   sub: string;
@@ -219,6 +219,27 @@ export class AuthService implements OnModuleInit {
 
   async me(authUser: AuthenticatedRequestUser) {
     return this.serializeAuthenticatedUser(authUser);
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const user = await this.requireActiveUser(userId);
+    const currentPassword = `${dto.current_password ?? ''}`;
+    const newPassword = `${dto.new_password ?? ''}`;
+
+    const currentValid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!currentValid) {
+      throw new BadRequestException('La contraseña actual no es correcta.');
+    }
+
+    this.validateNewPassword(newPassword, user.username);
+    if (currentPassword === newPassword) {
+      throw new BadRequestException('La nueva contraseña debe ser diferente a la actual.');
+    }
+
+    user.password_hash = await bcrypt.hash(newPassword, 10);
+    user.updated_at = new Date();
+    await this.usersRepo.save(user);
+    return { password_changed: true };
   }
 
   async authenticateAccessToken(token: string) {
@@ -510,6 +531,30 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('El usuario no existe o esta inactivo.');
     }
     return user;
+  }
+
+  private validateNewPassword(password: string, username: string) {
+    if (password.length < 8) {
+      throw new BadRequestException('La nueva contraseña debe tener al menos 8 caracteres.');
+    }
+    if (password.length > 72) {
+      throw new BadRequestException('La nueva contraseña no puede superar 72 caracteres.');
+    }
+    if (!/[a-z]/.test(password)) {
+      throw new BadRequestException('La nueva contraseña debe incluir una letra minúscula.');
+    }
+    if (!/[A-Z]/.test(password)) {
+      throw new BadRequestException('La nueva contraseña debe incluir una letra mayúscula.');
+    }
+    if (!/\d/.test(password)) {
+      throw new BadRequestException('La nueva contraseña debe incluir un número.');
+    }
+    if (/\s/.test(password)) {
+      throw new BadRequestException('La nueva contraseña no debe contener espacios.');
+    }
+    if (username && password.toLowerCase().includes(username.toLowerCase())) {
+      throw new BadRequestException('La nueva contraseña no debe contener el nombre de usuario.');
+    }
   }
 
   private async issueTokens(userId: string, username: string) {

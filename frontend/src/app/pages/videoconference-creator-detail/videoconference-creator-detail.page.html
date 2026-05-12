@@ -22,10 +22,11 @@
       <div class="hero-left">
         <div class="hero-eyebrow">VIDEOCONFERENCIA</div>
         <h1 class="hero-title">{{ meeting.topic }}</h1>
+        <p class="hero-status">{{ statusContext(meeting) }}</p>
         <p class="hero-agenda" *ngIf="meeting.agenda">{{ meeting.agenda }}</p>
         <div class="hero-badges">
-          <span class="badge" [ngClass]="statusClass(meeting.status)">
-            {{ statusLabel(meeting.status) }}
+          <span class="badge" [ngClass]="statusClass(meeting)">
+            {{ statusLabel(meeting) }}
           </span>
           <span class="type-pill">
             {{ meeting.type === 'WEEKLY' ? '🔁 Semanal recurrente' : '📅 Reunión única' }}
@@ -60,22 +61,38 @@
     <!-- ── Info grid ────────────────────────────────────────────────── -->
     <div class="info-grid">
 
-      <!-- Fila 1: datos básicos -->
-      <div class="info-card">
-        <p class="info-label">Inicio</p>
-        <p class="info-value">{{ meeting.start_time | date:'dd/MM/yyyy HH:mm' }}</p>
+      <div class="info-card info-card--schedule">
+        <p class="info-label">Horario</p>
+        <div class="schedule-grid">
+          <div class="schedule-item">
+            <span class="schedule-label">Inicio</span>
+            <span class="schedule-value">{{ meeting.start_time | date:'dd/MM/yyyy HH:mm' }}</span>
+          </div>
+          <div class="schedule-item">
+            <span class="schedule-label">Fin</span>
+            <span class="schedule-value">{{ calculatedEndTime(meeting) | date:'dd/MM/yyyy HH:mm' }}</span>
+          </div>
+          <div class="schedule-item">
+            <span class="schedule-label">Duración</span>
+            <span class="schedule-value">{{ meeting.duration_minutes }} min</span>
+          </div>
+        </div>
       </div>
-      <div class="info-card">
-        <p class="info-label">Duración</p>
-        <p class="info-value">{{ meeting.duration_minutes }} min</p>
-      </div>
-      <div class="info-card" *ngIf="meeting.zoom_meeting_id; else emptyCell1">
+
+      <div class="info-card info-card--zoom" *ngIf="meeting.zoom_meeting_id; else emptyCell1">
         <p class="info-label">Zoom Meeting ID</p>
         <p class="info-value mono">{{ meeting.zoom_meeting_id }}</p>
       </div>
       <ng-template #emptyCell1><div class="info-card info-card--empty"></div></ng-template>
 
-      <!-- Fila 2: enlaces (ancho completo) -->
+      <div class="info-card" *ngIf="meeting.assigned_zoom_user_name">
+        <p class="info-label">Host Zoom asignado</p>
+        <div class="host-row">
+          <span class="host-icon">👤</span>
+          <span class="info-value">{{ meeting.assigned_zoom_user_name }}</span>
+        </div>
+      </div>
+
       <div class="info-card info-card--full" *ngIf="meeting.start_url || meeting.join_url">
         <p class="info-label">Enlaces</p>
         <div class="links-row">
@@ -98,14 +115,6 @@
         </div>
       </div>
 
-      <!-- Fila 3: host + recurrencia -->
-      <div class="info-card" *ngIf="meeting.assigned_zoom_user_name">
-        <p class="info-label">Host Zoom asignado</p>
-        <div class="host-row">
-          <span class="host-icon">👤</span>
-          <span class="info-value">{{ meeting.assigned_zoom_user_name }}</span>
-        </div>
-      </div>
       <div class="info-card" *ngIf="recurrenceDays">
         <p class="info-label">Días de recurrencia</p>
         <p class="info-value">{{ recurrenceDays }}</p>

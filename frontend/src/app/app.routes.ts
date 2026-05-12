@@ -29,6 +29,7 @@ import { VideoconferencesPageComponent } from './pages/videoconferences/videocon
 import { VideoconferenceEspecialesPageComponent } from './pages/videoconference-especiales/videoconference-especiales.page';
 import { VideoconferenceCreatorPageComponent } from './pages/videoconference-creator/videoconference-creator.page';
 import { VideoconferenceCreatorDetailPageComponent } from './pages/videoconference-creator-detail/videoconference-creator-detail.page';
+import { PasswordResetPageComponent } from './pages/password-reset/password-reset.page';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'planning' },
@@ -226,6 +227,15 @@ export const routes: Routes = [
   { path: 'settings', pathMatch: 'full', redirectTo: 'integrations/sync' },
   { path: 'admin/security', pathMatch: 'full', canActivate: [securityLandingGuard], component: SecurityPageComponent },
   { path: 'security', pathMatch: 'full', canActivate: [securityLandingGuard], component: SecurityPageComponent },
+  {
+    path: 'admin/password',
+    component: PasswordResetPageComponent,
+    canActivate: [windowGuard, permissionGuard],
+    data: {
+      requiredWindow: 'window.password_reset',
+      requiredPermission: 'action.password.change',
+    },
+  },
   // ── Videoconference Creator ──────────────────────────────────────────────
   {
     path: 'videoconferences/creator',

@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   Length,
+  MaxLength,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -33,6 +34,17 @@ export class LogoutDto {
   @IsOptional()
   @IsString()
   refresh_token?: string;
+}
+
+export class ChangePasswordDto {
+  @IsString()
+  @IsNotEmpty()
+  current_password!: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(72)
+  new_password!: string;
 }
 
 export class UpsertAuthUserDto {

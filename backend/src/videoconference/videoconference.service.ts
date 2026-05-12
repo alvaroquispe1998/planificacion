@@ -243,6 +243,15 @@ type AulaVirtualRequestContext = {
     cookie: string;
 };
 
+type AulaVirtualConferenceRow = {
+    id: string;
+    name: string;
+    sectionId: string;
+    date: string;
+    url: string | null;
+    zoomMeetingId: string | null;
+};
+
 type AulaVirtualSectionSyncFilters = {
     semester_id?: string;
     campus_id?: string;
@@ -3549,6 +3558,8 @@ export class VideoconferenceService implements OnModuleInit {
         let deletedAulaVirtualCount = 0;
         let affectedLocalChildren = 0;
 
+        await this.reconcileZoomMeetingForDeletion(record);
+
         // 1. Delete from Aula Virtual FIRST.
         // If the record exists in AV but cannot be deleted → abort entirely (don't touch Zoom or DB).
         // If the record is not found in AV → treat as already deleted and continue.
@@ -3626,6 +3637,40 @@ export class VideoconferenceService implements OnModuleInit {
         };
     }
 
+    private async reconcileZoomMeetingForDeletion(record: PlanningSubsectionVideoconferenceEntity) {
+        if (record.zoom_meeting_id) {
+            return;
+        }
+        if (!record.zoom_user_email?.trim() || !record.topic?.trim() || !record.scheduled_start) {
+            return;
+        }
+
+        const durationMinutes = calculateDurationMinutes(
+            compactTime(record.start_time),
+            compactTime(record.end_time),
+        );
+        const matched = await this.matchZoomMeeting(
+            record.zoom_user_email,
+            record.topic,
+            record.scheduled_start,
+            durationMinutes,
+            { maxAttempts: 1, delayMs: 0 },
+        );
+        if (!matched) {
+            return;
+        }
+
+        record.zoom_meeting_id = matched.id;
+        record.join_url = matched.join_url;
+        record.start_url = matched.start_url;
+        record.status = 'MATCHED';
+        record.match_attempts = (record.match_attempts ?? 0) + matched.attempts;
+        record.matched_at = new Date();
+        record.error_message = null;
+        record.updated_at = new Date();
+        await this.planningVideoconferencesRepo.save(record);
+    }
+
     private async findAulaVirtualConferencesForDeletion(
         context: AulaVirtualRequestContext,
         record: PlanningSubsectionVideoconferenceEntity,
@@ -3633,7 +3678,7 @@ export class VideoconferenceService implements OnModuleInit {
         const topic = record.topic?.trim() ?? '';
         const storedAvId = this.extractAulaVirtualId(record.response_json);
         if (!topic) {
-            return storedAvId ? [{ id: storedAvId, name: '', sectionId: '', date: '' }] : [];
+            return storedAvId ? [{ id: storedAvId, name: '', sectionId: '', date: '', url: null, zoomMeetingId: null }] : [];
         }
 
         const conferenceDate = toDateOnly(record.conference_date);
@@ -3646,33 +3691,85 @@ export class VideoconferenceService implements OnModuleInit {
             (record.payload_json as Record<string, unknown> | null)?.['sectionId'] ?? '',
         ).trim();
 
-        let rows: Array<{ id: string; name: string; sectionId: string; date: string }>;
+        let rows: AulaVirtualConferenceRow[];
         if (payloadSectionId) {
             rows = await this.listAulaVirtualConferencesBySection(context, payloadSectionId);
         } else {
             rows = await this.listAllAulaVirtualConferences(context, null, null, topic);
         }
 
-        // Match by title (AV row.name) against topic (DB) AND by date (AV row.date) against
-        // conference_date (DB). When duplicates exist, take only ONE (TOP 1) so that sibling
-        // records that share the same topic+date each get to delete their own entry separately.
-        const matches = rows.filter(
+        const match = this.selectAulaVirtualConferenceForRecord({
+            record,
+            rows,
+            topic,
+            akademicDate,
+            storedAvId,
+            sectionId: payloadSectionId,
+            contextLabel: 'delete',
+        });
+        return match ? [match] : [];
+    }
+
+    private selectAulaVirtualConferenceForRecord(input: {
+        record: PlanningSubsectionVideoconferenceEntity;
+        rows: AulaVirtualConferenceRow[];
+        topic: string;
+        akademicDate: string;
+        storedAvId: string | null;
+        sectionId: string;
+        contextLabel: string;
+    }) {
+        const matches = input.rows.filter(
             (row) =>
-                row.name.trim() === topic &&
-                isAkademicDateWithinDays(row.date, akademicDate, 1),
+                row.name.trim() === input.topic &&
+                isAkademicDateWithinDays(row.date, input.akademicDate, 1),
         );
-        const firstMatch = matches.find((row) => row.id.trim()) ?? null;
+        const targetZoomMeetingId = normalizeComparableId(input.record.zoom_meeting_id);
+        let selected: AulaVirtualConferenceRow | null = null;
+        let reason = 'no-match';
+
+        if (targetZoomMeetingId) {
+            const zoomMatches = matches.filter((row) => getAulaVirtualRowZoomMeetingId(row) === targetZoomMeetingId);
+            if (zoomMatches.length === 1) {
+                selected = zoomMatches[0];
+                reason = 'zoom-id';
+            } else if (zoomMatches.length > 1) {
+                throw new BadRequestException(
+                    `Se encontraron ${zoomMatches.length} conferencias en Aula Virtual con el mismo topic, fecha y Zoom ID ${targetZoomMeetingId}. No se puede elegir una de forma segura.`,
+                );
+            } else if (matches.length === 1) {
+                const onlyMatchZoomId = getAulaVirtualRowZoomMeetingId(matches[0]);
+                if (onlyMatchZoomId && onlyMatchZoomId !== targetZoomMeetingId) {
+                    throw new BadRequestException(
+                        `La unica conferencia encontrada en Aula Virtual tiene Zoom ID ${onlyMatchZoomId}, pero el registro local usa ${targetZoomMeetingId}. No se eliminara para evitar borrar otra reunion.`,
+                    );
+                }
+                selected = matches[0];
+                reason = onlyMatchZoomId ? 'single-match' : 'single-match-without-av-zoom-id';
+            } else if (matches.length > 1) {
+                throw new BadRequestException(
+                    `Se encontraron ${matches.length} conferencias en Aula Virtual con el mismo topic y fecha, pero ninguna coincide con el Zoom ID local ${targetZoomMeetingId}. No se puede eliminar de forma segura.`,
+                );
+            }
+        } else if (matches.length === 1) {
+            selected = matches[0];
+            reason = 'single-match-no-local-zoom-id';
+        } else if (matches.length > 1) {
+            throw new BadRequestException(
+                `Se encontraron ${matches.length} conferencias en Aula Virtual con el mismo topic y fecha, pero el registro local no tiene Zoom ID conciliado. Reintenta la conciliacion antes de eliminar.`,
+            );
+        }
 
         console.log(
-            `[deleteVideoconference] AV delete lookup local=${record.id} topic="${topic}" date=${akademicDate} storedAvId=${storedAvId ?? 'none'} sectionId=${payloadSectionId || 'none'} rows=${rows.length} totalMatches=${matches.length} using=${firstMatch?.id ?? 'none'} rowsSample=${JSON.stringify(rows.slice(0, 3))}`,
+            `[deleteVideoconference] AV ${input.contextLabel} lookup local=${input.record.id} topic="${input.topic}" date=${input.akademicDate} storedAvId=${input.storedAvId ?? 'none'} localZoomId=${targetZoomMeetingId || 'none'} sectionId=${input.sectionId || 'none'} rows=${input.rows.length} totalMatches=${matches.length} using=${selected?.id ?? 'none'} reason=${reason} rowsSample=${JSON.stringify(input.rows.slice(0, 3).map((row) => ({ id: row.id, name: row.name, date: row.date, sectionId: row.sectionId, zoomMeetingId: getAulaVirtualRowZoomMeetingId(row) || null })))}`,
         );
-        return firstMatch ? [firstMatch] : [];
+        return selected;
     }
 
     private async listAulaVirtualConferencesBySection(
         context: AulaVirtualRequestContext,
         sectionId: string,
-    ): Promise<Array<{ id: string; name: string; sectionId: string; date: string }>> {
+    ): Promise<AulaVirtualConferenceRow[]> {
         const url = new URL(
             `/web/conference/list?s=${encodeURIComponent(sectionId)}`,
             context.baseUrl,
@@ -3694,11 +3791,14 @@ export class VideoconferenceService implements OnModuleInit {
         }
         return (parsed as unknown[]).map((item) => {
             const r = item as Record<string, unknown>;
+            const rowUrl = readNullableString(r['url']) ?? readNullableString(r['join_url']);
             return {
                 id: String(r['id'] ?? ''),
                 name: String(r['title'] ?? r['name'] ?? ''),
                 sectionId,
                 date: String(r['date'] ?? ''),
+                url: rowUrl,
+                zoomMeetingId: extractZoomMeetingIdFromUrl(rowUrl ?? ''),
             };
         });
     }
@@ -3785,7 +3885,7 @@ export class VideoconferenceService implements OnModuleInit {
             (record.payload_json as Record<string, unknown> | null)?.['sectionId'] ?? '',
         ).trim();
 
-        let rows: Array<{ id: string; name: string; sectionId: string; date: string }> = [];
+        let rows: AulaVirtualConferenceRow[] = [];
         if (payloadSectionId) {
             rows = await this.listAulaVirtualConferencesBySection(context, payloadSectionId);
         } else if (meta.courseCode) {
@@ -3804,8 +3904,15 @@ export class VideoconferenceService implements OnModuleInit {
 
         // Use exact name and date matching (with 1-day window) to identify the correct entry among weekly sessions.
         let match =
-            rows.find((r) => (r.name || '').trim() === topicTrimmed && isAkademicDateWithinDays(r.date, akademicDate, 1)) ??
-            null;
+            this.selectAulaVirtualConferenceForRecord({
+                record,
+                rows,
+                topic: topicTrimmed,
+                akademicDate,
+                storedAvId,
+                sectionId: payloadSectionId,
+                contextLabel: 'lookup',
+            });
 
         // Fallback: search by date if section/courseCode search didn't yield a match.
         if (!match && !payloadSectionId && akademicDate) {
@@ -3817,7 +3924,15 @@ export class VideoconferenceService implements OnModuleInit {
                 100,
             );
             rows = listing.rows;
-            match = rows.find((r) => r.name === topic) ?? null;
+            match = this.selectAulaVirtualConferenceForRecord({
+                record,
+                rows,
+                topic: topicTrimmed,
+                akademicDate,
+                storedAvId,
+                sectionId: payloadSectionId,
+                contextLabel: 'lookup-fallback',
+            });
         }
 
         if (!match) {
@@ -6674,7 +6789,7 @@ export class VideoconferenceService implements OnModuleInit {
         courseCode: string | null = null,
         section: string | null = null,
     ): Promise<{
-        rows: Array<{ id: string; name: string; sectionId: string; date: string }>;
+        rows: AulaVirtualConferenceRow[];
         recordsTotal: number | null;
         recordsFiltered: number | null;
     }> {
@@ -6726,6 +6841,10 @@ export class VideoconferenceService implements OnModuleInit {
                 name: String(r['name'] ?? r['title'] ?? ''),
                 sectionId: String(r['sectionId'] ?? ''),
                 date: String(r['date'] ?? ''),
+                url: readNullableString(r['url']) ?? readNullableString(r['join_url']),
+                zoomMeetingId: extractZoomMeetingIdFromUrl(
+                    readNullableString(r['url']) ?? readNullableString(r['join_url']) ?? '',
+                ),
             };
         });
         return {
@@ -6742,7 +6861,7 @@ export class VideoconferenceService implements OnModuleInit {
         searchValue: string,
     ) {
         const pageSize = 500;
-        const rows: Array<{ id: string; name: string; sectionId: string; date: string }> = [];
+        const rows: AulaVirtualConferenceRow[] = [];
         let start = 0;
         let expectedTotal: number | null = null;
 
@@ -6777,7 +6896,7 @@ export class VideoconferenceService implements OnModuleInit {
         context: AulaVirtualRequestContext,
         dates: string[],
     ) {
-        const cache = new Map<string, Array<{ id: string; name: string; sectionId: string; date: string }>>();
+        const cache = new Map<string, AulaVirtualConferenceRow[]>();
         const rows = await this.listAllAulaVirtualConferences(context, null, null, '');
         for (const date of dates) {
             if (cache.has(date)) {
@@ -8323,6 +8442,10 @@ function isSameAulaVirtualImportedSession(
 
 function normalizeComparableId(value: string | null | undefined) {
     return `${value ?? ''}`.trim();
+}
+
+function getAulaVirtualRowZoomMeetingId(row: Pick<AulaVirtualConferenceRow, 'zoomMeetingId' | 'url'>) {
+    return normalizeComparableId(row.zoomMeetingId ?? extractZoomMeetingIdFromUrl(row.url ?? ''));
 }
 
 function normalizeIsoDate(value: string) {

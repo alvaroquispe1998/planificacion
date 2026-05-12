@@ -983,8 +983,8 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
   }
 
   async generate() {
-    const selected = this.previewData.filter((item) => item.selectable && item.selected);
-    if (!selected.length) {
+    const initialSelected = this.previewData.filter((item) => item.selectable && item.selected);
+    if (!initialSelected.length) {
       await this.dialog.alert({
         title: 'Seleccion requerida',
         message: 'Selecciona al menos una ocurrencia generable.',
@@ -1011,6 +1011,21 @@ export class VideoconferencesPageComponent implements OnInit, OnDestroy {
       await this.dialog.alert({
         title: 'Rango invalido',
         message: 'La fecha de inicio no puede ser mayor que la fecha fin.',
+      });
+      return;
+    }
+
+    this.loading = true;
+    this.cdr.detectChanges();
+    await this.refreshExistingCheckAsync();
+    this.loading = false;
+    this.cdr.detectChanges();
+
+    const selected = this.previewData.filter((item) => item.selectable && item.selected);
+    if (!selected.length) {
+      await this.dialog.alert({
+        title: 'Todo ya creado',
+        message: 'Todas las filas seleccionadas ya tienen videoconferencias creadas. No hay nada nuevo que generar.',
       });
       return;
     }
