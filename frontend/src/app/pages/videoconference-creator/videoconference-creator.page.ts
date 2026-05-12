@@ -189,12 +189,9 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         return this.profile?.assigned_groups ?? [];
     }
 
-    /** Mínimo permitido para datetime-local: ahora + 5 min en formato YYYY-MM-DDTHH:mm */
+    /** Mínimo permitido para datetime-local: minuto actual en formato YYYY-MM-DDTHH:mm */
     get minDateTime(): string {
-        const d = new Date();
-        d.setMinutes(d.getMinutes() + 5);
-        const p = (n: number) => String(n).padStart(2, '0');
-        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+        return this.formatDateTimeLocal(this.currentMinute());
     }
 
     /** Mínimo para la fecha fin de recurrencia: la fecha de inicio o hoy */
@@ -208,9 +205,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
     get startTimeError(): string {
         if (!this.formStartTime) return '';
         const selected = new Date(this.formStartTime);
-        const min = new Date();
-        min.setMinutes(min.getMinutes() + 5);
-        if (selected < min) return 'La fecha y hora deben ser al menos 5 minutos en el futuro.';
+        if (selected < this.currentMinute()) return 'La fecha y hora no puede ser anterior al minuto actual.';
         return '';
     }
 
@@ -355,6 +350,17 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
 
     private clampCurrentPage(): void {
         this.currentPage = Math.min(Math.max(1, this.currentPage), this.totalPages);
+    }
+
+    private currentMinute(): Date {
+        const date = new Date();
+        date.setSeconds(0, 0);
+        return date;
+    }
+
+    private formatDateTimeLocal(date: Date): string {
+        const p = (n: number) => String(n).padStart(2, '0');
+        return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}`;
     }
 
     private isMeetingInProgress(meeting: ManualMeeting): boolean {
