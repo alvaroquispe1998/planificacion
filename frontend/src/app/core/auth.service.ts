@@ -138,6 +138,13 @@ export class AuthService {
       );
   }
 
+  changePassword(currentPassword: string, newPassword: string) {
+    return this.http.post<{ password_changed: boolean }>(`${this.baseUrl}/change-password`, {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }).pipe(timeout({ first: this.authRequestTimeoutMs }));
+  }
+
   refreshAccessToken() {
     if (!this.refreshToken) {
       this.clearSession();

@@ -11,6 +11,13 @@ export type ManualMeetingStatus =
     | 'APPROVED_WITH_BACKUP'
     | 'ERROR'
     | 'CANCELLED';
+export type ManualMeetingDisplayStatus =
+    | 'PENDING'
+    | 'IN_PROGRESS'
+    | 'FINISHED'
+    | 'DRAFT_NO_HOST'
+    | 'ERROR'
+    | 'CANCELLED';
 
 export interface ManualMeeting {
     id: string;
@@ -29,6 +36,8 @@ export interface ManualMeeting {
     duration_minutes: number;
     recurrence_json: Record<string, unknown> | null;
     status: ManualMeetingStatus;
+    is_in_progress?: boolean;
+    can_cancel?: boolean;
     zoom_meeting_id: string | null;
     join_url: string | null;
     start_url: string | null;

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { ChangeDetectorRef, Component, NgZone, OnInit } from '@angular/core';
+import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { timeout, catchError } from 'rxjs/operators';
@@ -8,13 +8,13 @@ import {
     CreateMeetingDto,
     CreatorProfile,
     ManualMeeting,
-    ManualMeetingStatus,
+    ManualMeetingDisplayStatus,
     VideoconferenceCreatorApiService,
     ZoomGroupSummary,
 } from '../../services/videoconference-creator-api.service';
 
 type FormMode = 'UNIQUE' | 'WEEKLY';
-type StatusFilter = 'ALL' | ManualMeetingStatus;
+type StatusFilter = 'ALL' | ManualMeetingDisplayStatus;
 
 @Component({
     selector: 'app-videoconference-creator-page',
@@ -23,7 +23,7 @@ type StatusFilter = 'ALL' | ManualMeetingStatus;
     templateUrl: './videoconference-creator.page.html',
     styleUrl: './videoconference-creator.page.css',
 })
-export class VideoconferenceCreatorPageComponent implements OnInit {
+export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
     profile: CreatorProfile | null = null;
     meetings: ManualMeeting[] = [];
     loading = true;
@@ -33,6 +33,9 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     successMsg = '';
     statusFilter: StatusFilter = 'ALL';
     view: 'list' | 'form' = 'list';
+    currentPage = 1;
+    readonly pageSize = 10;
+    private clockTimer: ReturnType<typeof setInterval> | null = null;
 
     formMode: FormMode = 'UNIQUE';
     formGroupId = '';
@@ -55,10 +58,11 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
 
     readonly statusFilters: Array<{ value: StatusFilter; label: string }> = [
         { value: 'ALL', label: 'Todas' },
-        { value: 'CREATED', label: 'Creadas' },
+        { value: 'PENDING', label: 'Pendientes' },
+        { value: 'IN_PROGRESS', label: 'En proceso' },
+        { value: 'FINISHED', label: 'Finalizadas' },
         { value: 'DRAFT_NO_HOST', label: 'Borradores' },
-        { value: 'APPROVED_WITH_BACKUP', label: 'Aprobadas' },
-        { value: 'ERROR', label: 'Error' },
+        { value: 'ERROR', label: 'Con error' },
         { value: 'CANCELLED', label: 'Canceladas' },
     ];
 
@@ -70,7 +74,15 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     ) { }
 
     ngOnInit(): void {
+        this.clockTimer = setInterval(() => this.cdr.markForCheck(), 30000);
         this.load();
+    }
+
+    ngOnDestroy(): void {
+        if (this.clockTimer) {
+            clearInterval(this.clockTimer);
+            this.clockTimer = null;
+        }
     }
 
     load(): void {
@@ -122,6 +134,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
         ).subscribe((meetings) => {
             this.zone.run(() => {
                 this.meetings = meetings;
+                this.clampCurrentPage();
                 this.loading = false;
                 this.loadingMeetings = false;
                 this.cdr.markForCheck();
@@ -135,8 +148,31 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
     }
 
     get filteredMeetings(): ManualMeeting[] {
-        if (this.statusFilter === 'ALL') return this.meetings;
-        return this.meetings.filter((m) => m.status === this.statusFilter);
+        const filtered = this.statusFilter === 'ALL'
+            ? this.meetings
+            : this.meetings.filter((m) => this.displayStatus(m) === this.statusFilter);
+        return [...filtered].sort((a, b) => this.meetingSortTime(b) - this.meetingSortTime(a));
+    }
+
+    get paginatedMeetings(): ManualMeeting[] {
+        const start = (this.currentPage - 1) * this.pageSize;
+        return this.filteredMeetings.slice(start, start + this.pageSize);
+    }
+
+    get totalPages(): number {
+        return Math.max(1, Math.ceil(this.filteredMeetings.length / this.pageSize));
+    }
+
+    get pageStart(): number {
+        return this.filteredMeetings.length === 0 ? 0 : (this.currentPage - 1) * this.pageSize + 1;
+    }
+
+    get pageEnd(): number {
+        return Math.min(this.currentPage * this.pageSize, this.filteredMeetings.length);
+    }
+
+    get showPagination(): boolean {
+        return this.filteredMeetings.length > this.pageSize;
     }
 
     get draftCount(): number {
@@ -218,9 +254,9 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
                 if (result.status === 'DRAFT_NO_HOST') {
                     this.successMsg = 'Sin host disponible: guardada como borrador. TI ser\u00e1 notificado.';
                 } else if (result.status === 'ERROR') {
-                    this.successMsg = 'Creada pero con error en Zoom: ' + result.error_message;
+                    this.successMsg = 'Registrada pero con error en Zoom: ' + result.error_message;
                 } else {
-                    this.successMsg = 'Videoconferencia creada (Zoom ID: ' + result.zoom_meeting_id + ').';
+                    this.successMsg = 'Videoconferencia pendiente (Zoom ID: ' + result.zoom_meeting_id + ').';
                 }
                 this.resetForm();
                 this.refreshMeetings();
@@ -240,30 +276,65 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
         this.router.navigate(['/videoconferences/creator', id]);
     }
 
-    statusLabel(status: ManualMeeting['status']): string {
+    setStatusFilter(filter: StatusFilter): void {
+        this.statusFilter = filter;
+        this.currentPage = 1;
+        this.clampCurrentPage();
+    }
+
+    previousPage(): void {
+        this.currentPage = Math.max(1, this.currentPage - 1);
+    }
+
+    nextPage(): void {
+        this.currentPage = Math.min(this.totalPages, this.currentPage + 1);
+    }
+
+    displayStatus(meeting: ManualMeeting): ManualMeetingDisplayStatus {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+            return meeting.status;
+        }
+        if (this.isMeetingInProgress(meeting)) return 'IN_PROGRESS';
+        if (this.isMeetingFinished(meeting)) return 'FINISHED';
+        return 'PENDING';
+    }
+
+    statusLabel(meeting: ManualMeeting): string {
         const map: Record<string, string> = {
-            CREATED: 'Creada',
+            PENDING: meeting.status === 'APPROVED_WITH_BACKUP' ? 'Pendiente (backup)' : 'Pendiente',
+            IN_PROGRESS: 'En proceso',
+            FINISHED: 'Finalizada',
             DRAFT_NO_HOST: 'Borrador sin host',
-            APPROVED_WITH_BACKUP: 'Aprobada (backup)',
             ERROR: 'Error',
             CANCELLED: 'Cancelada',
         };
+        const status = this.displayStatus(meeting);
         return map[status] ?? status;
     }
 
-    statusClass(status: ManualMeeting['status']): string {
+    statusClass(meeting: ManualMeeting): string {
         const map: Record<string, string> = {
-            CREATED: 'badge-ok',
+            PENDING: 'badge-pending',
+            IN_PROGRESS: 'badge-progress',
+            FINISHED: 'badge-finished',
             DRAFT_NO_HOST: 'badge-warn',
-            APPROVED_WITH_BACKUP: 'badge-backup',
             ERROR: 'badge-err',
             CANCELLED: 'badge-cancelled',
         };
+        const status = this.displayStatus(meeting);
         return map[status] ?? '';
     }
 
     typeLabel(type: ManualMeeting['type']): string {
         return type === 'WEEKLY' ? 'Semanal' : '\u00danica';
+    }
+
+    calculatedEndTime(meeting: ManualMeeting): Date {
+        const start = new Date(meeting.start_time);
+        if (Number.isNaN(start.getTime())) {
+            return new Date(meeting.end_time);
+        }
+        return new Date(start.getTime() + meeting.duration_minutes * 60 * 1000);
     }
 
     private resetForm(): void {
@@ -273,5 +344,66 @@ export class VideoconferenceCreatorPageComponent implements OnInit {
         this.formDuration = 60;
         this.formRecurrenceEndDate = '';
         this.formRecurrenceWeeklyDays = '2';
+    }
+
+    private meetingSortTime(meeting: ManualMeeting): number {
+        const startTime = new Date(meeting.start_time).getTime();
+        if (!Number.isNaN(startTime)) return startTime;
+        const createdAt = new Date(meeting.created_at).getTime();
+        return Number.isNaN(createdAt) ? 0 : createdAt;
+    }
+
+    private clampCurrentPage(): void {
+        this.currentPage = Math.min(Math.max(1, this.currentPage), this.totalPages);
+    }
+
+    private isMeetingInProgress(meeting: ManualMeeting): boolean {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+            return false;
+        }
+        const now = new Date();
+        if (meeting.type === 'WEEKLY') {
+            return this.isWeeklyMeetingInProgress(meeting, now);
+        }
+        const start = new Date(meeting.start_time);
+        const end = this.calculatedEndTime(meeting);
+        return start <= now && now < end;
+    }
+
+    private isMeetingFinished(meeting: ManualMeeting): boolean {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+            return false;
+        }
+        const now = new Date();
+        if (meeting.type === 'WEEKLY') {
+            return this.isWeeklyMeetingFinished(meeting, now);
+        }
+        const end = new Date(meeting.end_time);
+        return !Number.isNaN(end.getTime()) && now >= end;
+    }
+
+    private isWeeklyMeetingInProgress(meeting: ManualMeeting, now: Date): boolean {
+        const weeklyDays = String(meeting.recurrence_json?.['weekly_days'] ?? '')
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+        const todayZoomDay = String(now.getDay() + 1);
+        if (weeklyDays.length && !weeklyDays.includes(todayZoomDay)) return false;
+
+        const firstStart = new Date(meeting.start_time);
+        if (now < firstStart) return false;
+        const recurrenceEndRaw = meeting.recurrence_json?.['end_date_time'];
+        if (typeof recurrenceEndRaw === 'string' && now > new Date(recurrenceEndRaw)) return false;
+
+        const startMinutes = firstStart.getHours() * 60 + firstStart.getMinutes();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        return nowMinutes >= startMinutes && nowMinutes < startMinutes + meeting.duration_minutes;
+    }
+
+    private isWeeklyMeetingFinished(meeting: ManualMeeting, now: Date): boolean {
+        const recurrenceEndRaw = meeting.recurrence_json?.['end_date_time'];
+        if (typeof recurrenceEndRaw !== 'string') return false;
+        const recurrenceEnd = new Date(recurrenceEndRaw);
+        return !Number.isNaN(recurrenceEnd.getTime()) && now > recurrenceEnd;
     }
 }

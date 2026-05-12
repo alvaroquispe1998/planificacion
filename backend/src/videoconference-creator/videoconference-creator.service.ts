@@ -153,6 +153,12 @@ export class VideoconferenceCreatorService {
         if (mv.status === 'CANCELLED') {
             throw new BadRequestException('La videoconferencia ya está cancelada.');
         }
+        if (this.isMeetingInProgress(mv)) {
+            throw new BadRequestException('La videoconferencia está en proceso. No se puede cancelar mientras está en curso.');
+        }
+        if (this.isMeetingFinished(mv)) {
+            throw new BadRequestException('La videoconferencia ya finalizó. No se puede cancelar una reunión finalizada.');
+        }
 
         if (mv.zoom_meeting_id) {
             const deleteResult = await this.zoomService.deleteZoomMeeting(mv.zoom_meeting_id);
@@ -456,16 +462,79 @@ export class VideoconferenceCreatorService {
         const creatorMap = new Map(creators.map((u) => [u.id, u.display_name || u.username]));
         const zoomUserMap = new Map(zoomUsers.map((u) => [u.id, u.name || u.email]));
 
-        return meetings.map((m) => ({
-            ...m,
-            creator_display_name: creatorMap.get(m.created_by_user_id) ?? null,
-            assigned_zoom_user_name: m.assigned_zoom_user_id
-                ? (zoomUserMap.get(m.assigned_zoom_user_id) ?? null)
+        const now = new Date();
+        return meetings.map((m) => {
+            const isInProgress = this.isMeetingInProgress(m, now);
+            const isFinished = this.isMeetingFinished(m, now);
+            return {
+                ...m,
+                creator_display_name: creatorMap.get(m.created_by_user_id) ?? null,
+                assigned_zoom_user_name: m.assigned_zoom_user_id
+                    ? (zoomUserMap.get(m.assigned_zoom_user_id) ?? null)
+                    : null,
+                backup_zoom_user_name: m.backup_zoom_user_id
+                    ? (zoomUserMap.get(m.backup_zoom_user_id) ?? null)
                 : null,
-            backup_zoom_user_name: m.backup_zoom_user_id
-                ? (zoomUserMap.get(m.backup_zoom_user_id) ?? null)
-                : null,
-        }));
+                is_in_progress: isInProgress,
+                can_cancel: m.status !== 'CANCELLED' && !isInProgress && !isFinished && m.start_time > now,
+            };
+        });
+    }
+
+    private isMeetingInProgress(meeting: ManualVideoconferenceEntity, now = new Date()): boolean {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+            return false;
+        }
+
+        if (meeting.type === 'WEEKLY') {
+            return this.isWeeklyMeetingInProgress(meeting, now);
+        }
+
+        return meeting.start_time <= now && now < meeting.end_time;
+    }
+
+    private isMeetingFinished(meeting: ManualVideoconferenceEntity, now = new Date()): boolean {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+            return false;
+        }
+
+        if (meeting.type === 'WEEKLY') {
+            return this.isWeeklyMeetingFinished(meeting, now);
+        }
+
+        return now >= meeting.end_time;
+    }
+
+    private isWeeklyMeetingInProgress(meeting: ManualVideoconferenceEntity, now: Date): boolean {
+        const recurrence = meeting.recurrence_json as Record<string, unknown> | null;
+        const weeklyDays = String(recurrence?.['weekly_days'] ?? '').split(',').map((item) => item.trim()).filter(Boolean);
+        const todayZoomDay = String(now.getDay() + 1);
+        if (weeklyDays.length && !weeklyDays.includes(todayZoomDay)) {
+            return false;
+        }
+
+        if (now < meeting.start_time) {
+            return false;
+        }
+        const endDateTime = typeof recurrence?.['end_date_time'] === 'string'
+            ? new Date(recurrence['end_date_time'])
+            : null;
+        if (endDateTime && now > endDateTime) {
+            return false;
+        }
+
+        const startMinutes = meeting.start_time.getHours() * 60 + meeting.start_time.getMinutes();
+        const endMinutes = startMinutes + meeting.duration_minutes;
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        return nowMinutes >= startMinutes && nowMinutes < endMinutes;
+    }
+
+    private isWeeklyMeetingFinished(meeting: ManualVideoconferenceEntity, now: Date): boolean {
+        const recurrence = meeting.recurrence_json as Record<string, unknown> | null;
+        const endDateTime = typeof recurrence?.['end_date_time'] === 'string'
+            ? new Date(recurrence['end_date_time'])
+            : null;
+        return Boolean(endDateTime && now > endDateTime);
     }
 
     private async hasConflict(

@@ -6,6 +6,7 @@ import { takeUntil, timeout, catchError, retry } from 'rxjs/operators';
 import {
     MeetingDetail,
     ManualMeeting,
+    ManualMeetingDisplayStatus,
     MeetingInstance,
     MeetingParticipant,
     MeetingRecording,
@@ -29,6 +30,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     error = '';
     detail: MeetingDetail | null = null;
     private currentId = '';
+    private clockTimer: ReturnType<typeof setInterval> | null = null;
     private readonly destroy$ = new Subject<void>();
 
     get meeting(): ManualMeeting | null {
@@ -42,6 +44,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     /** Sólo reuniones futuras (aún no iniciadas) pueden cancelarse. */
     get canCancel(): boolean {
         if (!this.meeting || this.meeting.status === 'CANCELLED') return false;
+        if (this.meeting.can_cancel === false || this.isMeetingInProgress(this.meeting) || this.isMeetingFinished(this.meeting)) return false;
         const now = new Date();
         const start = new Date(this.meeting.start_time);
         return start > now;
@@ -98,6 +101,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     ) { }
 
     ngOnInit(): void {
+        this.clockTimer = setInterval(() => this.cdr.markForCheck(), 30000);
         // Subscribe to param changes so navigating directly to a different ID works
         this.route.paramMap.pipe(takeUntil(this.destroy$)).subscribe((params) => {
             const id = params.get('id') ?? '';
@@ -109,6 +113,10 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     }
 
     ngOnDestroy(): void {
+        if (this.clockTimer) {
+            clearInterval(this.clockTimer);
+            this.clockTimer = null;
+        }
         this.destroy$.next();
         this.destroy$.complete();
     }
@@ -228,7 +236,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         const map: Record<string, string> = {
             ENDED: 'Finalizada',
             IN_PROGRESS: 'En curso',
-            CREATED: 'Creada',
+            CREATED: 'Pendiente',
             ERROR: 'Error',
         };
         return status ? (map[status] ?? status) : '—';
@@ -241,26 +249,129 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         return `${(n / (1024 * 1024)).toFixed(1)} MB`;
     }
 
-    statusLabel(status: ManualMeeting['status']): string {
+    calculatedEndTime(meeting: ManualMeeting): Date {
+        const start = new Date(meeting.start_time);
+        if (Number.isNaN(start.getTime())) {
+            return new Date(meeting.end_time);
+        }
+        return new Date(start.getTime() + meeting.duration_minutes * 60 * 1000);
+    }
+
+    displayStatus(meeting: ManualMeeting): ManualMeetingDisplayStatus {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+            return meeting.status;
+        }
+        if (this.isMeetingInProgress(meeting)) return 'IN_PROGRESS';
+        if (this.isMeetingFinished(meeting)) return 'FINISHED';
+        return 'PENDING';
+    }
+
+    statusLabel(meeting: ManualMeeting): string {
         const map: Record<string, string> = {
-            CREATED: 'Creada',
+            PENDING: meeting.status === 'APPROVED_WITH_BACKUP' ? 'Pendiente (backup)' : 'Pendiente',
+            IN_PROGRESS: 'En proceso',
+            FINISHED: 'Finalizada',
             DRAFT_NO_HOST: 'Borrador sin host',
-            APPROVED_WITH_BACKUP: 'Aprobada (backup)',
             ERROR: 'Error',
             CANCELLED: 'Cancelada',
         };
+        const status = this.displayStatus(meeting);
         return map[status] ?? status;
     }
 
-    statusClass(status: ManualMeeting['status']): string {
+    statusClass(meeting: ManualMeeting): string {
         const map: Record<string, string> = {
-            CREATED: 'badge-ok',
+            PENDING: 'badge-pending',
+            IN_PROGRESS: 'badge-progress',
+            FINISHED: 'badge-finished',
             DRAFT_NO_HOST: 'badge-warn',
-            APPROVED_WITH_BACKUP: 'badge-backup',
             ERROR: 'badge-err',
             CANCELLED: 'badge-cancelled',
         };
+        const status = this.displayStatus(meeting);
         return map[status] ?? '';
+    }
+
+    statusContext(meeting: ManualMeeting): string {
+        const status = this.displayStatus(meeting);
+        const end = this.calculatedEndTime(meeting);
+        if (status === 'PENDING') {
+            return meeting.type === 'WEEKLY' ? 'Reunión recurrente pendiente' : `Inicia el ${this.formatDateTime(meeting.start_time)}`;
+        }
+        if (status === 'IN_PROGRESS') {
+            return `Reunión en curso. Finaliza a las ${this.formatTime(end)}`;
+        }
+        if (status === 'FINISHED') {
+            return meeting.type === 'WEEKLY' ? 'Recurrencia finalizada' : `Finalizó el ${this.formatDateTime(end)}`;
+        }
+        if (status === 'CANCELLED') return 'Esta reunión fue cancelada';
+        if (status === 'DRAFT_NO_HOST') return 'Pendiente de asignar host Zoom';
+        if (status === 'ERROR') return 'Requiere revisión por error de creación';
+        return '';
+    }
+
+    isMeetingInProgress(meeting: ManualMeeting): boolean {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+            return false;
+        }
+        const now = new Date();
+        if (meeting.type === 'WEEKLY') {
+            return this.isWeeklyMeetingInProgress(meeting, now);
+        }
+        const start = new Date(meeting.start_time);
+        const end = this.calculatedEndTime(meeting);
+        return start <= now && now < end;
+    }
+
+    private isMeetingFinished(meeting: ManualMeeting): boolean {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+            return false;
+        }
+        const now = new Date();
+        if (meeting.type === 'WEEKLY') {
+            return this.isWeeklyMeetingFinished(meeting, now);
+        }
+        const end = this.calculatedEndTime(meeting);
+        return !Number.isNaN(end.getTime()) && now >= end;
+    }
+
+    private isWeeklyMeetingInProgress(meeting: ManualMeeting, now: Date): boolean {
+        const weeklyDays = String(meeting.recurrence_json?.['weekly_days'] ?? '')
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+        const todayZoomDay = String(now.getDay() + 1);
+        if (weeklyDays.length && !weeklyDays.includes(todayZoomDay)) return false;
+
+        const firstStart = new Date(meeting.start_time);
+        if (now < firstStart) return false;
+        const recurrenceEndRaw = meeting.recurrence_json?.['end_date_time'];
+        if (typeof recurrenceEndRaw === 'string' && now > new Date(recurrenceEndRaw)) return false;
+
+        const startMinutes = firstStart.getHours() * 60 + firstStart.getMinutes();
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
+        return nowMinutes >= startMinutes && nowMinutes < startMinutes + meeting.duration_minutes;
+    }
+
+    private isWeeklyMeetingFinished(meeting: ManualMeeting, now: Date): boolean {
+        const recurrenceEndRaw = meeting.recurrence_json?.['end_date_time'];
+        if (typeof recurrenceEndRaw !== 'string') return false;
+        const recurrenceEnd = new Date(recurrenceEndRaw);
+        return !Number.isNaN(recurrenceEnd.getTime()) && now > recurrenceEnd;
+    }
+
+    private formatDateTime(value: string | Date): string {
+        return new Date(value).toLocaleString('es-PE', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    }
+
+    private formatTime(value: Date): string {
+        return value.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
     }
 }
 

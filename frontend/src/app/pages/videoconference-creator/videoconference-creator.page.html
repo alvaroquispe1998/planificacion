@@ -43,7 +43,7 @@
               type="button"
               class="filter-chip"
               [class.active]="statusFilter === f.value"
-              (click)="statusFilter = f.value">
+              (click)="setStatusFilter(f.value)">
               {{ f.label }}
             </button>
           </div>
@@ -66,16 +66,16 @@
         </div>
 
         <div class="meeting-list" *ngIf="!loadingMeetings && filteredMeetings.length > 0">
-          <div class="meeting-row" *ngFor="let m of filteredMeetings" (click)="openDetail(m.id)">
-            <div class="meeting-status-bar" [ngClass]="statusClass(m.status)"></div>
+          <div class="meeting-row" *ngFor="let m of paginatedMeetings" (click)="openDetail(m.id)">
+            <div class="meeting-status-bar" [ngClass]="statusClass(m)"></div>
             <div class="meeting-body">
               <div class="meeting-main">
                 <span class="meeting-topic">{{ m.topic }}</span>
                 <span class="meeting-type-pill">{{ typeLabel(m.type) }}</span>
-                <span class="badge" [ngClass]="statusClass(m.status)">{{ statusLabel(m.status) }}</span>
+                <span class="badge" [ngClass]="statusClass(m)">{{ statusLabel(m) }}</span>
               </div>
               <div class="meeting-meta">
-                <span>{{ m.start_time | date:'dd/MM/yyyy HH:mm' }}</span>
+                <span>{{ m.start_time | date:'dd/MM/yyyy HH:mm' }} - {{ calculatedEndTime(m) | date:'HH:mm' }}</span>
                 <span>{{ m.duration_minutes }} min</span>
                 <span *ngIf="m.zoom_meeting_id" class="meeting-meta-id">ID: {{ m.zoom_meeting_id }}</span>
                 <span *ngIf="m.creator_display_name" class="meeting-creator">{{ m.creator_display_name }}</span>
@@ -83,6 +83,21 @@
               <div *ngIf="m.error_message" class="meeting-error-msg">{{ m.error_message }}</div>
             </div>
             <span class="meeting-arrow">&#8250;</span>
+          </div>
+        </div>
+
+        <div class="pagination-bar" *ngIf="!loadingMeetings && filteredMeetings.length > 0">
+          <span class="pagination-summary">
+            {{ pageStart }} - {{ pageEnd }} de {{ filteredMeetings.length }}
+          </span>
+          <div class="pagination-actions" *ngIf="showPagination">
+            <button type="button" class="btn page-btn" (click)="previousPage()" [disabled]="currentPage === 1">
+              &#8249;
+            </button>
+            <span class="page-indicator">{{ currentPage }} / {{ totalPages }}</span>
+            <button type="button" class="btn page-btn" (click)="nextPage()" [disabled]="currentPage === totalPages">
+              &#8250;
+            </button>
           </div>
         </div>
 

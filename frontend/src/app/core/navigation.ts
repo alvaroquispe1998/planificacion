@@ -276,6 +276,16 @@ export const APP_NAV_GROUPS: NavGroup[] = [
               exact: ['/admin/security/roles'],
             },
           },
+          {
+            label: 'Contraseña',
+            path: '/admin/password',
+            icon: 'key',
+            window: 'window.password_reset',
+            permission: 'action.password.change',
+            match: {
+              exact: ['/admin/password'],
+            },
+          },
         ],
       },
     ],

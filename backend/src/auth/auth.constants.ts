@@ -5,6 +5,7 @@ export const WINDOW_PERMISSIONS = {
   VIDEOCONFERENCES: 'window.videoconferences',
   VIDEOCONFERENCE_CREATOR: 'window.videoconference_creator',
   SECURITY: 'window.security',
+  PASSWORD_RESET: 'window.password_reset',
   SETTINGS: 'window.settings',
 } as const;
 
@@ -12,6 +13,7 @@ export const ACTION_PERMISSIONS = {
   USERS_MANAGE: 'action.users.manage',
   ROLES_MANAGE: 'action.roles.manage',
   PERMISSIONS_MANAGE: 'action.permissions.manage',
+  PASSWORD_CHANGE: 'action.password.change',
   SETTINGS_MANAGE: 'action.settings.manage',
   PLANNING_CHANGE_LOG_VIEW: 'action.planning.change_log.view',
   PLANNING_PLAN_SUBMIT_REVIEW: 'action.planning.plan.submit_review',
@@ -104,6 +106,15 @@ export const PERMISSION_SEEDS = [
     sort_order: 60,
   },
   {
+    code: WINDOW_PERMISSIONS.PASSWORD_RESET,
+    type: 'WINDOW' as const,
+    description: 'Acceso al modulo de cambio de contraseña propia.',
+    display_name: 'Contraseña',
+    group_key: 'password_reset',
+    parent_window_code: null,
+    sort_order: 65,
+  },
+  {
     code: ACTION_PERMISSIONS.USERS_MANAGE,
     type: 'ACTION' as const,
     description: 'Gestion de usuarios.',
@@ -138,6 +149,15 @@ export const PERMISSION_SEEDS = [
     group_key: 'settings',
     parent_window_code: WINDOW_PERMISSIONS.SETTINGS,
     sort_order: 130,
+  },
+  {
+    code: ACTION_PERMISSIONS.PASSWORD_CHANGE,
+    type: 'ACTION' as const,
+    description: 'Cambiar la contraseña propia validando la contraseña actual.',
+    display_name: 'Cambiar contraseña',
+    group_key: 'password_reset',
+    parent_window_code: WINDOW_PERMISSIONS.PASSWORD_RESET,
+    sort_order: 135,
   },
   {
     code: ACTION_PERMISSIONS.PLANNING_CHANGE_LOG_VIEW,

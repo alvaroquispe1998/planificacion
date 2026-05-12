@@ -5,6 +5,7 @@ export type WindowCode =
   | 'window.videoconferences'
   | 'window.videoconference_creator'
   | 'window.security'
+  | 'window.password_reset'
   | 'window.settings';
 
 export type PermissionCode =
@@ -12,6 +13,7 @@ export type PermissionCode =
   | 'action.users.manage'
   | 'action.roles.manage'
   | 'action.permissions.manage'
+  | 'action.password.change'
   | 'action.settings.manage'
   | 'action.planning.change_log.view'
   | 'action.planning.plan.submit_review'
