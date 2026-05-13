@@ -283,6 +283,14 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         return this.detail?.recordings ?? [];
     }
 
+    get hasEndedInstances(): boolean {
+        return (this.detail?.instances ?? []).some((i) => i['status'] === 'ENDED');
+    }
+
+    get hasAnyInstances(): boolean {
+        return (this.detail?.instances ?? []).length > 0;
+    }
+
     instanceStatusLabel(status: string | undefined): string {
         const map: Record<string, string> = {
             ENDED: 'Finalizada',

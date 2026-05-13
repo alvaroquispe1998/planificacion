@@ -597,6 +597,29 @@
 .btn-rec--play { background: #e8efff; color: #2a4aaa; }
 .btn-rec--dl   { background: #e3f8ee; color: #1a6b40; }
 
+/* ── Grabación pendiente ─────────────────────────────────────── */
+.recording-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 1.8rem 1.25rem;
+  gap: 0.35rem;
+  color: #7a92ab;
+}
+.recording-pending-icon { font-size: 2rem; line-height: 1; }
+.recording-pending-title {
+  margin: 0.4rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #3a5a7c;
+}
+.recording-pending-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 /* ── Badges ──────────────────────────────────────────────────── */
 .badge {
   display: inline-block;
