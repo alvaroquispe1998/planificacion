@@ -3,7 +3,7 @@ import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit } from '@angula
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { timeout, catchError } from 'rxjs/operators';
-import { of } from 'rxjs';
+import { firstValueFrom, of } from 'rxjs';
 import {
     CreateMeetingDto,
     CreatorProfile,
@@ -12,6 +12,7 @@ import {
     VideoconferenceCreatorApiService,
     ZoomGroupSummary,
 } from '../../services/videoconference-creator-api.service';
+import { DialogService } from '../../core/dialog.service';
 
 type FormMode = 'UNIQUE' | 'WEEKLY';
 type StatusFilter = 'ALL' | ManualMeetingDisplayStatus;
@@ -61,7 +62,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         { value: 'PENDING', label: 'Pendientes' },
         { value: 'IN_PROGRESS', label: 'En proceso' },
         { value: 'FINISHED', label: 'Finalizadas' },
-        { value: 'DRAFT_NO_HOST', label: 'Borradores' },
+        { value: 'DRAFT_NO_HOST', label: 'Pendiente de host' },
         { value: 'ERROR', label: 'Con error' },
         { value: 'CANCELLED', label: 'Canceladas' },
     ];
@@ -71,6 +72,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         private readonly router: Router,
         private readonly cdr: ChangeDetectorRef,
         private readonly zone: NgZone,
+        private readonly dialog: DialogService,
     ) { }
 
     ngOnInit(): void {
@@ -179,6 +181,11 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         return this.meetings.filter((m) => m.status === 'DRAFT_NO_HOST').length;
     }
 
+    get draftLabel(): string {
+        const count = this.draftCount;
+        return `${count} pendiente${count > 1 ? 's' : ''} de host`;
+    }
+
     get canCreate(): boolean {
         if (!this.profile) return false;
         if (this.formMode === 'UNIQUE') return this.profile.can_create_unique;
@@ -217,7 +224,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         return '';
     }
 
-    submit(): void {
+    async submit(): Promise<void> {
         if (!this.formTopic.trim() || !this.formGroupId || !this.formStartTime) return;
         if (this.startTimeError) { this.error = this.startTimeError; return; }
         if (this.recurrenceEndError) { this.error = this.recurrenceEndError; return; }
@@ -229,6 +236,46 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         this.error = '';
         this.successMsg = '';
 
+        try {
+            const result = await firstValueFrom(this.api.createMeeting(this.buildCreateDto(false)));
+            this.handleCreateResult(result);
+        } catch (err: any) {
+            this.saving = false;
+            const errorBody = err?.error;
+            if (errorBody?.code === 'NO_HOST_AVAILABLE') {
+                const confirmed = await this.dialog.confirm({
+                    title: 'Sin host disponible',
+                    message:
+                        'No fue posible crear la reunión porque no hay usuarios Zoom disponibles en el grupo seleccionado para ese horario. Puedes enviar una solicitud para que un administrador la revise y la apruebe usando un grupo backup. ¿Deseas enviar esta solicitud para aprobación?',
+                    confirmLabel: 'Enviar solicitud',
+                    cancelLabel: 'No enviar',
+                });
+                if (confirmed) {
+                    await this.submitApprovalRequest();
+                    return;
+                }
+                this.successMsg = 'No se creó la reunión.';
+                this.view = 'list';
+                this.refreshMeetings();
+                return;
+            }
+            this.error = errorBody?.message ?? 'Error al crear la videoconferencia.';
+        }
+    }
+
+    private async submitApprovalRequest(): Promise<void> {
+        this.saving = true;
+        this.error = '';
+        try {
+            const result = await firstValueFrom(this.api.createMeeting(this.buildCreateDto(true)));
+            this.handleCreateResult(result);
+        } catch (err: any) {
+            this.saving = false;
+            this.error = err?.error?.message ?? 'No se pudo enviar la solicitud para aprobación.';
+        }
+    }
+
+    private buildCreateDto(requestApprovalIfNoHost: boolean): CreateMeetingDto {
         const dto: CreateMeetingDto = {
             type: this.formMode,
             zoom_group_id: this.formGroupId,
@@ -236,32 +283,28 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
             agenda: this.formAgenda.trim() || undefined,
             start_time: this.formStartTime,
             duration_minutes: this.formDuration,
+            request_approval_if_no_host: requestApprovalIfNoHost,
         };
 
         if (this.formMode === 'WEEKLY') {
             dto.recurrence_end_date = this.formRecurrenceEndDate || undefined;
             dto.recurrence_weekly_days = this.formRecurrenceWeeklyDays || '2';
         }
+        return dto;
+    }
 
-        this.api.createMeeting(dto).subscribe({
-            next: (result) => {
-                this.saving = false;
-                if (result.status === 'DRAFT_NO_HOST') {
-                    this.successMsg = 'Sin host disponible: guardada como borrador. TI ser\u00e1 notificado.';
-                } else if (result.status === 'ERROR') {
-                    this.successMsg = 'Registrada pero con error en Zoom: ' + result.error_message;
-                } else {
-                    this.successMsg = 'Videoconferencia pendiente (Zoom ID: ' + result.zoom_meeting_id + ').';
-                }
-                this.resetForm();
-                this.refreshMeetings();
-                this.view = 'list';
-            },
-            error: (err) => {
-                this.saving = false;
-                this.error = err?.error?.message ?? 'Error al crear la videoconferencia.';
-            },
-        });
+    private handleCreateResult(result: ManualMeeting): void {
+        this.saving = false;
+        if (result.status === 'DRAFT_NO_HOST') {
+            this.successMsg = 'Solicitud enviada para aprobación.';
+        } else if (result.status === 'ERROR') {
+            this.successMsg = 'Registrada pero con error en Zoom: ' + result.error_message;
+        } else {
+            this.successMsg = 'Videoconferencia pendiente (Zoom ID: ' + result.zoom_meeting_id + ').';
+        }
+        this.resetForm();
+        this.refreshMeetings();
+        this.view = 'list';
     }
 
     openDetail(id: string): void {
@@ -299,7 +342,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
             PENDING: meeting.status === 'APPROVED_WITH_BACKUP' ? 'Pendiente (backup)' : 'Pendiente',
             IN_PROGRESS: 'En proceso',
             FINISHED: 'Finalizada',
-            DRAFT_NO_HOST: 'Borrador sin host',
+            DRAFT_NO_HOST: 'Pendiente de host',
             ERROR: 'Error',
             CANCELLED: 'Cancelada',
         };

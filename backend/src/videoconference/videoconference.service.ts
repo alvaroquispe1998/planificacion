@@ -2438,6 +2438,10 @@ export class VideoconferenceService implements OnModuleInit {
             name: group.name,
             code: group.code,
             is_active: group.is_active,
+            backup_zoom_group_id: group.backup_zoom_group_id,
+            backup_zoom_group_name: group.backup_zoom_group_id
+                ? (groups.find((item) => item.id === group.backup_zoom_group_id)?.name ?? null)
+                : null,
             is_default:
                 group.code === DEFAULT_ZOOM_GROUP_REGULAR_CODE ||
                 group.code === DEFAULT_ZOOM_GROUP_HIBRIDO_CODE,
@@ -2457,6 +2461,8 @@ export class VideoconferenceService implements OnModuleInit {
                 name: item.name,
                 code: item.code,
                 is_active: item.is_active,
+                backup_zoom_group_id: item.backup_zoom_group_id ?? null,
+                backup_zoom_group_name: item.backup_zoom_group_name ?? null,
                 members_count: item.members_count ?? 0,
                 active_members_count: item.active_members_count ?? 0,
             }));
@@ -2479,6 +2485,7 @@ export class VideoconferenceService implements OnModuleInit {
             name,
             code,
             is_active: dto.is_active ?? true,
+            backup_zoom_group_id: await this.normalizeBackupZoomGroupId(dto.backup_zoom_group_id, null),
             created_at: now,
             updated_at: now,
         });
@@ -2488,6 +2495,7 @@ export class VideoconferenceService implements OnModuleInit {
             name: entity.name,
             code: entity.code,
             is_active: entity.is_active,
+            backup_zoom_group_id: entity.backup_zoom_group_id,
             created_at: entity.created_at,
             updated_at: entity.updated_at,
         };
@@ -2523,6 +2531,9 @@ export class VideoconferenceService implements OnModuleInit {
         if (dto.is_active !== undefined) {
             group.is_active = Boolean(dto.is_active);
         }
+        if (dto.backup_zoom_group_id !== undefined) {
+            group.backup_zoom_group_id = await this.normalizeBackupZoomGroupId(dto.backup_zoom_group_id, group.id);
+        }
         group.updated_at = new Date();
         await this.zoomGroupsRepo.save(group);
         return {
@@ -2530,6 +2541,7 @@ export class VideoconferenceService implements OnModuleInit {
             name: group.name,
             code: group.code,
             is_active: group.is_active,
+            backup_zoom_group_id: group.backup_zoom_group_id,
             created_at: group.created_at,
             updated_at: group.updated_at,
         };
@@ -2748,6 +2760,7 @@ export class VideoconferenceService implements OnModuleInit {
                 name: group.name,
                 code: group.code,
                 is_active: group.is_active,
+                backup_zoom_group_id: group.backup_zoom_group_id,
             },
             items: poolRows.map((row) => ({
                 id: readString(row.pool_id),
@@ -2938,6 +2951,21 @@ export class VideoconferenceService implements OnModuleInit {
             throw new BadRequestException('No se encontro el grupo Zoom seleccionado.');
         }
         return group;
+    }
+
+    private async normalizeBackupZoomGroupId(value: string | null | undefined, currentGroupId: string | null) {
+        const normalized = String(value ?? '').trim();
+        if (!normalized) {
+            return null;
+        }
+        if (currentGroupId && normalized === currentGroupId) {
+            throw new BadRequestException('El grupo backup debe ser distinto al grupo principal.');
+        }
+        const backupGroup = await this.zoomGroupsRepo.findOne({ where: { id: normalized } });
+        if (!backupGroup) {
+            throw new BadRequestException('El grupo backup seleccionado no existe.');
+        }
+        return backupGroup.id;
     }
 
     private async getDefaultRegularZoomGroup() {

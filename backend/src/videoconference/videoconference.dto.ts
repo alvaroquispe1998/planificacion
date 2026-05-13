@@ -354,6 +354,10 @@ export class CreateZoomGroupDto {
     @Type(() => Boolean)
     @IsBoolean()
     is_active?: boolean;
+
+    @IsOptional()
+    @IsString()
+    backup_zoom_group_id?: string | null;
 }
 
 export class UpdateZoomGroupDto {
@@ -371,6 +375,10 @@ export class UpdateZoomGroupDto {
     @Type(() => Boolean)
     @IsBoolean()
     is_active?: boolean;
+
+    @IsOptional()
+    @IsString()
+    backup_zoom_group_id?: string | null;
 }
 
 export class VideoconferenceInheritanceCatalogDto {

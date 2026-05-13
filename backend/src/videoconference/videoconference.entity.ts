@@ -297,9 +297,13 @@ export class ZoomGroupEntity {
     @Column({ type: 'boolean', default: true })
     is_active!: boolean;
 
-    /** Optional backup Zoom user ID used when the primary host pool is exhausted. */
+    /** Optional legacy backup Zoom user ID used when the primary host pool is exhausted. */
     @Column({ type: 'varchar', length: 36, nullable: true })
     backup_zoom_user_id!: string | null;
+
+    /** Optional backup Zoom group used to approve manual drafts when the primary group is exhausted. */
+    @Column({ type: 'varchar', length: 36, nullable: true })
+    backup_zoom_group_id!: string | null;
 
     @Column({ type: 'datetime' })
     created_at!: Date;

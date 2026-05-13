@@ -1,6 +1,6 @@
 <div class="drafts-page">
   <div class="panel">
-    <h2 class="panel-title">Borradores sin host (DRAFT_NO_HOST)</h2>
+    <h2 class="panel-title">Pendientes de host</h2>
 
     <div *ngIf="loading" class="status-block">Cargando…</div>
     <div *ngIf="error" class="status-block status-error">{{ error }}</div>
@@ -32,7 +32,7 @@
             <button type="button" class="btn btn-warn btn-sm"
               [disabled]="approvingId === d.id"
               (click)="approveBackup(d.id)">
-              {{ approvingId === d.id ? 'Aprobando…' : 'Aprobar con backup' }}
+              {{ approvingId === d.id ? 'Aprobando…' : 'Aprobar con grupo backup' }}
             </button>
           </td>
         </tr>

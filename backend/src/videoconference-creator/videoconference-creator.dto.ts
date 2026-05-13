@@ -1,4 +1,5 @@
-import { IsDateString, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsDateString, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { ManualVideoconferenceTypeValues } from '../entities/videoconference-creator.entities';
 
 // ── Create Meeting ────────────────────────────────────────────────────────────
@@ -50,6 +51,11 @@ export class CreateManualVideoconferenceDto {
     @IsOptional()
     @IsString()
     recurrence_weekly_days?: string;
+
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean()
+    request_approval_if_no_host?: boolean;
 }
 
 // ── Approve Backup ────────────────────────────────────────────────────────────

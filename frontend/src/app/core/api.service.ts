@@ -553,11 +553,11 @@ export class ApiService {
     return this.http.get<any[]>(`${this.baseUrl}/settings/zoom/groups`);
   }
 
-  createZoomGroup(payload: { name: string; code?: string; is_active?: boolean }) {
+  createZoomGroup(payload: { name: string; code?: string; is_active?: boolean; backup_zoom_group_id?: string | null }) {
     return this.http.post<any>(`${this.baseUrl}/settings/zoom/groups`, payload);
   }
 
-  updateZoomGroup(id: string, payload: { name?: string; code?: string; is_active?: boolean }) {
+  updateZoomGroup(id: string, payload: { name?: string; code?: string; is_active?: boolean; backup_zoom_group_id?: string | null }) {
     return this.http.patch<any>(`${this.baseUrl}/settings/zoom/groups/${encodeURIComponent(id)}`, payload);
   }
 

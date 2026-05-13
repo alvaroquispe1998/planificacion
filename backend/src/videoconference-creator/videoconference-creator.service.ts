@@ -222,8 +222,15 @@ export class VideoconferenceCreatorService {
         const now = new Date();
         const mvId = newId();
 
-        // 4a. If no host available → save as DRAFT_NO_HOST
+        // 4a. If no host is available, ask the frontend to confirm whether this should become an approval request.
         if (!availableHostEmail) {
+            if (!dto.request_approval_if_no_host) {
+                throw new BadRequestException({
+                    code: 'NO_HOST_AVAILABLE',
+                    message:
+                        'No fue posible crear la reunión porque no hay usuarios Zoom disponibles en el grupo seleccionado para ese horario.',
+                });
+            }
             const entity = this.mvRepo.create({
                 id: mvId,
                 created_by_user_id: userId,
@@ -344,12 +351,20 @@ export class VideoconferenceCreatorService {
         const group = await this.zoomGroupRepo.findOne({ where: { id: mv.zoom_group_id } });
         if (!group) throw new NotFoundException('Grupo Zoom no encontrado.');
 
-        const backupZoomUserId = dto.override_backup_zoom_user_id ?? group.backup_zoom_user_id;
-        if (!backupZoomUserId) {
-            throw new BadRequestException('No hay backup configurado para este grupo Zoom.');
+        const maxConcurrent = await this.getMaxConcurrentMeetings();
+        const backupHost = dto.override_backup_zoom_user_id
+            ? await this.getBackupHostFromUser(dto.override_backup_zoom_user_id)
+            : group.backup_zoom_group_id
+                ? await this.findAvailableHostInGroup(group.backup_zoom_group_id, mv.start_time, mv.end_time, maxConcurrent)
+                : null;
+        if (!backupHost) {
+            const reason = group.backup_zoom_group_id
+                ? 'No hay host disponible en el grupo backup configurado.'
+                : 'No hay grupo backup configurado para este grupo Zoom.';
+            throw new BadRequestException(reason);
         }
 
-        const backupUser = await this.zoomUserRepo.findOne({ where: { id: backupZoomUserId } });
+        const backupUser = backupHost.user;
         if (!backupUser) throw new NotFoundException('Usuario Zoom backup no encontrado.');
 
         const payload = this.buildZoomPayload(
@@ -370,8 +385,8 @@ export class VideoconferenceCreatorService {
         const now = new Date();
 
         mv.status = result.ok ? 'APPROVED_WITH_BACKUP' : 'ERROR';
-        mv.assigned_zoom_user_id = backupZoomUserId;
-        mv.backup_zoom_user_id = backupZoomUserId;
+        mv.assigned_zoom_user_id = backupUser.id;
+        mv.backup_zoom_user_id = backupUser.id;
         mv.zoom_meeting_id = result.ok ? result.meetingId : mv.zoom_meeting_id;
         mv.join_url = result.ok ? result.joinUrl : mv.join_url;
         mv.start_url = result.ok ? result.startUrl : mv.start_url;
@@ -454,17 +469,19 @@ export class VideoconferenceCreatorService {
         const backupHostIds = [...new Set(meetings.map((m) => m.backup_zoom_user_id).filter(Boolean))] as string[];
         const zoomUserIds = [...new Set([...assignedHostIds, ...backupHostIds])];
 
-        const [creators, zoomUsers] = await Promise.all([
+        const [creators, zoomUsers, zoomGroups] = await Promise.all([
             creatorIds.length
                 ? this.authUserRepo.find({ where: { id: In(creatorIds) }, select: ['id', 'display_name', 'username'] })
                 : Promise.resolve([]),
             zoomUserIds.length
                 ? this.zoomUserRepo.find({ where: { id: In(zoomUserIds) } })
                 : Promise.resolve([]),
+            this.zoomGroupRepo.find(),
         ]);
 
         const creatorMap = new Map(creators.map((u) => [u.id, u.display_name || u.username]));
         const zoomUserMap = new Map(zoomUsers.map((u) => [u.id, u.name || u.email]));
+        const zoomGroupMap = new Map(zoomGroups.map((group) => [group.id, group]));
 
         const now = new Date();
         return meetings.map((m) => {
@@ -478,9 +495,12 @@ export class VideoconferenceCreatorService {
                     : null,
                 backup_zoom_user_name: m.backup_zoom_user_id
                     ? (zoomUserMap.get(m.backup_zoom_user_id) ?? null)
-                : null,
+                    : null,
+                zoom_group_name: zoomGroupMap.get(m.zoom_group_id)?.name ?? null,
+                backup_zoom_group_id: zoomGroupMap.get(m.zoom_group_id)?.backup_zoom_group_id ?? null,
+                backup_zoom_group_name: zoomGroupMap.get(zoomGroupMap.get(m.zoom_group_id)?.backup_zoom_group_id ?? '')?.name ?? null,
                 is_in_progress: isInProgress,
-                can_cancel: m.status !== 'CANCELLED' && !isInProgress && !isFinished && m.start_time > now,
+                can_cancel: m.status !== 'CANCELLED' && !isInProgress && !isFinished && (m.status === 'DRAFT_NO_HOST' || m.start_time > now),
             };
         });
     }
@@ -539,6 +559,36 @@ export class VideoconferenceCreatorService {
             ? new Date(recurrence['end_date_time'])
             : null;
         return Boolean(endDateTime && now > endDateTime);
+    }
+
+    private async findAvailableHostInGroup(
+        groupId: string,
+        start: Date,
+        end: Date,
+        maxConcurrent: number,
+    ): Promise<{ user: ZoomUserEntity; groupUser: ZoomGroupUserEntity } | null> {
+        const group = await this.zoomGroupRepo.findOne({ where: { id: groupId, is_active: true } });
+        if (!group) {
+            return null;
+        }
+        const groupUsers = await this.zoomGroupUserRepo.find({
+            where: { group_id: group.id, is_active: true },
+            order: { sort_order: 'ASC' },
+        });
+        for (const groupUser of groupUsers) {
+            const zoomUser = await this.zoomUserRepo.findOne({ where: { id: groupUser.zoom_user_id } });
+            if (!zoomUser) continue;
+            const hasCapacity = await this.hasHostCapacity(zoomUser.id, start, end, maxConcurrent, null);
+            if (hasCapacity) {
+                return { user: zoomUser, groupUser };
+            }
+        }
+        return null;
+    }
+
+    private async getBackupHostFromUser(zoomUserId: string): Promise<{ user: ZoomUserEntity; groupUser: ZoomGroupUserEntity | null } | null> {
+        const zoomUser = await this.zoomUserRepo.findOne({ where: { id: zoomUserId } });
+        return zoomUser ? { user: zoomUser, groupUser: null } : null;
     }
 
     private async hasHostCapacity(

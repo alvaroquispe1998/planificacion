@@ -24,6 +24,9 @@ export interface ManualMeeting {
     created_by_user_id: string;
     creator_display_name: string | null;
     zoom_group_id: string;
+    zoom_group_name?: string | null;
+    backup_zoom_group_id?: string | null;
+    backup_zoom_group_name?: string | null;
     assigned_zoom_user_id: string | null;
     assigned_zoom_user_name: string | null;
     backup_zoom_user_id: string | null;
@@ -69,6 +72,7 @@ export interface CreateMeetingDto {
     duration_minutes: number;
     recurrence_end_date?: string;
     recurrence_weekly_days?: string;
+    request_approval_if_no_host?: boolean;
 }
 
 export interface MeetingInstance {
