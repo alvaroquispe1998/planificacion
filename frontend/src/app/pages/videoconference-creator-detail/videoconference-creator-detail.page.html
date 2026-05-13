@@ -85,17 +85,23 @@
         </div>
       </div>
 
-      <div class="info-card info-card--zoom" *ngIf="meeting.zoom_meeting_id; else emptyCell1">
-        <p class="info-label">Zoom Meeting ID</p>
-        <p class="info-value mono">{{ meeting.zoom_meeting_id }}</p>
-      </div>
-      <ng-template #emptyCell1><div class="info-card info-card--empty"></div></ng-template>
-
-      <div class="info-card" *ngIf="meeting.assigned_zoom_user_name">
-        <p class="info-label">Host Zoom asignado</p>
-        <div class="host-row">
-          <span class="host-icon">👤</span>
-          <span class="info-value">{{ meeting.assigned_zoom_user_name }}</span>
+      <div class="info-card info-card--zoom-col" *ngIf="meeting.zoom_meeting_id || meeting.assigned_zoom_user_name">
+        <div>
+          <p class="info-label">Zoom Meeting ID</p>
+          <p class="zoom-meeting-id">{{ meeting.zoom_meeting_id || '—' }}</p>
+        </div>
+        <div *ngIf="meeting.assigned_zoom_user_name">
+          <p class="info-label">Host asignado</p>
+          <div class="host-row">
+            <span class="host-icon">👤</span>
+            <span class="zoom-host-name">{{ meeting.assigned_zoom_user_name }}</span>
+          </div>
+        </div>
+        <div class="zoom-status-row" *ngIf="canSync">
+          <button type="button" class="btn-zoom-check" (click)="checkZoomStatus()" [disabled]="checkingZoom">
+            {{ checkingZoom ? 'Verificando...' : '⬤ Estado en Zoom' }}
+          </button>
+          <span *ngIf="zoomStatus" class="zoom-live-chip" [ngClass]="zoomStatusClass()">{{ zoomStatusLabel() }}</span>
         </div>
       </div>
 

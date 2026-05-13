@@ -12,6 +12,11 @@ type ZoomConfigForm = {
   maxConcurrent: number;
   pageSize: number;
   timezone: string;
+  ms_tenant_id: string;
+  ms_client_id: string;
+  ms_client_secret: string;
+  mail_ti_recipient: string;
+  system_public_url: string;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -37,6 +42,7 @@ export class VideoconferenceZoomConfigPageComponent implements OnInit {
   message = '';
   error = '';
   showSecret = false;
+  showGraphSecret = false;
   lastTest: ZoomConfigTestResult | null = null;
   form: ZoomConfigForm = this.createEmptyForm();
 
@@ -194,6 +200,11 @@ export class VideoconferenceZoomConfigPageComponent implements OnInit {
       maxConcurrent: Math.max(1, Number(form.maxConcurrent || 1)),
       pageSize: Math.max(1, Number(form.pageSize || 20)),
       timezone: form.timezone.trim(),
+      ms_tenant_id: form.ms_tenant_id.trim() || undefined,
+      ms_client_id: form.ms_client_id.trim() || undefined,
+      ms_client_secret: form.ms_client_secret.trim() || undefined,
+      mail_ti_recipient: form.mail_ti_recipient.trim() || undefined,
+      system_public_url: form.system_public_url.trim() || undefined,
     };
   }
 
@@ -206,6 +217,11 @@ export class VideoconferenceZoomConfigPageComponent implements OnInit {
       maxConcurrent: Math.max(1, Number(value?.maxConcurrent ?? 2)),
       pageSize: Math.max(1, Number(value?.pageSize ?? 20)),
       timezone: `${value?.timezone ?? 'America/Lima'}`,
+      ms_tenant_id: `${value?.ms_tenant_id ?? ''}`,
+      ms_client_id: `${value?.ms_client_id ?? ''}`,
+      ms_client_secret: `${value?.ms_client_secret ?? ''}`,
+      mail_ti_recipient: `${value?.mail_ti_recipient ?? ''}`,
+      system_public_url: `${value?.system_public_url ?? ''}`,
       created_at: value?.created_at ?? null,
       updated_at: value?.updated_at ?? null,
     };
@@ -220,6 +236,11 @@ export class VideoconferenceZoomConfigPageComponent implements OnInit {
       maxConcurrent: 2,
       pageSize: 20,
       timezone: 'America/Lima',
+      ms_tenant_id: '',
+      ms_client_id: '',
+      ms_client_secret: '',
+      mail_ti_recipient: '',
+      system_public_url: '',
       created_at: null,
       updated_at: null,
     };

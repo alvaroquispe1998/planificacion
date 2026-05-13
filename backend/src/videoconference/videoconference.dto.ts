@@ -318,6 +318,26 @@ export class UpdateZoomConfigDto {
     @IsOptional()
     @IsString()
     timezone?: string;
+
+    @IsOptional()
+    @IsString()
+    ms_tenant_id?: string;
+
+    @IsOptional()
+    @IsString()
+    ms_client_id?: string;
+
+    @IsOptional()
+    @IsString()
+    ms_client_secret?: string;
+
+    @IsOptional()
+    @IsString()
+    mail_ti_recipient?: string;
+
+    @IsOptional()
+    @IsString()
+    system_public_url?: string;
 }
 
 export class UpdateZoomPoolItemDto {

@@ -134,6 +134,11 @@ export class ZoomAccountService {
             maxConcurrent: 2,
             pageSize: 20,
             timezone: 'America/Lima',
+            ms_tenant_id: null,
+            ms_client_id: null,
+            ms_client_secret: null,
+            mail_ti_recipient: null,
+            system_public_url: null,
             created_at: null,
             updated_at: null,
         };
@@ -153,6 +158,11 @@ export class ZoomAccountService {
                 maxConcurrent: dto.maxConcurrent ?? current.maxConcurrent,
                 pageSize: dto.pageSize ?? current.pageSize,
                 timezone: dto.timezone !== undefined ? dto.timezone.trim() : current.timezone,
+                ms_tenant_id: dto.ms_tenant_id !== undefined ? (dto.ms_tenant_id.trim() || null) : current.ms_tenant_id,
+                ms_client_id: dto.ms_client_id !== undefined ? (dto.ms_client_id.trim() || null) : current.ms_client_id,
+                ms_client_secret: dto.ms_client_secret !== undefined ? (dto.ms_client_secret.trim() || null) : current.ms_client_secret,
+                mail_ti_recipient: dto.mail_ti_recipient !== undefined ? (dto.mail_ti_recipient.trim() || null) : current.mail_ti_recipient,
+                system_public_url: dto.system_public_url !== undefined ? (dto.system_public_url.trim().replace(/\/$/, '') || null) : current.system_public_url,
                 updated_at: now,
             })
             : this.zoomConfigRepo.create({
@@ -163,6 +173,11 @@ export class ZoomAccountService {
                 maxConcurrent: dto.maxConcurrent ?? 2,
                 pageSize: dto.pageSize ?? 20,
                 timezone: dto.timezone?.trim() ?? 'America/Lima',
+                ms_tenant_id: dto.ms_tenant_id?.trim() || null,
+                ms_client_id: dto.ms_client_id?.trim() || null,
+                ms_client_secret: dto.ms_client_secret?.trim() || null,
+                mail_ti_recipient: dto.mail_ti_recipient?.trim() || null,
+                system_public_url: dto.system_public_url?.trim().replace(/\/$/, '') || null,
                 created_at: now,
                 updated_at: now,
             });

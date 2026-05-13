@@ -596,6 +596,11 @@ export class ApiService {
     maxConcurrent?: number;
     pageSize?: number;
     timezone?: string;
+    ms_tenant_id?: string;
+    ms_client_id?: string;
+    ms_client_secret?: string;
+    mail_ti_recipient?: string;
+    system_public_url?: string;
   }) {
     return this.http.put<any>(`${this.baseUrl}/settings/zoom/config`, payload);
   }

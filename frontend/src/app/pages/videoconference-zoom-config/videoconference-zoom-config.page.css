@@ -152,6 +152,17 @@ h1 {
   gap: 1rem;
 }
 
+.workspace-grid--single {
+  grid-template-columns: 1fr;
+  margin-top: 0;
+}
+
+.field-hint {
+  color: #6b8097;
+  font-size: 0.75rem;
+  margin-top: -0.2rem;
+}
+
 .panel {
   padding: 1.2rem 1.25rem;
 }
