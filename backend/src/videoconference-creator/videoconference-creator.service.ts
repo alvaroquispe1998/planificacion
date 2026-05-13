@@ -131,15 +131,14 @@ export class VideoconferenceCreatorService {
             })
             : [];
 
-        // Only return MP4 recordings (the ones users can actually watch)
+        // Return all AVAILABLE recordings so the creator can watch/download any type
         const recordings = instances.length > 0
             ? await this.recordingRepo.find({
                 where: {
                     meeting_instance_id: In(instances.map((i) => i.id)),
-                    recording_type: 'MP4',
                     status: 'AVAILABLE',
                 },
-                order: { start_time: 'ASC' },
+                order: { start_time: 'ASC', recording_type: 'ASC' },
             })
             : [];
 
@@ -308,35 +307,97 @@ export class VideoconferenceCreatorService {
         const zoomInstances = await this.zoomService.listPastMeetingInstances(mv.zoom_meeting_id);
         const now = new Date();
         let synced = 0;
+        let syncedParticipants = 0;
+        let syncedRecordings = 0;
 
         for (const inst of zoomInstances) {
             const existing = await this.instanceRepo.findOne({
                 where: { zoom_meeting_id: mv.zoom_meeting_id, zoom_meeting_uuid: inst.uuid },
             });
-            if (existing) continue;
 
-            const instanceEntity = this.instanceRepo.create({
-                id: newId(),
-                video_conference_id: null,
-                planning_subsection_videoconference_id: null,
-                manual_videoconference_id: id,
-                zoom_meeting_id: mv.zoom_meeting_id,
-                zoom_meeting_uuid: inst.uuid,
-                scheduled_start: mv.start_time,
-                scheduled_end: mv.end_time,
-                actual_start: inst.start_time ? new Date(inst.start_time) : null,
-                actual_end: null,
-                duration_minutes: inst.duration_minutes,
-                status: 'ENDED',
-                raw_json: inst.raw,
-                created_at: now,
-                updated_at: now,
-            });
-            await this.instanceRepo.save(instanceEntity);
-            synced++;
+            let instanceId: string;
+            if (existing) {
+                instanceId = existing.id;
+            } else {
+                const instanceEntity = this.instanceRepo.create({
+                    id: newId(),
+                    video_conference_id: null,
+                    planning_subsection_videoconference_id: null,
+                    manual_videoconference_id: id,
+                    zoom_meeting_id: mv.zoom_meeting_id,
+                    zoom_meeting_uuid: inst.uuid,
+                    scheduled_start: mv.start_time,
+                    scheduled_end: mv.end_time,
+                    actual_start: inst.start_time ? new Date(inst.start_time) : null,
+                    actual_end: null,
+                    duration_minutes: inst.duration_minutes,
+                    status: 'ENDED',
+                    raw_json: inst.raw,
+                    created_at: now,
+                    updated_at: now,
+                });
+                await this.instanceRepo.save(instanceEntity);
+                instanceId = instanceEntity.id;
+                synced++;
+            }
+
+            // Sync participants for this instance (skip if already present)
+            const existingParticipants = await this.participantRepo.count({ where: { meeting_instance_id: instanceId } });
+            if (existingParticipants === 0) {
+                try {
+                    const participants = await this.zoomService.listPastMeetingParticipants(inst.uuid);
+                    for (const p of participants) {
+                        const roleMap: Record<string, string> = { HOST: 'HOST', CO_HOST: 'CO_HOST', PANELIST: 'PANELIST', ATTENDEE: 'ATTENDEE' };
+                        const mappedRole = (p.role && roleMap[p.role]) ? roleMap[p.role] as 'HOST' | 'CO_HOST' | 'PANELIST' | 'ATTENDEE' | 'UNKNOWN' : 'UNKNOWN';
+                        await this.participantRepo.save(this.participantRepo.create({
+                            id: newId(),
+                            meeting_instance_id: instanceId,
+                            zoom_participant_id: p.zoom_participant_id,
+                            zoom_user_id: p.zoom_user_id,
+                            display_name: p.display_name || '—',
+                            email: p.email,
+                            role: mappedRole,
+                            teacher_id: null,
+                            created_at: now,
+                        }));
+                        syncedParticipants++;
+                    }
+                } catch { /* ignore per-instance participant errors */ }
+            }
+
+            // Sync recordings for this instance (skip if already present)
+            const existingRecordings = await this.recordingRepo.count({ where: { meeting_instance_id: instanceId } });
+            if (existingRecordings === 0) {
+                try {
+                    const recordings = await this.zoomService.listMeetingRecordings(inst.uuid);
+                    const validTypes = ['MP4', 'M4A', 'CHAT', 'TRANSCRIPT', 'VTT', 'OTHER'] as const;
+                    for (const r of recordings) {
+                        const recType = (r.recording_type && validTypes.includes(r.recording_type as any))
+                            ? r.recording_type as typeof validTypes[number]
+                            : 'OTHER';
+                        const recStatus = r.status === 'AVAILABLE' ? 'AVAILABLE' : 'ERROR';
+                        await this.recordingRepo.save(this.recordingRepo.create({
+                            id: newId(),
+                            meeting_instance_id: instanceId,
+                            zoom_recording_id: r.zoom_recording_id,
+                            recording_type: recType,
+                            file_extension: r.file_extension,
+                            file_size_bytes: r.file_size_bytes,
+                            download_url: r.download_url,
+                            play_url: r.play_url,
+                            start_time: r.start_time ? new Date(r.start_time) : null,
+                            end_time: r.end_time ? new Date(r.end_time) : null,
+                            status: recStatus,
+                            raw_json: r.raw,
+                            created_at: now,
+                        }));
+                        syncedRecordings++;
+                    }
+                } catch { /* ignore per-instance recording errors */ }
+            }
         }
 
-        return { synced_instances: synced };
+        return { synced_instances: synced, synced_participants: syncedParticipants, synced_recordings: syncedRecordings };
     }
 
     // ── Approve draft with backup ──────────────────────────────────────────────

@@ -244,11 +244,11 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
             const errorBody = err?.error;
             if (errorBody?.code === 'NO_HOST_AVAILABLE') {
                 const confirmed = await this.dialog.confirm({
-                    title: 'Sin host disponible',
+                    title: 'Sin hosts disponibles',
                     message:
-                        'No fue posible crear la reunión porque no hay usuarios Zoom disponibles en el grupo seleccionado para ese horario. Puedes enviar una solicitud para que un administrador la revise y la apruebe usando un grupo backup. ¿Deseas enviar esta solicitud para aprobación?',
+                        'No hay usuarios Zoom disponibles en el horario seleccionado.\n¿Deseas enviar una solicitud de aprobación para usar un host de respaldo?',
                     confirmLabel: 'Enviar solicitud',
-                    cancelLabel: 'No enviar',
+                    cancelLabel: 'Cancelar',
                 });
                 if (confirmed) {
                     await this.submitApprovalRequest();

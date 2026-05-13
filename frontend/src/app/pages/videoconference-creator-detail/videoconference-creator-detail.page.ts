@@ -25,6 +25,7 @@ import { DialogService } from '../../core/dialog.service';
 export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDestroy {
     loading = true;
     syncing = false;
+    syncMsg = '';
     approving = false;
     cancelling = false;
     error = '';
@@ -161,9 +162,17 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     sync(): void {
         if (!this.meeting) return;
         this.syncing = true;
+        this.syncMsg = '';
         this.api.syncMeeting(this.meeting.id).subscribe({
-            next: () => {
+            next: (result) => {
                 this.syncing = false;
+                const parts: string[] = [];
+                if (result.synced_instances > 0) parts.push(`${result.synced_instances} sesión(es)`);
+                if (result.synced_participants > 0) parts.push(`${result.synced_participants} participante(s)`);
+                if (result.synced_recordings > 0) parts.push(`${result.synced_recordings} grabación(es)`);
+                this.syncMsg = parts.length > 0
+                    ? `Sincronizado: ${parts.join(', ')}.`
+                    : 'Ya está al día. No hay datos nuevos en Zoom.';
                 this.load(this.meeting!.id);
             },
             error: () => {
@@ -362,6 +371,30 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         if (typeof recurrenceEndRaw !== 'string') return false;
         const recurrenceEnd = new Date(recurrenceEndRaw);
         return !Number.isNaN(recurrenceEnd.getTime()) && now > recurrenceEnd;
+    }
+
+    recordingTypeLabel(type: string): string {
+        const map: Record<string, string> = {
+            MP4: 'Video',
+            M4A: 'Audio',
+            VTT: 'Subtitulos',
+            TRANSCRIPT: 'Transcripcion',
+            CHAT: 'Chat',
+            OTHER: 'Otro',
+        };
+        return map[type] ?? type;
+    }
+
+    recordingIcon(type: string): string {
+        const map: Record<string, string> = {
+            MP4: '🎥',
+            M4A: '🔊',
+            VTT: '📝',
+            TRANSCRIPT: '📝',
+            CHAT: '💬',
+            OTHER: '📄',
+        };
+        return map[type] ?? '📄';
     }
 
     private formatDateTime(value: string | Date): string {

@@ -80,6 +80,15 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
 
   private initialFingerprint = '[]';
 
+  showGroupModal = false;
+  groupModalMode: 'create' | 'edit' = 'create';
+  groupModalName = '';
+  groupModalCode = '';
+  groupModalError = '';
+  groupModalSaving = false;
+  /** undefined = not changed; null = cleared; string = new backup group id */
+  pendingBackupGroupId: string | null | undefined = undefined;
+
   constructor(
     private readonly api: ApiService,
     private readonly cdr: ChangeDetectorRef,
@@ -141,7 +150,8 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
   }
 
   get isDirty() {
-    return this.snapshotFingerprint(this.poolItems) !== this.initialFingerprint;
+    return this.snapshotFingerprint(this.poolItems) !== this.initialFingerprint
+      || this.pendingBackupGroupId !== undefined;
   }
 
   loadPage() {
@@ -200,63 +210,12 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
     });
   }
 
-  async createGroup() {
-    const name = window.prompt('Nombre del grupo Zoom');
-    if (!name?.trim()) {
-      return;
-    }
-    const code = window.prompt('Codigo del grupo (opcional)');
-    this.managingGroups = true;
-    this.error = '';
-    this.message = '';
-    this.api.createZoomGroup({
-      name: name.trim(),
-      code: code?.trim() || undefined,
-      is_active: true,
-      backup_zoom_group_id: null,
-    }).subscribe({
-      next: (created) => {
-        this.managingGroups = false;
-        this.selectedGroupId = created?.id || this.selectedGroupId;
-        this.message = 'Grupo Zoom creado.';
-        this.loadPage();
-      },
-      error: (err) => {
-        this.managingGroups = false;
-        this.error = err?.error?.message ?? 'No se pudo crear el grupo Zoom.';
-        this.cdr.detectChanges();
-      },
-    });
+  createGroup(): void {
+    this.openCreateGroupModal();
   }
 
-  async editSelectedGroup() {
-    if (!this.selectedGroup) {
-      return;
-    }
-    const current = this.selectedGroup;
-    const nextName = window.prompt('Nombre del grupo Zoom', current.name || '');
-    if (!nextName?.trim()) {
-      return;
-    }
-    const nextCode = window.prompt('Codigo del grupo', current.code || '') ?? current.code;
-    this.managingGroups = true;
-    this.error = '';
-    this.message = '';
-    this.api.updateZoomGroup(current.id, {
-      name: nextName.trim(),
-      code: nextCode.trim(),
-    }).subscribe({
-      next: () => {
-        this.managingGroups = false;
-        this.message = 'Grupo Zoom actualizado.';
-        this.loadPage();
-      },
-      error: (err) => {
-        this.managingGroups = false;
-        this.error = err?.error?.message ?? 'No se pudo actualizar el grupo Zoom.';
-        this.cdr.detectChanges();
-      },
-    });
+  editSelectedGroup(): void {
+    this.openEditGroupModal();
   }
 
   async toggleSelectedGroupActive() {
@@ -284,23 +243,92 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
   }
 
   setSelectedBackupGroup(value: string) {
-    if (!this.selectedGroup || this.managingGroups || this.loading || this.saving) {
+    if (!this.selectedGroup) {
       return;
     }
-    this.managingGroups = true;
-    this.error = '';
-    this.message = '';
-    this.api.updateZoomGroup(this.selectedGroup.id, {
-      backup_zoom_group_id: value || null,
+    const newBackupId = value || null;
+    this.pendingBackupGroupId = newBackupId;
+    this.groups = this.groups.map((g) =>
+      g.id === this.selectedGroupId ? { ...g, backup_zoom_group_id: newBackupId } : g,
+    );
+    this.cdr.detectChanges();
+  }
+
+  openCreateGroupModal(): void {
+    this.groupModalMode = 'create';
+    this.groupModalName = '';
+    this.groupModalCode = '';
+    this.groupModalError = '';
+    this.showGroupModal = true;
+  }
+
+  openEditGroupModal(): void {
+    if (!this.selectedGroup) return;
+    this.groupModalMode = 'edit';
+    this.groupModalName = this.selectedGroup.name;
+    this.groupModalCode = this.selectedGroup.code;
+    this.groupModalError = '';
+    this.showGroupModal = true;
+  }
+
+  closeGroupModal(): void {
+    this.showGroupModal = false;
+    this.groupModalError = '';
+  }
+
+  submitGroupModal(): void {
+    const name = this.groupModalName.trim();
+    if (!name) {
+      this.groupModalError = 'El nombre es requerido.';
+      return;
+    }
+    const code = this.groupModalCode.trim() || undefined;
+    if (this.groupModalMode === 'create') {
+      this.doCreateGroup(name, code);
+    } else {
+      this.doEditGroup(name, code ?? '');
+    }
+  }
+
+  private doCreateGroup(name: string, code?: string): void {
+    this.groupModalSaving = true;
+    this.groupModalError = '';
+    this.api.createZoomGroup({
+      name,
+      code,
+      is_active: true,
+      backup_zoom_group_id: null,
     }).subscribe({
-      next: () => {
-        this.managingGroups = false;
-        this.message = value ? 'Grupo backup actualizado.' : 'Grupo backup quitado.';
+      next: (created) => {
+        this.groupModalSaving = false;
+        this.showGroupModal = false;
+        this.selectedGroupId = created?.id || this.selectedGroupId;
+        this.message = 'Grupo Zoom creado.';
         this.loadPage();
       },
       error: (err) => {
-        this.managingGroups = false;
-        this.error = err?.error?.message ?? 'No se pudo actualizar el grupo backup.';
+        this.groupModalSaving = false;
+        this.groupModalError = err?.error?.message ?? 'No se pudo crear el grupo Zoom.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  private doEditGroup(name: string, code: string): void {
+    if (!this.selectedGroup) return;
+    const groupId = this.selectedGroup.id;
+    this.groupModalSaving = true;
+    this.groupModalError = '';
+    this.api.updateZoomGroup(groupId, { name, code }).subscribe({
+      next: () => {
+        this.groupModalSaving = false;
+        this.showGroupModal = false;
+        this.message = 'Grupo Zoom actualizado.';
+        this.loadPage();
+      },
+      error: (err) => {
+        this.groupModalSaving = false;
+        this.groupModalError = err?.error?.message ?? 'No se pudo actualizar el grupo Zoom.';
         this.cdr.detectChanges();
       },
     });
@@ -441,11 +469,13 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
       }
     }
 
+    const pendingBackup = this.pendingBackupGroupId;
+    const groupId = this.selectedGroupId;
     this.saving = true;
     this.error = '';
     this.message = '';
     this.api
-      .updateZoomGroupPool(this.selectedGroupId, {
+      .updateZoomGroupPool(groupId, {
         items: this.poolItems.map((item, index) => ({
           zoom_user_id: item.zoom_user_id,
           sort_order: index + 1,
@@ -455,9 +485,25 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
       .subscribe({
         next: (response) => {
           this.applyResponse(response);
-          this.message = 'Pool de usuarios Zoom actualizado.';
-          this.saving = false;
-          this.cdr.detectChanges();
+          if (pendingBackup !== undefined) {
+            this.api.updateZoomGroup(groupId, { backup_zoom_group_id: pendingBackup }).subscribe({
+              next: () => {
+                this.pendingBackupGroupId = undefined;
+                this.message = 'Cambios guardados.';
+                this.saving = false;
+                this.cdr.detectChanges();
+              },
+              error: (err) => {
+                this.error = err?.error?.message ?? 'Pool guardado, pero no se pudo actualizar el grupo backup.';
+                this.saving = false;
+                this.cdr.detectChanges();
+              },
+            });
+          } else {
+            this.message = 'Pool de usuarios Zoom actualizado.';
+            this.saving = false;
+            this.cdr.detectChanges();
+          }
         },
         error: (err) => {
           this.error = err?.error?.message ?? 'No se pudo guardar el pool de usuarios Zoom.';
@@ -542,6 +588,7 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
     this.licenseSyncOk = response?.license_sync_ok !== false;
     this.licenseSyncError = response?.license_sync_error ?? '';
     this.initialFingerprint = this.snapshotFingerprint(this.poolItems);
+    this.pendingBackupGroupId = undefined;
   }
 
   licenseBadgeClass(item: { license_status: 'LICENSED' | 'BASIC' | 'ON_PREM' | 'UNKNOWN' }) {

@@ -79,6 +79,7 @@
                 <span>{{ m.duration_minutes }} min</span>
                 <span *ngIf="m.zoom_meeting_id" class="meeting-meta-id">ID: {{ m.zoom_meeting_id }}</span>
                 <span *ngIf="m.creator_display_name" class="meeting-creator">{{ m.creator_display_name }}</span>
+                <span *ngIf="m.assigned_zoom_user_name" class="meeting-host">🎥 {{ m.assigned_zoom_user_name }}</span>
               </div>
               <div *ngIf="m.error_message" class="meeting-error-msg">{{ m.error_message }}</div>
             </div>

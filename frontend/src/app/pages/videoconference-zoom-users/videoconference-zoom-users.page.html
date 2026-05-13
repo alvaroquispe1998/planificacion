@@ -53,10 +53,10 @@
       </label>
 
       <div class="group-actions">
-        <button type="button" class="btn btn-secondary btn-sm" (click)="createGroup()" [disabled]="loading || saving || managingGroups">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="openCreateGroupModal()" [disabled]="loading || saving || managingGroups">
           Nuevo grupo
         </button>
-        <button type="button" class="btn btn-secondary btn-sm" (click)="editSelectedGroup()" [disabled]="loading || saving || managingGroups || !hasSelectedGroup">
+        <button type="button" class="btn btn-secondary btn-sm" (click)="openEditGroupModal()" [disabled]="loading || saving || managingGroups || !hasSelectedGroup">
           Editar
         </button>
         <button type="button" class="btn btn-secondary btn-sm" (click)="toggleSelectedGroupActive()" [disabled]="loading || saving || managingGroups || !hasSelectedGroup">
@@ -206,5 +206,39 @@
         </article>
       </div>
     </article>
+  </section>
+</div>
+
+<!-- ── Group create / edit modal ───────────────────────────── -->
+<div class="grp-modal-backdrop" *ngIf="showGroupModal" (click)="closeGroupModal()">
+  <section class="grp-modal-card" (click)="$event.stopPropagation()">
+    <div class="grp-modal-head">
+      <p class="grp-modal-kicker">{{ groupModalMode === 'create' ? 'Nuevo grupo' : 'Editar grupo' }}</p>
+      <h3 class="grp-modal-title">{{ groupModalMode === 'create' ? 'Crear grupo Zoom' : 'Editar grupo Zoom' }}</h3>
+    </div>
+
+    <div class="grp-modal-fields">
+      <label class="grp-modal-field">
+        <span class="grp-modal-label">Nombre del grupo *</span>
+        <input type="text" class="grp-modal-input" [(ngModel)]="groupModalName"
+          placeholder="Ej: Posgrado" [disabled]="groupModalSaving" />
+      </label>
+      <label class="grp-modal-field">
+        <span class="grp-modal-label">Código del grupo (opcional)</span>
+        <input type="text" class="grp-modal-input" [(ngModel)]="groupModalCode"
+          placeholder="Ej: POSGRADO" [disabled]="groupModalSaving" />
+      </label>
+      <p *ngIf="groupModalError" class="grp-modal-error">{{ groupModalError }}</p>
+    </div>
+
+    <div class="grp-modal-actions">
+      <button type="button" class="btn btn-secondary" (click)="closeGroupModal()" [disabled]="groupModalSaving">
+        Cancelar
+      </button>
+      <button type="button" class="btn btn-primary" (click)="submitGroupModal()"
+        [disabled]="groupModalSaving || !groupModalName.trim()">
+        {{ groupModalSaving ? 'Guardando...' : (groupModalMode === 'create' ? 'Crear grupo' : 'Guardar cambios') }}
+      </button>
+    </div>
   </section>
 </div>

@@ -93,7 +93,7 @@ export interface MeetingParticipant {
 export interface MeetingRecording {
     id: string;
     meeting_instance_id: string;
-    recording_type: string;
+    recording_type: 'MP4' | 'M4A' | 'CHAT' | 'TRANSCRIPT' | 'VTT' | 'OTHER';
     file_extension: string | null;
     file_size_bytes: string | null;
     download_url: string | null;
@@ -135,7 +135,7 @@ export class VideoconferenceCreatorApiService {
     }
 
     syncMeeting(id: string) {
-        return this.http.post<{ synced_instances: number }>(`${BASE}/meetings/${id}/sync`, {});
+        return this.http.post<{ synced_instances: number; synced_participants: number; synced_recordings: number }>(`${BASE}/meetings/${id}/sync`, {});
     }
 
     approveDraft(id: string, dto: ApproveDraftDto = {}) {
