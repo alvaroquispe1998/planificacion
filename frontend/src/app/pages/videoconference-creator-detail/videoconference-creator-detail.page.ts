@@ -193,27 +193,55 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         });
     }
 
-    approveBackup(): void {
+    async approveBackup(): Promise<void> {
         if (!this.meeting) return;
+        const confirmed = await this.dialog.confirm({
+            title: 'Aprobar solicitud',
+            message: `Se aprobará la solicitud "${this.meeting.topic}" usando el grupo backup disponible. Se creará la reunión en Zoom y se notificará al solicitante.`,
+            confirmLabel: 'Sí, aprobar',
+            cancelLabel: 'No, volver',
+            tone: 'success',
+        });
+        if (!confirmed) return;
+
         this.approving = true;
+        this.error = '';
+        this.cdr.markForCheck();
         this.api.approveDraft(this.meeting.id).subscribe({
             next: () => {
-                this.approving = false;
-                this.load(this.meeting!.id);
+                this.zone.run(() => {
+                    this.approving = false;
+                    this.load(this.meeting!.id);
+                });
             },
             error: (err) => {
-                this.approving = false;
-                this.error = err?.error?.message ?? 'Error al aprobar.';
+                this.zone.run(() => {
+                    this.approving = false;
+                    this.error = err?.error?.message ?? 'Error al aprobar.';
+                    this.cdr.markForCheck();
+                });
             },
         });
     }
 
-    denyMeeting(): void {
+    async denyMeeting(): Promise<void> {
         if (!this.meeting || !this.canDeny) return;
+        const reason = await this.dialog.prompt({
+            title: 'Denegar solicitud',
+            message: `Se denegará la solicitud "${this.meeting.topic}" y se notificará al solicitante. Puedes indicar un motivo para incluirlo en el correo.`,
+            inputLabel: 'Motivo',
+            inputPlaceholder: 'Ej. No hay disponibilidad de host Zoom para el horario solicitado.',
+            confirmLabel: 'Sí, denegar',
+            cancelLabel: 'No, volver',
+            tone: 'danger',
+            maxLength: 1000,
+        });
+        if (reason === null) return;
+
         this.denying = true;
         this.error = '';
         this.cdr.markForCheck();
-        this.api.denyDraft(this.meeting.id).subscribe({
+        this.api.denyDraft(this.meeting.id, { reason: reason.trim() || undefined }).subscribe({
             next: (meeting) => {
                 this.zone.run(() => {
                     this.denying = false;

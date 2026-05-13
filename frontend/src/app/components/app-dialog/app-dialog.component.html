@@ -8,6 +8,15 @@
 
       <p class="dialog-message">{{ dialog.message }}</p>
 
+      <label *ngIf="dialog.kind === 'prompt'" class="dialog-field">
+        <span>{{ dialog.inputLabel || 'Detalle' }}</span>
+        <textarea
+          [(ngModel)]="promptValue"
+          [attr.maxLength]="dialog.maxLength || null"
+          [placeholder]="dialog.inputPlaceholder || ''"
+          rows="4"></textarea>
+      </label>
+
       <div class="dialog-actions">
         <button
           *ngIf="dialog.kind === 'confirm'"
@@ -20,7 +29,7 @@
           type="button"
           class="btn"
           [ngClass]="dialog.tone === 'danger' ? 'btn-danger' : 'btn-primary'"
-          (click)="accept()">
+          (click)="accept(dialog.kind)">
           {{ dialog.confirmLabel }}
         </button>
       </div>

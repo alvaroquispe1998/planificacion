@@ -5,16 +5,20 @@ export type DialogTone = 'default' | 'danger' | 'success';
 
 export type DialogRequest = {
   id: number;
-  kind: 'alert' | 'confirm';
+  kind: 'alert' | 'confirm' | 'prompt';
   title: string;
   message: string;
   confirmLabel: string;
   cancelLabel: string;
   tone: DialogTone;
+  inputLabel?: string;
+  inputPlaceholder?: string;
+  inputValue?: string;
+  maxLength?: number;
 };
 
 type PendingDialog = DialogRequest & {
-  resolve: (value: boolean) => void;
+  resolve: (value: boolean | string | null) => void;
 };
 
 type DialogOptions = {
@@ -23,6 +27,13 @@ type DialogOptions = {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: DialogTone;
+};
+
+type DialogPromptOptions = DialogOptions & {
+  inputLabel?: string;
+  inputPlaceholder?: string;
+  inputValue?: string;
+  maxLength?: number;
 };
 
 @Injectable({ providedIn: 'root' })
@@ -65,22 +76,44 @@ export class DialogService {
       confirmLabel: options.confirmLabel,
       cancelLabel: options.cancelLabel,
       tone: options.tone,
-    });
+    }).then((value) => value === true);
   }
 
-  close(accepted: boolean) {
+  prompt(messageOrOptions: string | DialogPromptOptions) {
+    const options = this.normalizeOptions(messageOrOptions, {
+      title: 'Confirmar accion',
+      confirmLabel: 'Aceptar',
+      cancelLabel: 'Cancelar',
+      tone: 'default',
+    });
+    const promptOptions: Partial<DialogPromptOptions> = typeof messageOrOptions === 'string' ? {} : messageOrOptions;
+    return this.enqueue({
+      kind: 'prompt',
+      title: options.title,
+      message: options.message,
+      confirmLabel: options.confirmLabel,
+      cancelLabel: options.cancelLabel,
+      tone: options.tone,
+      inputLabel: promptOptions.inputLabel,
+      inputPlaceholder: promptOptions.inputPlaceholder,
+      inputValue: promptOptions.inputValue ?? '',
+      maxLength: promptOptions.maxLength,
+    }).then((value) => typeof value === 'string' ? value : null);
+  }
+
+  close(value: boolean | string | null) {
     if (!this.activeDialog) {
       return;
     }
     const current = this.activeDialog;
     this.activeDialog = null;
     this.dialogSubject.next(null);
-    current.resolve(accepted);
+    current.resolve(value);
     this.flushQueue();
   }
 
   private enqueue(request: Omit<DialogRequest, 'id'>) {
-    return new Promise<boolean>((resolve) => {
+    return new Promise<boolean | string | null>((resolve) => {
       this.queue.push({
         ...request,
         id: this.nextId++,

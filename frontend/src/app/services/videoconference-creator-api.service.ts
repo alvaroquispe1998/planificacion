@@ -116,6 +116,10 @@ export interface ApproveDraftDto {
     override_backup_zoom_user_id?: string;
 }
 
+export interface DenyDraftDto {
+    reason?: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class VideoconferenceCreatorApiService {
     constructor(private readonly http: HttpClient) { }
@@ -148,8 +152,8 @@ export class VideoconferenceCreatorApiService {
         return this.http.post<ManualMeeting>(`${BASE}/meetings/${id}/approve-backup`, dto);
     }
 
-    denyDraft(id: string) {
-        return this.http.post<ManualMeeting>(`${BASE}/meetings/${id}/deny`, {});
+    denyDraft(id: string, dto: DenyDraftDto = {}) {
+        return this.http.post<ManualMeeting>(`${BASE}/meetings/${id}/deny`, dto);
     }
 
     cancelMeeting(id: string) {
