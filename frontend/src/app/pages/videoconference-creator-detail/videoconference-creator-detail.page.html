@@ -62,6 +62,7 @@
         </button>
       </div>
     </div>
+    <div *ngIf="syncMsg" class="sync-msg">&#8505; {{ syncMsg }}</div>
 
     <!-- ── Info grid ────────────────────────────────────────────────── -->
     <div class="info-grid">
@@ -195,7 +196,7 @@
         </div>
       </div>
 
-      <!-- Grabaciones MP4 -->
+      <!-- Grabaciones -->
       <div class="panel panel--recordings" *ngIf="recordings.length > 0">
         <div class="panel-head">
           <h2 class="panel-title">Grabaciones</h2>
@@ -203,8 +204,9 @@
         </div>
         <div class="recording-list">
           <div class="recording-row" *ngFor="let rec of recordings">
-            <div class="recording-icon">🎬</div>
+            <div class="recording-icon">{{ recordingIcon(rec.recording_type) }}</div>
             <div class="recording-meta">
+              <p class="recording-type-label">{{ recordingTypeLabel(rec.recording_type) }}</p>
               <p class="recording-date">{{ rec.start_time ? (rec.start_time | date:'dd/MM/yyyy HH:mm') : 'Grabación' }}</p>
               <p class="recording-size" *ngIf="rec.file_size_bytes">{{ formatBytes(rec.file_size_bytes) }}</p>
             </div>

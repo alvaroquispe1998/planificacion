@@ -110,6 +110,7 @@ h1 {
   flex-wrap: wrap;
   gap: 0.55rem;
   justify-content: flex-start;
+  margin-bottom: 1rem; /* sync with .search-field margin-bottom so buttons align with dropdowns */
 }
 
 .stat-card,
@@ -434,4 +435,101 @@ h1 {
   .available-item {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── Group create / edit modal ─────────────────────────────────── */
+.grp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(3px);
+  z-index: 120;
+}
+
+.grp-modal-card {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 1rem;
+  padding: 1.35rem 1.35rem 1.15rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(20, 33, 61, 0.1);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+}
+
+.grp-modal-head {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.grp-modal-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #1f629f;
+}
+
+.grp-modal-title {
+  margin: 0;
+  color: #14213d;
+  font-size: 1.28rem;
+  line-height: 1.15;
+}
+
+.grp-modal-fields {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.grp-modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.grp-modal-label {
+  color: #2a4768;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.grp-modal-input {
+  border: 1px solid #cfdceb;
+  border-radius: 14px;
+  padding: 0.8rem 0.95rem;
+  background: #fff;
+  color: #24364b;
+  font: inherit;
+  font-size: 0.97rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.grp-modal-input:focus {
+  border-color: #2b84d7;
+  box-shadow: 0 0 0 3px rgba(43, 132, 215, 0.12);
+}
+
+.grp-modal-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.grp-modal-error {
+  margin: 0;
+  color: #9a3030;
+  font-size: 0.87rem;
+}
+
+.grp-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
 }

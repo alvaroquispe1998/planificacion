@@ -424,6 +424,13 @@ select.input { cursor: pointer; }
   font-weight: 500;
 }
 
+.meeting-host {
+  color: #1f629f;
+  font-weight: 500;
+  font-family: monospace;
+  font-size: 0.78rem;
+}
+
 .meeting-error-msg {
   font-size: 0.8rem;
   color: #9b1a1a;
