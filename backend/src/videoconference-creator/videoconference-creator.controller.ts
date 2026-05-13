@@ -14,6 +14,7 @@ import type { AuthenticatedRequestUser } from '../auth/auth.service';
 import {
     ApproveDraftBackupDto,
     CreateManualVideoconferenceDto,
+    DenyDraftDto,
     SetUserZoomGroupsDto,
 } from './videoconference-creator.dto';
 import { VideoconferenceCreatorService } from './videoconference-creator.service';
@@ -132,8 +133,11 @@ export class VideoconferenceCreatorController {
      */
     @Post('meetings/:id/deny')
     @RequirePermissions('action.videoconference_creator.approve_backup')
-    async denyDraft(@Param('id') id: string) {
-        return this.service.denyDraft(id);
+    async denyDraft(
+        @Param('id') id: string,
+        @Body() dto: DenyDraftDto,
+    ) {
+        return this.service.denyDraft(id, dto);
     }
 
     /**

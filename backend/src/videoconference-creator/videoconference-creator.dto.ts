@@ -70,6 +70,13 @@ export class ApproveDraftBackupDto {
     override_backup_zoom_user_id?: string;
 }
 
+export class DenyDraftDto {
+    @IsOptional()
+    @IsString()
+    @MaxLength(1000)
+    reason?: string;
+}
+
 // ── Assign User Zoom Groups (security panel) ──────────────────────────────────
 
 export class SetUserZoomGroupsDto {

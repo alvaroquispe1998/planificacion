@@ -59,6 +59,36 @@
   white-space: pre-wrap;
 }
 
+.dialog-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.dialog-field span {
+  color: #14213d;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.dialog-field textarea {
+  width: 100%;
+  min-height: 108px;
+  resize: vertical;
+  border: 1px solid rgba(11, 79, 108, 0.22);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  color: #14213d;
+  background: #f8fbff;
+  font: inherit;
+  line-height: 1.45;
+  outline: none;
+}
+
+.dialog-field textarea:focus {
+  border-color: #0b4f6c;
+  box-shadow: 0 0 0 3px rgba(11, 79, 108, 0.12);
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;

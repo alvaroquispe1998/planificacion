@@ -27,11 +27,24 @@ import { ZoomAccountService } from '../videoconference/zoom-account.service';
 import {
     ApproveDraftBackupDto,
     CreateManualVideoconferenceDto,
+    DenyDraftDto,
     SetUserZoomGroupsDto,
 } from './videoconference-creator.dto';
 
 const MEETING_MARGIN_MINUTES = 10;
 const DEFAULT_MAX_CONCURRENT_MEETINGS = 2;
+const TI_PENDING_CATEGORY = 'FALTA ATENDER';
+const TI_ATTENDED_CATEGORY = 'ATENDIDO';
+const TI_ATTENDED_FOLDER = 'ATENDIDO';
+
+function escapeHtml(value: string): string {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
 @Injectable()
 export class VideoconferenceCreatorService {
@@ -503,7 +516,7 @@ export class VideoconferenceCreatorService {
         return mv;
     }
 
-    async denyDraft(id: string): Promise<ManualVideoconferenceEntity> {
+    async denyDraft(id: string, dto: DenyDraftDto = {}): Promise<ManualVideoconferenceEntity> {
         const mv = await this.mvRepo.findOne({ where: { id } });
         if (!mv) throw new NotFoundException('Videoconferencia no encontrada.');
         if (mv.status !== 'DRAFT_NO_HOST') {
@@ -516,7 +529,7 @@ export class VideoconferenceCreatorService {
         await this.mvRepo.save(mv);
 
         // Send denial reply email (non-blocking)
-        void this.sendReplyEmail(mv, 'denied', null);
+        void this.sendReplyEmail(mv, 'denied', null, dto.reason);
 
         return mv;
     }
@@ -526,6 +539,7 @@ export class VideoconferenceCreatorService {
         mv: ManualVideoconferenceEntity,
         action: 'approved' | 'denied',
         hostEmail: string | null,
+        denialReason?: string,
     ): Promise<void> {
         try {
             const configs = await this.zoomConfigRepo.find({ order: { created_at: 'ASC' }, take: 1 });
@@ -573,10 +587,12 @@ export class VideoconferenceCreatorService {
                     action: 'denied',
                     hostEmail: '',
                     meetingUrl,
+                    denialReason,
                 });
             }
 
             let emailSent = false;
+            let originalGraphId: string | null = null;
 
             // ── Attempt 1: threaded reply via createReply in TI's mailbox ──────────
             if (mv.ti_alert_message_id) {
@@ -591,17 +607,19 @@ export class VideoconferenceCreatorService {
                     if (searchRes.ok) {
                         const searchData = await searchRes.json() as Record<string, unknown>;
                         const msgs = Array.isArray(searchData['value']) ? searchData['value'] as Record<string, unknown>[] : [];
-                        const origGraphId = typeof msgs[0]?.['id'] === 'string' ? msgs[0]['id'] as string : undefined;
-                        if (origGraphId) {
-                            // Create a draft reply (automatically FROM TI, threads correctly)
+                        originalGraphId = typeof msgs[0]?.['id'] === 'string' ? msgs[0]['id'] as string : null;
+                        if (originalGraphId) {
+                            // Create a draft reply. IMPORTANT: do NOT override `subject` —
+                            // Graph auto-prefixes "Re: " to the original subject, which is what
+                            // Outlook uses (ConversationTopic) to group emails in the same thread.
+                            // Overriding subject breaks conversation grouping in Outlook UI.
                             const replyDraftRes = await fetch(
-                                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages/${encodeURIComponent(origGraphId)}/createReply`,
+                                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages/${encodeURIComponent(originalGraphId)}/createReply`,
                                 {
                                     method: 'POST',
                                     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
                                     body: JSON.stringify({
                                         message: {
-                                            subject,
                                             body: { contentType: 'HTML', content: html },
                                             toRecipients: [{ emailAddress: { address: creatorEmail, name: creatorName } }],
                                         },
@@ -670,14 +688,115 @@ export class VideoconferenceCreatorService {
                     { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15_000) },
                 );
                 if (sendRes.ok) {
+                    emailSent = true;
                     console.log(`[VideoconferenceCreator] sendReplyEmail: ${action} reply sent from ${tiMailbox} to ${creatorEmail}`);
                 } else {
                     console.warn(`[VideoconferenceCreator] sendReplyEmail fallback send ${sendRes.status}`);
                 }
             }
+
+            if (emailSent && originalGraphId) {
+                await this.markTiAlertAsAttended(tiMailbox, originalGraphId, accessToken);
+            }
         } catch (err) {
             console.warn('[VideoconferenceCreator] sendReplyEmail error:', err);
         }
+    }
+
+    private async markTiAlertAsAttended(
+        tiMailbox: string,
+        graphMessageId: string,
+        accessToken: string,
+    ): Promise<void> {
+        try {
+            await this.updateTiAlertCategories(tiMailbox, graphMessageId, accessToken);
+
+            const attendedFolderId = await this.findTiMailboxFolderId(tiMailbox, TI_ATTENDED_FOLDER, accessToken);
+            if (!attendedFolderId) {
+                console.warn(`[VideoconferenceCreator] markTiAlertAsAttended: folder ${TI_ATTENDED_FOLDER} not found in ${tiMailbox}`);
+                return;
+            }
+
+            const moveRes = await fetch(
+                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages/${encodeURIComponent(graphMessageId)}/move`,
+                {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ destinationId: attendedFolderId }),
+                    signal: AbortSignal.timeout(15_000),
+                },
+            );
+            if (moveRes.ok) {
+                console.log(`[VideoconferenceCreator] markTiAlertAsAttended: original alert moved to ${TI_ATTENDED_FOLDER}`);
+            } else {
+                const errBody = await moveRes.text();
+                console.warn(`[VideoconferenceCreator] markTiAlertAsAttended move ${moveRes.status}: ${errBody.slice(0, 300)}`);
+            }
+        } catch (err) {
+            console.warn('[VideoconferenceCreator] markTiAlertAsAttended error:', err);
+        }
+    }
+
+    private async updateTiAlertCategories(
+        tiMailbox: string,
+        graphMessageId: string,
+        accessToken: string,
+    ): Promise<void> {
+        const messageRes = await fetch(
+            `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages/${encodeURIComponent(graphMessageId)}?$select=categories`,
+            { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15_000) },
+        );
+        if (!messageRes.ok) {
+            const errBody = await messageRes.text();
+            console.warn(`[VideoconferenceCreator] updateTiAlertCategories get ${messageRes.status}: ${errBody.slice(0, 300)}`);
+            return;
+        }
+
+        const message = await messageRes.json() as Record<string, unknown>;
+        const existingCategories = Array.isArray(message['categories'])
+            ? message['categories'].filter((category): category is string => typeof category === 'string')
+            : [];
+        const nextCategories = existingCategories.filter((category) => {
+            const normalized = category.trim().toUpperCase();
+            return normalized !== TI_PENDING_CATEGORY && normalized !== TI_ATTENDED_CATEGORY;
+        });
+        nextCategories.push(TI_ATTENDED_CATEGORY);
+
+        const patchRes = await fetch(
+            `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages/${encodeURIComponent(graphMessageId)}`,
+            {
+                method: 'PATCH',
+                headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ categories: nextCategories }),
+                signal: AbortSignal.timeout(15_000),
+            },
+        );
+        if (!patchRes.ok) {
+            const errBody = await patchRes.text();
+            console.warn(`[VideoconferenceCreator] updateTiAlertCategories patch ${patchRes.status}: ${errBody.slice(0, 300)}`);
+        }
+    }
+
+    private async findTiMailboxFolderId(
+        tiMailbox: string,
+        folderName: string,
+        accessToken: string,
+    ): Promise<string | null> {
+        const escapedFolderName = folderName.replace(/'/g, "''");
+        const folderRes = await fetch(
+            `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/mailFolders` +
+            `?$filter=displayName eq '${escapedFolderName}'&$select=id,displayName&$top=1`,
+            { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15_000) },
+        );
+        if (!folderRes.ok) {
+            const errBody = await folderRes.text();
+            console.warn(`[VideoconferenceCreator] findTiMailboxFolderId ${folderRes.status}: ${errBody.slice(0, 300)}`);
+            return null;
+        }
+
+        const folderData = await folderRes.json() as Record<string, unknown>;
+        const folders = Array.isArray(folderData['value']) ? folderData['value'] as Record<string, unknown>[] : [];
+        return typeof folders[0]?.['id'] === 'string' ? folders[0]['id'] as string : null;
     }
 
     private async getMsGraphToken(tenantId: string, clientId: string, clientSecret: string): Promise<string | null> {
@@ -709,6 +828,7 @@ export class VideoconferenceCreatorService {
         action: 'approved' | 'denied';
         hostEmail: string;
         meetingUrl: string;
+        denialReason?: string;
     }): string {
         const isApproved = p.action === 'approved';
         // Use solid background-color — Outlook desktop (Word engine) strips CSS gradients
@@ -718,6 +838,12 @@ export class VideoconferenceCreatorService {
         const bodyText = isApproved
             ? `La solicitud de videoconferencia fue <strong style="color:#1a5c36">aprobada</strong>. Se asign\u00f3 el host <strong style="color:#1a2e4a">${p.hostEmail}</strong> y la reuni\u00f3n fue creada en Zoom.`
             : `La solicitud de videoconferencia fue <strong style="color:#7a1a1a">denegada</strong>. No se crear\u00e1 la reuni\u00f3n en Zoom.`;
+        const cleanReason = `${p.denialReason ?? ''}`.trim();
+        const reasonHtml = !isApproved && cleanReason
+            ? `<div style="margin:0 0 20px;padding:13px 16px;background:#fff5f5;border:1px solid #efb4b4;border-radius:10px;color:#421313;font-size:14px;line-height:1.55">
+                 <strong style="color:#7a1a1a">Motivo:</strong> ${escapeHtml(cleanReason).replace(/\r?\n/g, '<br>')}
+               </div>`
+            : '';
         const btnHtml = p.meetingUrl
             ? `<div style="margin-top:24px;text-align:center">
                  <a href="${p.meetingUrl}" style="display:inline-block;padding:11px 24px;background:#1e3458;color:#ffffff;border-radius:9px;text-decoration:none;font-weight:700;font-size:13px">
@@ -742,6 +868,7 @@ export class VideoconferenceCreatorService {
         <tr>
           <td style="padding:28px 36px;background:#ffffff">
             <p style="margin:0 0 20px;color:#1a2e4a;font-size:14px;line-height:1.6">${bodyText}</p>
+            ${reasonHtml}
             <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #b8cfe0;border-radius:10px;overflow:hidden;font-size:14px">
               <tr style="background:#eef4fb">
                 <td style="padding:11px 16px;color:#2a4a6a;font-weight:700;width:38%;border-bottom:1px solid #b8cfe0">Reuni\u00f3n</td>
