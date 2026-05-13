@@ -385,41 +385,40 @@ export class VideoconferenceCreatorService {
                 } catch { /* ignore per-instance participant errors */ }
             }
 
-            // Sync recordings — try numeric meeting ID first (more reliable than UUID for the recordings endpoint)
-            const existingRecordings = await this.recordingRepo.count({ where: { meeting_instance_id: instanceId } });
-            if (existingRecordings === 0) {
-                try {
-                    // Prefer numeric zoom_meeting_id; fall back to UUID if needed
-                    let recordings = await this.zoomService.listMeetingRecordings(mv.zoom_meeting_id);
-                    if (recordings.length === 0) {
-                        recordings = await this.zoomService.listMeetingRecordings(inst.uuid);
-                    }
-                    const validTypes = ['MP4', 'M4A', 'CHAT', 'TRANSCRIPT', 'VTT', 'OTHER'] as const;
-                    for (const r of recordings) {
-                        const recType = (r.recording_type && validTypes.includes(r.recording_type as any))
-                            ? r.recording_type as typeof validTypes[number]
-                            : 'OTHER';
-                        const recStatus = r.status === 'AVAILABLE' ? 'AVAILABLE' : 'ERROR';
-                        await this.recordingRepo.save(this.recordingRepo.create({
-                            id: newId(),
-                            meeting_instance_id: instanceId,
-                            zoom_recording_id: r.zoom_recording_id,
-                            recording_type: recType,
-                            file_extension: r.file_extension,
-                            file_size_bytes: r.file_size_bytes,
-                            download_url: r.download_url,
-                            play_url: r.play_url,
-                            start_time: r.start_time ? new Date(r.start_time) : null,
-                            end_time: r.end_time ? new Date(r.end_time) : null,
-                            status: recStatus,
-                            raw_json: r.raw,
-                            created_at: now,
-                        }));
-                        syncedRecordings++;
-                    }
-                } catch (err) {
-                    recordingErrors.push(err instanceof Error ? err.message : 'Error desconocido al obtener grabaciones');
+            // Sync recordings — always replace (delete + re-insert) so status changes (processing→available) are picked up
+            try {
+                const recordings = await this.zoomService.listMeetingRecordings(inst.uuid);
+                const validTypes = ['MP4', 'M4A', 'CHAT', 'TRANSCRIPT', 'VTT', 'OTHER'] as const;
+                // Delete existing recordings for this instance before re-inserting
+                await this.recordingRepo.delete({ meeting_instance_id: instanceId });
+                for (const r of recordings) {
+                    const recType = (r.recording_type && validTypes.includes(r.recording_type as any))
+                        ? r.recording_type as typeof validTypes[number]
+                        : 'OTHER';
+                    // Normalize status the same way audit does: toUpperCase, default to AVAILABLE
+                    const statusNorm = `${r.status ?? ''}`.trim().toUpperCase();
+                    const recStatus = (['DELETED', 'EXPIRED', 'ERROR'] as string[]).includes(statusNorm)
+                        ? (statusNorm as 'DELETED' | 'EXPIRED' | 'ERROR')
+                        : 'AVAILABLE';
+                    await this.recordingRepo.save(this.recordingRepo.create({
+                        id: newId(),
+                        meeting_instance_id: instanceId,
+                        zoom_recording_id: r.zoom_recording_id,
+                        recording_type: recType,
+                        file_extension: r.file_extension,
+                        file_size_bytes: r.file_size_bytes,
+                        download_url: r.download_url,
+                        play_url: r.play_url,
+                        start_time: r.start_time ? new Date(r.start_time) : null,
+                        end_time: r.end_time ? new Date(r.end_time) : null,
+                        status: recStatus,
+                        raw_json: r.raw,
+                        created_at: now,
+                    }));
+                    syncedRecordings++;
                 }
+            } catch (err) {
+                recordingErrors.push(err instanceof Error ? err.message : 'Error desconocido al obtener grabaciones');
             }
         }
 
