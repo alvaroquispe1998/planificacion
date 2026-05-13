@@ -328,6 +328,7 @@ export class VideoconferenceCreatorService {
         let synced = 0;
         let syncedParticipants = 0;
         let syncedRecordings = 0;
+        const recordingErrors: string[] = [];
 
         for (const inst of zoomInstances) {
             const existing = await this.instanceRepo.findOne({
@@ -384,11 +385,15 @@ export class VideoconferenceCreatorService {
                 } catch { /* ignore per-instance participant errors */ }
             }
 
-            // Sync recordings for this instance (skip if already present)
+            // Sync recordings — try numeric meeting ID first (more reliable than UUID for the recordings endpoint)
             const existingRecordings = await this.recordingRepo.count({ where: { meeting_instance_id: instanceId } });
             if (existingRecordings === 0) {
                 try {
-                    const recordings = await this.zoomService.listMeetingRecordings(inst.uuid);
+                    // Prefer numeric zoom_meeting_id; fall back to UUID if needed
+                    let recordings = await this.zoomService.listMeetingRecordings(mv.zoom_meeting_id);
+                    if (recordings.length === 0) {
+                        recordings = await this.zoomService.listMeetingRecordings(inst.uuid);
+                    }
                     const validTypes = ['MP4', 'M4A', 'CHAT', 'TRANSCRIPT', 'VTT', 'OTHER'] as const;
                     for (const r of recordings) {
                         const recType = (r.recording_type && validTypes.includes(r.recording_type as any))
@@ -412,11 +417,18 @@ export class VideoconferenceCreatorService {
                         }));
                         syncedRecordings++;
                     }
-                } catch { /* ignore per-instance recording errors */ }
+                } catch (err) {
+                    recordingErrors.push(err instanceof Error ? err.message : 'Error desconocido al obtener grabaciones');
+                }
             }
         }
 
-        return { synced_instances: synced, synced_participants: syncedParticipants, synced_recordings: syncedRecordings };
+        return {
+            synced_instances: synced,
+            synced_participants: syncedParticipants,
+            synced_recordings: syncedRecordings,
+            recording_errors: recordingErrors,
+        };
     }
 
     // ── Approve draft with backup ──────────────────────────────────────────────
@@ -476,7 +488,225 @@ export class VideoconferenceCreatorService {
         mv.updated_at = now;
 
         await this.mvRepo.save(mv);
+
+        // Send approval reply email (non-blocking)
+        if (result.ok) {
+            void this.sendReplyEmail(mv, 'approved', backupUser.email);
+        }
+
         return mv;
+    }
+
+    async denyDraft(id: string): Promise<ManualVideoconferenceEntity> {
+        const mv = await this.mvRepo.findOne({ where: { id } });
+        if (!mv) throw new NotFoundException('Videoconferencia no encontrada.');
+        if (mv.status !== 'DRAFT_NO_HOST') {
+            throw new BadRequestException('Solo se pueden denegar videoconferencias en estado DRAFT_NO_HOST.');
+        }
+
+        const now = new Date();
+        mv.status = 'DENIED';
+        mv.updated_at = now;
+        await this.mvRepo.save(mv);
+
+        // Send denial reply email (non-blocking)
+        void this.sendReplyEmail(mv, 'denied', null);
+
+        return mv;
+    }
+
+    /** Sends a reply (approve or deny) in the same email thread as the original TI alert. */
+    private async sendReplyEmail(
+        mv: ManualVideoconferenceEntity,
+        action: 'approved' | 'denied',
+        hostEmail: string | null,
+    ): Promise<void> {
+        try {
+            const configs = await this.zoomConfigRepo.find({ order: { created_at: 'ASC' }, take: 1 });
+            const dbConfig = configs[0];
+
+            const tenantId = (dbConfig?.ms_tenant_id ?? process.env['MS_TENANT_ID'] ?? '').trim();
+            const clientId = (dbConfig?.ms_client_id ?? process.env['MS_CLIENT_ID'] ?? '').trim();
+            const clientSecret = (dbConfig?.ms_client_secret ?? process.env['MS_CLIENT_SECRET'] ?? '').trim();
+            const tiRecipient = (dbConfig?.mail_ti_recipient ?? process.env['MAIL_TI_RECIPIENT'] ?? '').trim();
+            const systemUrl = (dbConfig?.system_public_url ?? process.env['SYSTEM_PUBLIC_URL'] ?? '').trim().replace(/\/$/, '');
+
+            if (!tenantId || !clientId || !clientSecret || !tiRecipient) return;
+
+            // Get creator info for fromEmail
+            const creator = await this.authUserRepo.findOne({
+                where: { id: mv.created_by_user_id },
+                select: ['id', 'email', 'display_name', 'username'] as any,
+            });
+            const fromEmail = creator?.email?.trim();
+            if (!fromEmail) return;
+            const creatorName = (creator as any).display_name || (creator as any).username || fromEmail;
+
+            const accessToken = await this.getMsGraphToken(tenantId, clientId, clientSecret);
+            if (!accessToken) return;
+
+            const meetingUrl = systemUrl ? `${systemUrl}/videoconferences/creator/${mv.id}` : '';
+
+            let subject: string;
+            let html: string;
+
+            if (action === 'approved') {
+                subject = `[Videoconferencia] ✅ Solicitud aprobada — ${mv.topic}`;
+                html = this.buildReplyHtml({
+                    topic: mv.topic,
+                    creatorName,
+                    action: 'approved',
+                    hostEmail: hostEmail ?? '',
+                    meetingUrl,
+                });
+            } else {
+                subject = `[Videoconferencia] ❌ Solicitud denegada — ${mv.topic}`;
+                html = this.buildReplyHtml({
+                    topic: mv.topic,
+                    creatorName,
+                    action: 'denied',
+                    hostEmail: '',
+                    meetingUrl,
+                });
+            }
+
+            // Build message body with threading headers if we have the original message ID
+            const messageBody: Record<string, unknown> = {
+                subject,
+                body: { contentType: 'HTML', content: html },
+                toRecipients: [{ emailAddress: { address: tiRecipient } }],
+                from: { emailAddress: { address: fromEmail, name: creatorName } },
+            };
+
+            if (mv.ti_alert_message_id) {
+                messageBody['singleValueExtendedProperties'] = [
+                    { id: 'String 0x0070', value: mv.ti_alert_message_id },   // PR_CONVERSATION_TOPIC
+                    { id: 'String 0x1042', value: mv.ti_alert_message_id },   // In-Reply-To
+                    { id: 'String 0x1039', value: mv.ti_alert_message_id },   // References
+                ];
+            }
+
+            const createRes = await fetch(
+                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/messages`,
+                {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(messageBody),
+                    signal: AbortSignal.timeout(15_000),
+                },
+            );
+            if (!createRes.ok) {
+                console.warn(`[VideoconferenceCreator] sendReplyEmail createMessage ${createRes.status}`);
+                return;
+            }
+            const createdMsg = await createRes.json() as Record<string, unknown>;
+            const graphMsgId = createdMsg['id'] as string | undefined;
+            if (!graphMsgId) return;
+
+            const sendRes = await fetch(
+                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/messages/${encodeURIComponent(graphMsgId)}/send`,
+                {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                    signal: AbortSignal.timeout(15_000),
+                },
+            );
+            if (!sendRes.ok) {
+                console.warn(`[VideoconferenceCreator] sendReplyEmail send ${sendRes.status}`);
+            } else {
+                console.log(`[VideoconferenceCreator] sendReplyEmail: ${action} reply sent to ${tiRecipient}`);
+            }
+        } catch (err) {
+            console.warn('[VideoconferenceCreator] sendReplyEmail error:', err);
+        }
+    }
+
+    private async getMsGraphToken(tenantId: string, clientId: string, clientSecret: string): Promise<string | null> {
+        try {
+            const res = await fetch(
+                `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'client_credentials',
+                        client_id: clientId,
+                        client_secret: clientSecret,
+                        scope: 'https://graph.microsoft.com/.default',
+                    }).toString(),
+                    signal: AbortSignal.timeout(12_000),
+                },
+            );
+            const data = await res.json() as Record<string, unknown>;
+            return typeof data['access_token'] === 'string' ? data['access_token'] : null;
+        } catch {
+            return null;
+        }
+    }
+
+    private buildReplyHtml(p: {
+        topic: string;
+        creatorName: string;
+        action: 'approved' | 'denied';
+        hostEmail: string;
+        meetingUrl: string;
+    }): string {
+        const isApproved = p.action === 'approved';
+        const headerBg = isApproved
+            ? 'linear-gradient(135deg,#1a5c36 0%,#1e8a50 100%)'
+            : 'linear-gradient(135deg,#6b1a1a 0%,#9b2020 100%)';
+        const icon = isApproved ? '✅' : '❌';
+        const title = isApproved ? 'Solicitud aprobada' : 'Solicitud denegada';
+        const bodyText = isApproved
+            ? `La solicitud de videoconferencia fue <strong style="color:#1a6b3a">aprobada</strong>. Se asignó el host <strong>${p.hostEmail}</strong> y la reunión fue creada en Zoom.`
+            : `La solicitud de videoconferencia fue <strong style="color:#9b2020">denegada</strong>. No se creará la reunión en Zoom.`;
+        const btnHtml = p.meetingUrl
+            ? `<div style="margin-top:24px;text-align:center">
+                 <a href="${p.meetingUrl}" style="display:inline-block;padding:11px 24px;background:#1e3458;color:#fff;border-radius:9px;text-decoration:none;font-weight:700;font-size:13px">
+                   Ver solicitud
+                 </a>
+               </div>`
+            : '';
+
+        return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f0f4f9;font-family:'Segoe UI',Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f9;padding:32px 16px">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10)">
+        <tr>
+          <td style="background:${headerBg};padding:24px 36px">
+            <p style="margin:0 0 4px;color:rgba(255,255,255,.7);font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700">SISTEMA DE VIDEOCONFERENCIAS</p>
+            <h1 style="margin:0;color:#fff;font-size:19px;font-weight:700">${icon} ${title}</h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 36px">
+            <p style="margin:0 0 20px;color:#60799b;font-size:14px;line-height:1.6">${bodyText}</p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #dbe8f4;border-radius:10px;overflow:hidden;font-size:14px">
+              <tr style="background:#f7fafd">
+                <td style="padding:11px 16px;color:#6688aa;font-weight:700;width:38%;border-bottom:1px solid #dbe8f4">Reunión</td>
+                <td style="padding:11px 16px;color:#1e3458;font-weight:700;border-bottom:1px solid #dbe8f4">${p.topic}</td>
+              </tr>
+              <tr>
+                <td style="padding:11px 16px;color:#6688aa;font-weight:700">Solicitante</td>
+                <td style="padding:11px 16px;color:#1e3458;font-weight:600">${p.creatorName}</td>
+              </tr>
+            </table>
+            ${btnHtml}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:14px 36px;background:#f7fafd;border-top:1px solid #dbe8f4;text-align:center;color:#9ab0c8;font-size:11px">
+            Universidad Autónoma de Ica — Sistema de Planificación Académica
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
     }
 
     // ── User ↔ Zoom group assignments (security panel) ─────────────────────────
@@ -802,36 +1032,22 @@ export class VideoconferenceCreatorService {
                 timeZone: 'America/Lima',
             });
 
-            // ── Get MS Graph token (client credentials) ─────────────────────
-            const tokenRes = await fetch(
-                `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({
-                        grant_type: 'client_credentials',
-                        client_id: clientId,
-                        client_secret: clientSecret,
-                        scope: 'https://graph.microsoft.com/.default',
-                    }).toString(),
-                    signal: AbortSignal.timeout(12_000),
-                },
-            );
-            const tokenData = await tokenRes.json() as Record<string, unknown>;
-            if (typeof tokenData['access_token'] !== 'string') {
-                console.warn('[VideoconferenceCreator] sendDraftAlertToTI: failed to get MS Graph token:', tokenData['error_description'] ?? tokenData['error']);
+            // ── Get MS Graph token ───────────────────────────────────────────
+            const accessToken = await this.getMsGraphToken(tenantId, clientId, clientSecret);
+            if (!accessToken) {
+                console.warn('[VideoconferenceCreator] sendDraftAlertToTI: failed to get MS Graph token.');
                 return;
             }
-            const accessToken = tokenData['access_token'];
 
-            // ── Send email via Graph /sendMail ───────────────────────────────
+            // ── Send email via Graph createMessage → send (captures internetMessageId) ──
             const subject = `[Videoconferencia] Solicitud pendiente de host — ${topic}`;
             const html = this.buildDraftAlertHtml({
                 topic, creatorName, fromEmail, dateStr, timeStr, durationMinutes, groupName, systemUrl, meetingId,
             });
 
-            const mailRes = await fetch(
-                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/sendMail`,
+            // Step 1: create the message in the mailbox (returns the message object with id)
+            const createRes = await fetch(
+                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/messages`,
                 {
                     method: 'POST',
                     headers: {
@@ -839,23 +1055,51 @@ export class VideoconferenceCreatorService {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        message: {
-                            subject,
-                            body: { contentType: 'HTML', content: html },
-                            toRecipients: [{ emailAddress: { address: tiRecipient } }],
-                            from: { emailAddress: { address: fromEmail, name: creatorName } },
-                        },
-                        saveToSentItems: false,
+                        subject,
+                        body: { contentType: 'HTML', content: html },
+                        toRecipients: [{ emailAddress: { address: tiRecipient } }],
+                        from: { emailAddress: { address: fromEmail, name: creatorName } },
                     }),
                     signal: AbortSignal.timeout(15_000),
                 },
             );
 
-            if (!mailRes.ok) {
-                const errorBody = await mailRes.text();
-                console.warn(`[VideoconferenceCreator] sendDraftAlertToTI: Graph API ${mailRes.status}: ${errorBody.slice(0, 400)}`);
-            } else {
-                console.log(`[VideoconferenceCreator] sendDraftAlertToTI: email enviado de ${fromEmail} a ${tiRecipient}`);
+            if (!createRes.ok) {
+                const errorBody = await createRes.text();
+                console.warn(`[VideoconferenceCreator] sendDraftAlertToTI: createMessage ${createRes.status}: ${errorBody.slice(0, 400)}`);
+                return;
+            }
+
+            const createdMsg = await createRes.json() as Record<string, unknown>;
+            const graphMsgId = createdMsg['id'] as string | undefined;           // internal Graph ID for send
+            const internetMsgId = createdMsg['internetMessageId'] as string | undefined; // RFC Message-ID for threading
+
+            if (!graphMsgId) {
+                console.warn('[VideoconferenceCreator] sendDraftAlertToTI: no message id returned from Graph.');
+                return;
+            }
+
+            // Step 2: send the created message
+            const sendRes = await fetch(
+                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/messages/${encodeURIComponent(graphMsgId)}/send`,
+                {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                    signal: AbortSignal.timeout(15_000),
+                },
+            );
+
+            if (!sendRes.ok) {
+                const errorBody = await sendRes.text();
+                console.warn(`[VideoconferenceCreator] sendDraftAlertToTI: send ${sendRes.status}: ${errorBody.slice(0, 400)}`);
+                return;
+            }
+
+            console.log(`[VideoconferenceCreator] sendDraftAlertToTI: email enviado de ${fromEmail} a ${tiRecipient}`);
+
+            // Persist internetMessageId for reply threading
+            if (internetMsgId) {
+                await this.mvRepo.update({ id: meetingId }, { ti_alert_message_id: internetMsgId });
             }
         } catch (err) {
             // Non-critical: do not throw — the meeting was already saved

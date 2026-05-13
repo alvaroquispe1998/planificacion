@@ -27,6 +27,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     syncing = false;
     syncMsg = '';
     approving = false;
+    denying = false;
     cancelling = false;
     error = '';
     zoomStatus: { zoom_status: string | null; reason?: string; host_email?: string | null } | null = null;
@@ -44,9 +45,13 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         return this.auth.hasPermission('action.videoconference_creator.approve_backup');
     }
 
+    get canDeny(): boolean {
+        return this.meeting?.status === 'DRAFT_NO_HOST' && this.auth.hasPermission('action.videoconference_creator.approve_backup');
+    }
+
     /** Sólo reuniones futuras (aún no iniciadas) pueden cancelarse. */
     get canCancel(): boolean {
-        if (!this.meeting || this.meeting.status === 'CANCELLED') return false;
+        if (!this.meeting || this.meeting.status === 'CANCELLED' || this.meeting.status === 'DENIED') return false;
         if (this.meeting.can_cancel === false || this.isMeetingInProgress(this.meeting) || this.isMeetingFinished(this.meeting)) return false;
         if (this.meeting.status === 'DRAFT_NO_HOST') return true;
         const now = new Date();
@@ -172,9 +177,14 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
                 if (result.synced_instances > 0) parts.push(`${result.synced_instances} sesión(es)`);
                 if (result.synced_participants > 0) parts.push(`${result.synced_participants} participante(s)`);
                 if (result.synced_recordings > 0) parts.push(`${result.synced_recordings} grabación(es)`);
-                this.syncMsg = parts.length > 0
-                    ? `Sincronizado: ${parts.join(', ')}.`
-                    : 'Ya está al día. No hay datos nuevos en Zoom.';
+                const hasErrors = result.recording_errors && result.recording_errors.length > 0;
+                if (parts.length > 0) {
+                    this.syncMsg = `Sincronizado: ${parts.join(', ')}.`;
+                } else if (hasErrors) {
+                    this.syncMsg = `Sin datos nuevos, pero hubo un error al obtener grabaciones: ${result.recording_errors![0]}`;
+                } else {
+                    this.syncMsg = 'Ya está al día. No hay datos nuevos en Zoom.';
+                }
                 this.load(this.meeting!.id);
             },
             error: () => {
@@ -194,6 +204,29 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
             error: (err) => {
                 this.approving = false;
                 this.error = err?.error?.message ?? 'Error al aprobar.';
+            },
+        });
+    }
+
+    denyMeeting(): void {
+        if (!this.meeting || !this.canDeny) return;
+        this.denying = true;
+        this.error = '';
+        this.cdr.markForCheck();
+        this.api.denyDraft(this.meeting.id).subscribe({
+            next: (meeting) => {
+                this.zone.run(() => {
+                    this.denying = false;
+                    if (this.detail) this.detail = { ...this.detail, meeting };
+                    this.cdr.markForCheck();
+                });
+            },
+            error: (err) => {
+                this.zone.run(() => {
+                    this.denying = false;
+                    this.error = err?.error?.message ?? 'No se pudo denegar la solicitud.';
+                    this.cdr.markForCheck();
+                });
             },
         });
     }
@@ -317,7 +350,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     }
 
     displayStatus(meeting: ManualMeeting): ManualMeetingDisplayStatus {
-        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST' || meeting.status === 'DENIED') {
             return meeting.status;
         }
         if (this.isMeetingInProgress(meeting)) return 'IN_PROGRESS';
@@ -331,6 +364,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
             IN_PROGRESS: 'En proceso',
             FINISHED: 'Finalizada',
             DRAFT_NO_HOST: 'Pendiente de host',
+            DENIED: 'Denegada',
             ERROR: 'Error',
             CANCELLED: 'Cancelada',
         };
@@ -344,6 +378,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
             IN_PROGRESS: 'badge-progress',
             FINISHED: 'badge-finished',
             DRAFT_NO_HOST: 'badge-warn',
+            DENIED: 'badge-denied',
             ERROR: 'badge-err',
             CANCELLED: 'badge-cancelled',
         };
@@ -364,15 +399,18 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
             return meeting.type === 'WEEKLY' ? 'Recurrencia finalizada' : `Finalizó el ${this.formatDateTime(end)}`;
         }
         if (status === 'CANCELLED') return 'Esta reunión fue cancelada';
+        if (status === 'DENIED') return 'La solicitud fue denegada por TI';
         if (status === 'DRAFT_NO_HOST') return 'Pendiente de asignar host Zoom';
         if (status === 'ERROR') return 'Requiere revisión por error de creación';
         return '';
     }
 
     isMeetingInProgress(meeting: ManualMeeting): boolean {
-        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST' || meeting.status === 'DENIED') {
             return false;
         }
+        // If a session was actually ended (host closed early), don't show as in-progress
+        if (meeting.type === 'UNIQUE' && this.hasEndedInstances) return false;
         const now = new Date();
         if (meeting.type === 'WEEKLY') {
             return this.isWeeklyMeetingInProgress(meeting, now);
@@ -383,9 +421,11 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     }
 
     private isMeetingFinished(meeting: ManualMeeting): boolean {
-        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST' || meeting.status === 'DENIED') {
             return false;
         }
+        // If the host actually ended the session, treat as finished regardless of scheduled end
+        if (meeting.type === 'UNIQUE' && this.hasEndedInstances) return true;
         const now = new Date();
         if (meeting.type === 'WEEKLY') {
             return this.isWeeklyMeetingFinished(meeting, now);
