@@ -138,6 +138,10 @@ export class VideoconferenceCreatorApiService {
         return this.http.post<{ synced_instances: number; synced_participants: number; synced_recordings: number }>(`${BASE}/meetings/${id}/sync`, {});
     }
 
+    getZoomStatus(id: string) {
+        return this.http.get<{ zoom_status: string | null; reason?: string; host_email?: string | null }>(`${BASE}/meetings/${id}/zoom-status`);
+    }
+
     approveDraft(id: string, dto: ApproveDraftDto = {}) {
         return this.http.post<ManualMeeting>(`${BASE}/meetings/${id}/approve-backup`, dto);
     }

@@ -154,10 +154,62 @@
   grid-row: span 2;
 }
 
-.info-card--zoom {
-  display: grid;
-  align-content: center;
+.info-card--zoom-col {
+  grid-row: span 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
+
+.zoom-meeting-id {
+  margin: 0;
+  font-family: monospace;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1e3458;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
+
+.zoom-host-name {
+  color: #1e3458;
+  font-size: 0.88rem;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.zoom-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: auto;
+  flex-wrap: wrap;
+}
+
+.btn-zoom-check {
+  font-size: 0.77rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid #bbd2ee;
+  background: #f0f7ff;
+  color: #1a4f7a;
+  cursor: pointer;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.btn-zoom-check:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-zoom-check:hover:not(:disabled) { background: #ddeeff; }
+
+.zoom-live-chip {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.18rem 0.55rem;
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.zoom-live    { background: #e4f8ee; color: #1a6e40; }
+.zoom-waiting { background: #fff5d6; color: #7a5b00; }
+.zoom-offline { background: #f3f5f8; color: #60799b; }
 
 .info-label {
   margin: 0 0 0.3rem;

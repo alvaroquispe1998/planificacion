@@ -29,6 +29,8 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     approving = false;
     cancelling = false;
     error = '';
+    zoomStatus: { zoom_status: string | null; reason?: string; host_email?: string | null } | null = null;
+    checkingZoom = false;
     detail: MeetingDetail | null = null;
     private currentId = '';
     private clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -235,6 +237,42 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     copyToClipboard(text: string | null | undefined): void {
         if (!text) return;
         void navigator.clipboard.writeText(text);
+    }
+
+    checkZoomStatus(): void {
+        if (!this.meeting?.zoom_meeting_id || this.checkingZoom) return;
+        this.checkingZoom = true;
+        this.zoomStatus = null;
+        this.cdr.markForCheck();
+        this.api.getZoomStatus(this.meeting.id).subscribe({
+            next: (status) => {
+                this.checkingZoom = false;
+                this.zoomStatus = status;
+                this.cdr.markForCheck();
+            },
+            error: () => {
+                this.checkingZoom = false;
+                this.zoomStatus = { zoom_status: null, reason: 'ERROR' };
+                this.cdr.markForCheck();
+            },
+        });
+    }
+
+    zoomStatusLabel(): string {
+        if (!this.zoomStatus) return '';
+        switch (this.zoomStatus.zoom_status) {
+            case 'started': return '🔴 En curso ahora';
+            case 'waiting': return '⏳ Esperando inicio';
+            default: return this.zoomStatus.reason === 'NOT_FOUND' ? 'No encontrada en Zoom' : '— Sin estado';
+        }
+    }
+
+    zoomStatusClass(): string {
+        switch (this.zoomStatus?.zoom_status) {
+            case 'started': return 'zoom-live';
+            case 'waiting': return 'zoom-waiting';
+            default: return 'zoom-offline';
+        }
     }
 
     back(): void {

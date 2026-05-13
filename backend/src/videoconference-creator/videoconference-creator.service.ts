@@ -146,6 +146,25 @@ export class VideoconferenceCreatorService {
         return { meeting, instances, participants, recordings };
     }
 
+    async getZoomMeetingStatus(id: string, userId: string, isAdminOrTI: boolean) {
+        const mv = await this.mvRepo.findOne({ where: { id } });
+        if (!mv) throw new NotFoundException('Videoconferencia no encontrada.');
+        if (!isAdminOrTI && mv.created_by_user_id !== userId) {
+            throw new ForbiddenException('Sin acceso a esta videoconferencia.');
+        }
+        if (!mv.zoom_meeting_id) {
+            return { zoom_status: null, reason: 'NO_ZOOM_ID' as const };
+        }
+        const zoomMeeting = await this.zoomService.getMeeting(mv.zoom_meeting_id);
+        if (!zoomMeeting) {
+            return { zoom_status: null, reason: 'NOT_FOUND' as const };
+        }
+        return {
+            zoom_status: zoomMeeting.status,
+            host_email: zoomMeeting.host_email,
+        };
+    }
+
     async cancelMeeting(id: string, userId: string, isAdminOrTI: boolean) {
         const mv = await this.mvRepo.findOne({ where: { id } });
         if (!mv) throw new NotFoundException('Videoconferencia no encontrada.');
@@ -254,7 +273,7 @@ export class VideoconferenceCreatorService {
                 updated_at: now,
             });
             await this.mvRepo.save(entity);
-            await this.sendDraftAlertToTI(dto.topic, dto.zoom_group_id);
+            await this.sendDraftAlertToTI(dto.topic, dto.zoom_group_id, userId, startDate, dto.duration_minutes);
             return entity;
         }
 
@@ -733,26 +752,205 @@ export class VideoconferenceCreatorService {
         return payload;
     }
 
-    private async sendDraftAlertToTI(topic: string, groupId: string): Promise<void> {
+    private async sendDraftAlertToTI(
+        topic: string,
+        groupId: string,
+        creatorUserId: string,
+        startTime: Date,
+        durationMinutes: number,
+    ): Promise<void> {
         try {
-            const configs = await this.zoomConfigRepo.find({ take: 1 });
-            const emails = configs[0]?.ti_alert_emails;
-            if (!emails?.trim()) return;
+            // Read MS Graph config from DB (falls back to env for local dev)
+            const configs = await this.zoomConfigRepo.find({ order: { created_at: 'ASC' }, take: 1 });
+            const dbConfig = configs[0];
 
-            const recipients = emails
-                .split(',')
-                .map((e) => e.trim())
-                .filter(Boolean);
-            if (recipients.length === 0) return;
+            const tenantId = (dbConfig?.ms_tenant_id ?? process.env['MS_TENANT_ID'] ?? '').trim();
+            const clientId = (dbConfig?.ms_client_id ?? process.env['MS_CLIENT_ID'] ?? '').trim();
+            const clientSecret = (dbConfig?.ms_client_secret ?? process.env['MS_CLIENT_SECRET'] ?? '').trim();
+            const tiRecipient = (dbConfig?.mail_ti_recipient ?? process.env['MAIL_TI_RECIPIENT'] ?? 'asistencia.ti@autonomadeica.edu.pe').trim();
+            const systemUrl = (dbConfig?.system_public_url ?? process.env['SYSTEM_PUBLIC_URL'] ?? '').trim().replace(/\/$/, '');
 
-            // Basic nodemailer-free approach: just log the alert.
-            // Replace with a real mailer (e.g. Nodemailer) if desired.
-            console.warn(
-                `[VideoconferenceCreator] DRAFT_NO_HOST alert — topic="${topic}" group=${groupId} — TI emails: ${recipients.join(', ')}`,
+            if (!tenantId || !clientId || !clientSecret) {
+                console.warn('[VideoconferenceCreator] sendDraftAlertToTI: MS Graph no configurado en BD ni en env, omitiendo correo.');
+                return;
+            }
+
+            // Resolve creator info
+            const creator = await this.authUserRepo.findOne({
+                where: { id: creatorUserId },
+                select: ['id', 'email', 'display_name', 'username'] as any,
+            });
+            const fromEmail = creator?.email?.trim();
+            if (!fromEmail) {
+                console.warn('[VideoconferenceCreator] sendDraftAlertToTI: creator has no email, skipping.');
+                return;
+            }
+            const creatorName = (creator as any).display_name || (creator as any).username || fromEmail;
+
+            // Resolve group name
+            const group = await this.zoomGroupRepo.findOne({ where: { id: groupId } });
+            const groupName = group?.name ?? 'Grupo principal';
+
+            // Format date/time (Lima, Perú)
+            const dateStr = startTime.toLocaleDateString('es-PE', {
+                weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+                timeZone: 'America/Lima',
+            });
+            const timeStr = startTime.toLocaleTimeString('es-PE', {
+                hour: '2-digit', minute: '2-digit',
+                timeZone: 'America/Lima',
+            });
+
+            // ── Get MS Graph token (client credentials) ─────────────────────
+            const tokenRes = await fetch(
+                `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'client_credentials',
+                        client_id: clientId,
+                        client_secret: clientSecret,
+                        scope: 'https://graph.microsoft.com/.default',
+                    }).toString(),
+                    signal: AbortSignal.timeout(12_000),
+                },
             );
-        } catch {
-            // Non-critical: do not throw
+            const tokenData = await tokenRes.json() as Record<string, unknown>;
+            if (typeof tokenData['access_token'] !== 'string') {
+                console.warn('[VideoconferenceCreator] sendDraftAlertToTI: failed to get MS Graph token:', tokenData['error_description'] ?? tokenData['error']);
+                return;
+            }
+            const accessToken = tokenData['access_token'];
+
+            // ── Send email via Graph /sendMail ───────────────────────────────
+            const subject = `[Videoconferencia] Solicitud pendiente de host — ${topic}`;
+            const html = this.buildDraftAlertHtml({
+                topic, creatorName, fromEmail, dateStr, timeStr, durationMinutes, groupName, systemUrl,
+            });
+
+            const mailRes = await fetch(
+                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/sendMail`,
+                {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: {
+                            subject,
+                            body: { contentType: 'HTML', content: html },
+                            toRecipients: [{ emailAddress: { address: tiRecipient } }],
+                            from: { emailAddress: { address: fromEmail, name: creatorName } },
+                        },
+                        saveToSentItems: false,
+                    }),
+                    signal: AbortSignal.timeout(15_000),
+                },
+            );
+
+            if (!mailRes.ok) {
+                const errorBody = await mailRes.text();
+                console.warn(`[VideoconferenceCreator] sendDraftAlertToTI: Graph API ${mailRes.status}: ${errorBody.slice(0, 400)}`);
+            } else {
+                console.log(`[VideoconferenceCreator] sendDraftAlertToTI: email enviado de ${fromEmail} a ${tiRecipient}`);
+            }
+        } catch (err) {
+            // Non-critical: do not throw — the meeting was already saved
+            console.warn('[VideoconferenceCreator] sendDraftAlertToTI error:', err);
         }
+    }
+
+    private buildDraftAlertHtml(p: {
+        topic: string;
+        creatorName: string;
+        fromEmail: string;
+        dateStr: string;
+        timeStr: string;
+        durationMinutes: number;
+        groupName: string;
+        systemUrl: string;
+    }): string {
+        const draftsUrl = p.systemUrl ? `${p.systemUrl}/videoconferences/creator/drafts` : '';
+        const btnHtml = draftsUrl
+            ? `<div style="margin-top:28px;text-align:center">
+                 <a href="${draftsUrl}" style="display:inline-block;padding:13px 28px;background:#1e3458;color:#fff;border-radius:9px;text-decoration:none;font-weight:700;font-size:14px;letter-spacing:.02em">
+                   Ver solicitudes pendientes →
+                 </a>
+               </div>`
+            : '';
+
+        return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f4f9;font-family:'Segoe UI',Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f9;padding:32px 16px">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10)">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:linear-gradient(135deg,#1e3458 0%,#1e5799 100%);padding:28px 36px">
+            <p style="margin:0 0 6px;color:#a8c4e8;font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700">SISTEMA DE VIDEOCONFERENCIAS</p>
+            <h1 style="margin:0;color:#fff;font-size:21px;font-weight:700;line-height:1.3">📹 Solicitud pendiente de host Zoom</h1>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:32px 36px">
+            <p style="margin:0 0 24px;color:#60799b;font-size:14px;line-height:1.6">
+              Se recibió una nueva solicitud de videoconferencia que <strong style="color:#c45000">no pudo asignarse automáticamente</strong> porque no hay hosts Zoom disponibles en el horario indicado.
+            </p>
+
+            <!-- Info table -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #dbe8f4;border-radius:10px;overflow:hidden;font-size:14px">
+              <tr style="background:#f7fafd">
+                <td style="padding:12px 16px;color:#6688aa;font-weight:700;width:38%;border-bottom:1px solid #dbe8f4">Reunión</td>
+                <td style="padding:12px 16px;color:#1e3458;font-weight:700;border-bottom:1px solid #dbe8f4">${p.topic}</td>
+              </tr>
+              <tr>
+                <td style="padding:12px 16px;color:#6688aa;font-weight:700;border-bottom:1px solid #dbe8f4">Solicitante</td>
+                <td style="padding:12px 16px;color:#1e3458;font-weight:600;border-bottom:1px solid #dbe8f4">${p.creatorName} &lt;${p.fromEmail}&gt;</td>
+              </tr>
+              <tr style="background:#f7fafd">
+                <td style="padding:12px 16px;color:#6688aa;font-weight:700;border-bottom:1px solid #dbe8f4">Fecha</td>
+                <td style="padding:12px 16px;color:#1e3458;font-weight:600;border-bottom:1px solid #dbe8f4;text-transform:capitalize">${p.dateStr}</td>
+              </tr>
+              <tr>
+                <td style="padding:12px 16px;color:#6688aa;font-weight:700;border-bottom:1px solid #dbe8f4">Hora · Duración</td>
+                <td style="padding:12px 16px;color:#1e3458;font-weight:600;border-bottom:1px solid #dbe8f4">${p.timeStr} · ${p.durationMinutes} min</td>
+              </tr>
+              <tr style="background:#f7fafd">
+                <td style="padding:12px 16px;color:#6688aa;font-weight:700">Grupo Zoom</td>
+                <td style="padding:12px 16px;color:#1e3458;font-weight:600">${p.groupName}</td>
+              </tr>
+            </table>
+
+            <!-- Warning banner -->
+            <div style="margin-top:20px;padding:14px 18px;background:#fff8e1;border-radius:9px;border-left:4px solid #f0a500">
+              <p style="margin:0;color:#7a5b00;font-size:13px;line-height:1.6">
+                ⚠️ Ningún host del grupo tenía disponibilidad en ese horario. Ingresa al sistema y usa <strong>Aprobar con grupo backup</strong> para asignar un host alternativo.
+              </p>
+            </div>
+
+            ${btnHtml}
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:16px 36px;background:#f7fafd;border-top:1px solid #dbe8f4;text-align:center;color:#9ab0c8;font-size:11px">
+            Universidad Autónoma de Ica — Sistema de Planificación Académica
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
     }
 }
 

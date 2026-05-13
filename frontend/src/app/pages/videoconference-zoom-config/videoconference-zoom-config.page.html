@@ -171,4 +171,69 @@
       </div>
     </article>
   </section>
+
+  <!-- ── MS Graph / correo alertas ─────────────────────────────────────── -->
+  <section class="workspace-grid workspace-grid--single">
+    <article class="panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Correo de alertas</p>
+          <h2>Microsoft Graph (Mail.Send)</h2>
+          <p class="panel-copy">
+            Cuando una videoconferencia queda en estado <strong>DRAFT_NO_HOST</strong> (sin host asignado), el sistema envía un correo al equipo de TI
+            usando la API de Microsoft Graph con las credenciales de abajo. Todos los campos son opcionales; si se dejan en blanco no se enviarán alertas.
+          </p>
+        </div>
+      </div>
+
+      <form *ngIf="!loading" class="config-form">
+        <div class="config-grid">
+          <label class="field">
+            <span>Tenant ID</span>
+            <input type="text" [(ngModel)]="form.ms_tenant_id" name="ms_tenant_id"
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" [disabled]="saving || testing" autocomplete="off" />
+          </label>
+
+          <label class="field">
+            <span>Client ID</span>
+            <input type="text" [(ngModel)]="form.ms_client_id" name="ms_client_id"
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" [disabled]="saving || testing" autocomplete="off" />
+          </label>
+
+          <label class="field field-wide">
+            <span>Client Secret</span>
+            <div class="secret-field">
+              <input [type]="showGraphSecret ? 'text' : 'password'"
+                [(ngModel)]="form.ms_client_secret" name="ms_client_secret"
+                placeholder="Pega aqui el client secret de la app Azure"
+                [disabled]="saving || testing" autocomplete="new-password" />
+              <button type="button" class="btn btn-secondary btn-sm" (click)="showGraphSecret = !showGraphSecret" [disabled]="saving || testing">
+                {{ showGraphSecret ? 'Ocultar' : 'Ver' }}
+              </button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>Correo destinatario TI</span>
+            <input type="email" [(ngModel)]="form.mail_ti_recipient" name="mail_ti_recipient"
+              placeholder="asistencia.ti@autonomadeica.edu.pe" [disabled]="saving || testing" />
+          </label>
+
+          <label class="field field-wide">
+            <span>URL pública del sistema</span>
+            <input type="url" [(ngModel)]="form.system_public_url" name="system_public_url"
+              placeholder="https://software-uai.autonomadeica.edu.pe/planificacion-academica/frontend"
+              [disabled]="saving || testing" />
+            <small class="field-hint">Se usa para generar el enlace al borrador en el correo de alerta.</small>
+          </label>
+        </div>
+
+        <div class="panel-actions">
+          <button type="button" class="btn btn-primary" (click)="save()" [disabled]="saving || testing || !isDirty">
+            {{ saving ? 'Guardando...' : 'Guardar configuracion' }}
+          </button>
+        </div>
+      </form>
+    </article>
+  </section>
 </div>

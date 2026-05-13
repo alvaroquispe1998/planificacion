@@ -78,6 +78,19 @@ export class VideoconferenceCreatorController {
     }
 
     /**
+     * Returns the real-time status of a meeting as reported by Zoom API.
+     */
+    @Get('meetings/:id/zoom-status')
+    @RequirePermissions('action.videoconference_creator.view')
+    async getZoomMeetingStatus(
+        @Param('id') id: string,
+        @CurrentAuthUser() user: AuthenticatedRequestUser,
+    ) {
+        const isAdminOrTI = user.is_admin || user.roles.some((r) => r.code === 'IT_SUPPORT');
+        return this.service.getZoomMeetingStatus(id, user.id, isAdminOrTI);
+    }
+
+    /**
      * Syncs past instances from Zoom for a given meeting.
      */
     @Post('meetings/:id/sync')

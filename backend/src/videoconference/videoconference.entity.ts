@@ -248,9 +248,28 @@ export class ZoomConfigEntity {
     /**
      * Comma-separated list of TI email addresses to notify when a manual
      * videoconference is saved as DRAFT_NO_HOST.
+     * @deprecated Use mail_ti_recipient instead.
      */
     @Column({ type: 'text', nullable: true })
     ti_alert_emails!: string | null;
+
+    // ── Microsoft Graph — email alerts ────────────────────────────────────────
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    ms_tenant_id!: string | null;
+
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    ms_client_id!: string | null;
+
+    @Column({ type: 'varchar', length: 512, nullable: true })
+    ms_client_secret!: string | null;
+
+    /** Recipient address for DRAFT_NO_HOST alert emails. */
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    mail_ti_recipient!: string | null;
+
+    /** Public URL of the frontend (used for buttons in alert emails). */
+    @Column({ type: 'varchar', length: 512, nullable: true })
+    system_public_url!: string | null;
 
     @Column({ type: 'datetime' })
     created_at!: Date;
