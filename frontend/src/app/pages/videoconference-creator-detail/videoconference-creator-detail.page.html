@@ -182,7 +182,7 @@
     </div>
 
     <!-- ── Grabaciones + Participantes ──────────────────────────────── -->
-    <div class="bottom-panels" *ngIf="detail && (recordings.length > 0 || detail.participants.length > 0)">
+    <div class="bottom-panels" *ngIf="detail && (recordings.length > 0 || detail.participants.length > 0 || hasAnyInstances)">
 
       <!-- Participantes -->
       <div class="panel panel--participants" *ngIf="detail.participants.length > 0">
@@ -197,18 +197,20 @@
               <p class="participant-name">{{ p.display_name || '—' }}</p>
               <p class="participant-email" *ngIf="p.email">{{ p.email }}</p>
             </div>
-            <span class="participant-role" *ngIf="p.role && p.role !== 'NO_ROLE'">{{ p.role }}</span>
+            <span class="participant-role" *ngIf="p.role && p.role !== 'NO_ROLE' && p.role !== 'UNKNOWN'">{{ p.role }}</span>
           </div>
         </div>
       </div>
 
       <!-- Grabaciones -->
-      <div class="panel panel--recordings" *ngIf="recordings.length > 0">
+      <div class="panel panel--recordings" *ngIf="recordings.length > 0 || hasAnyInstances">
         <div class="panel-head">
           <h2 class="panel-title">Grabaciones</h2>
-          <span class="count-chip">{{ recordings.length }}</span>
+          <span class="count-chip" *ngIf="recordings.length > 0">{{ recordings.length }}</span>
         </div>
-        <div class="recording-list">
+
+        <!-- Grabaciones disponibles -->
+        <div class="recording-list" *ngIf="recordings.length > 0">
           <div class="recording-row" *ngFor="let rec of recordings">
             <div class="recording-icon">{{ recordingIcon(rec.recording_type) }}</div>
             <div class="recording-meta">
@@ -223,6 +225,20 @@
                 class="btn-rec btn-rec--dl">⬇ Descargar</a>
             </div>
           </div>
+        </div>
+
+        <!-- Sin grabaciones aún -->
+        <div class="recording-pending" *ngIf="recordings.length === 0">
+          <span class="recording-pending-icon">🎞️</span>
+          <p class="recording-pending-title" *ngIf="hasEndedInstances">Grabación en proceso</p>
+          <p class="recording-pending-title" *ngIf="!hasEndedInstances">Sin grabación aún</p>
+          <p class="recording-pending-hint" *ngIf="hasEndedInstances">
+            Zoom puede tardar unos minutos en procesar la grabación.
+            Usa <strong>Sincronizar desde Zoom</strong> para actualizar.
+          </p>
+          <p class="recording-pending-hint" *ngIf="!hasEndedInstances">
+            La grabación estará disponible cuando la sesión finalice.
+          </p>
         </div>
       </div>
 

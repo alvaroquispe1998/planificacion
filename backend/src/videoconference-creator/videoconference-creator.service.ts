@@ -273,7 +273,7 @@ export class VideoconferenceCreatorService {
                 updated_at: now,
             });
             await this.mvRepo.save(entity);
-            await this.sendDraftAlertToTI(dto.topic, dto.zoom_group_id, userId, startDate, dto.duration_minutes);
+            await this.sendDraftAlertToTI(dto.topic, dto.zoom_group_id, userId, startDate, dto.duration_minutes, entity.id);
             return entity;
         }
 
@@ -758,6 +758,7 @@ export class VideoconferenceCreatorService {
         creatorUserId: string,
         startTime: Date,
         durationMinutes: number,
+        meetingId: string,
     ): Promise<void> {
         try {
             // Read MS Graph config from DB (falls back to env for local dev)
@@ -826,7 +827,7 @@ export class VideoconferenceCreatorService {
             // ── Send email via Graph /sendMail ───────────────────────────────
             const subject = `[Videoconferencia] Solicitud pendiente de host — ${topic}`;
             const html = this.buildDraftAlertHtml({
-                topic, creatorName, fromEmail, dateStr, timeStr, durationMinutes, groupName, systemUrl,
+                topic, creatorName, fromEmail, dateStr, timeStr, durationMinutes, groupName, systemUrl, meetingId,
             });
 
             const mailRes = await fetch(
@@ -871,12 +872,13 @@ export class VideoconferenceCreatorService {
         durationMinutes: number;
         groupName: string;
         systemUrl: string;
+        meetingId: string;
     }): string {
-        const draftsUrl = p.systemUrl ? `${p.systemUrl}/videoconferences/creator/drafts` : '';
-        const btnHtml = draftsUrl
+        const meetingUrl = p.systemUrl ? `${p.systemUrl}/videoconferences/creator/${p.meetingId}` : '';
+        const btnHtml = meetingUrl
             ? `<div style="margin-top:28px;text-align:center">
-                 <a href="${draftsUrl}" style="display:inline-block;padding:13px 28px;background:#1e3458;color:#fff;border-radius:9px;text-decoration:none;font-weight:700;font-size:14px;letter-spacing:.02em">
-                   Ver solicitudes pendientes →
+                 <a href="${meetingUrl}" style="display:inline-block;padding:13px 28px;background:#1e3458;color:#fff;border-radius:9px;text-decoration:none;font-weight:700;font-size:14px;letter-spacing:.02em">
+                   Ver solicitud
                  </a>
                </div>`
             : '';
@@ -901,7 +903,7 @@ export class VideoconferenceCreatorService {
         <tr>
           <td style="padding:32px 36px">
             <p style="margin:0 0 24px;color:#60799b;font-size:14px;line-height:1.6">
-              Se recibió una nueva solicitud de videoconferencia que <strong style="color:#c45000">no pudo asignarse automáticamente</strong> porque no hay hosts Zoom disponibles en el horario indicado.
+              Se envió una nueva solicitud de videoconferencia que <strong style="color:#c45000">no pudo asignarse automáticamente</strong> porque no hay hosts Zoom disponibles en el horario indicado.
             </p>
 
             <!-- Info table -->
@@ -928,12 +930,7 @@ export class VideoconferenceCreatorService {
               </tr>
             </table>
 
-            <!-- Warning banner -->
-            <div style="margin-top:20px;padding:14px 18px;background:#fff8e1;border-radius:9px;border-left:4px solid #f0a500">
-              <p style="margin:0;color:#7a5b00;font-size:13px;line-height:1.6">
-                ⚠️ Ningún host del grupo tenía disponibilidad en ese horario. Ingresa al sistema y usa <strong>Aprobar con grupo backup</strong> para asignar un host alternativo.
-              </p>
-            </div>
+            <!-- Warning banner removed -->
 
             ${btnHtml}
           </td>
