@@ -39,6 +39,19 @@
         </select>
       </label>
 
+      <label class="search-field">
+        <span>Grupo backup</span>
+        <select
+          [ngModel]="selectedGroup?.backup_zoom_group_id || ''"
+          (ngModelChange)="setSelectedBackupGroup($event)"
+          [disabled]="loading || saving || managingGroups || !hasSelectedGroup">
+          <option value="">Sin grupo backup</option>
+          <option *ngFor="let group of backupGroupOptions" [value]="group.id">
+            {{ group.name }} ({{ group.code }})
+          </option>
+        </select>
+      </label>
+
       <div class="group-actions">
         <button type="button" class="btn btn-secondary btn-sm" (click)="createGroup()" [disabled]="loading || saving || managingGroups">
           Nuevo grupo

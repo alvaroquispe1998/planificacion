@@ -46,14 +46,19 @@
           *ngIf="meeting.status === 'DRAFT_NO_HOST' && canApproveBackup"
           [disabled]="approving || cancelling"
           (click)="approveBackup()">
-          {{ approving ? 'Aprobando...' : '✓ Aprobar con backup' }}
+          {{ approving ? 'Aprobando...' : '✓ Aprobar con grupo backup' }}
         </button>
         <button type="button" class="btn btn-danger"
           *ngIf="canCancel"
           [disabled]="cancelling || syncing || approving"
           (click)="cancelMeeting()">
-          <span *ngIf="!cancelling">✕ Cancelar reunión</span>
-          <span *ngIf="cancelling" class="btn-saving"><span class="spinner spinner--sm"></span> Cancelando...</span>
+          <span *ngIf="!cancelling">
+            {{ meeting.status === 'DRAFT_NO_HOST' ? '✕ Cancelar solicitud' : '✕ Cancelar reunión' }}
+          </span>
+          <span *ngIf="cancelling" class="btn-saving">
+            <span class="spinner spinner--sm"></span>
+            {{ meeting.status === 'DRAFT_NO_HOST' ? 'Cancelando solicitud...' : 'Cancelando...' }}
+          </span>
         </button>
       </div>
     </div>
@@ -91,6 +96,17 @@
           <span class="host-icon">👤</span>
           <span class="info-value">{{ meeting.assigned_zoom_user_name }}</span>
         </div>
+      </div>
+
+      <div class="info-card" *ngIf="meeting.status === 'DRAFT_NO_HOST' && canApproveBackup">
+        <p class="info-label">Diagnóstico admin</p>
+        <p class="info-value">{{ meeting.zoom_group_name || 'Grupo principal' }}</p>
+        <p class="info-subvalue" *ngIf="meeting.backup_zoom_group_name">
+          Backup: {{ meeting.backup_zoom_group_name }}
+        </p>
+        <p class="info-subvalue info-subvalue--warn" *ngIf="!meeting.backup_zoom_group_name">
+          Backup no configurado
+        </p>
       </div>
 
       <div class="info-card info-card--full" *ngIf="meeting.start_url || meeting.join_url">

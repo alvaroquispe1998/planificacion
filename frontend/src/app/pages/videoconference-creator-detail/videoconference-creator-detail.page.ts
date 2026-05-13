@@ -45,6 +45,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     get canCancel(): boolean {
         if (!this.meeting || this.meeting.status === 'CANCELLED') return false;
         if (this.meeting.can_cancel === false || this.isMeetingInProgress(this.meeting) || this.isMeetingFinished(this.meeting)) return false;
+        if (this.meeting.status === 'DRAFT_NO_HOST') return true;
         const now = new Date();
         const start = new Date(this.meeting.start_time);
         return start > now;
@@ -189,10 +190,13 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     async cancelMeeting(): Promise<void> {
         if (!this.meeting || !this.canCancel) return;
 
+        const isHostRequest = this.meeting.status === 'DRAFT_NO_HOST';
         const confirmed = await this.dialog.confirm({
-            title: 'Cancelar reunión',
-            message: 'Se eliminará la reunión en Zoom y quedará marcada como cancelada en el sistema. Esta acción no se puede deshacer.',
-            confirmLabel: 'Sí, cancelar reunión',
+            title: isHostRequest ? 'Cancelar solicitud' : 'Cancelar reunión',
+            message: isHostRequest
+                ? 'La solicitud pendiente de host se marcará como cancelada. No se eliminará nada en Zoom porque todavía no se creó una reunión.'
+                : 'Se eliminará la reunión en Zoom y quedará marcada como cancelada en el sistema. Esta acción no se puede deshacer.',
+            confirmLabel: isHostRequest ? 'Sí, cancelar solicitud' : 'Sí, cancelar reunión',
             cancelLabel: 'No, mantener',
             tone: 'danger',
         });
@@ -271,7 +275,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
             PENDING: meeting.status === 'APPROVED_WITH_BACKUP' ? 'Pendiente (backup)' : 'Pendiente',
             IN_PROGRESS: 'En proceso',
             FINISHED: 'Finalizada',
-            DRAFT_NO_HOST: 'Borrador sin host',
+            DRAFT_NO_HOST: 'Pendiente de host',
             ERROR: 'Error',
             CANCELLED: 'Cancelada',
         };

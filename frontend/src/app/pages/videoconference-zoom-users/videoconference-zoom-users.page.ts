@@ -33,6 +33,7 @@ type ZoomPoolResponse = {
     name: string;
     code: string;
     is_active: boolean;
+    backup_zoom_group_id: string | null;
   };
   items: ZoomPoolItem[];
   users: ZoomPoolUser[];
@@ -48,6 +49,8 @@ type ZoomGroup = {
   is_default?: boolean;
   members_count?: number;
   active_members_count?: number;
+  backup_zoom_group_id?: string | null;
+  backup_zoom_group_name?: string | null;
 };
 
 type LicenseFilter = 'ALL' | 'UNVERIFIED' | 'BASIC' | 'LICENSED';
@@ -97,6 +100,10 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
 
   get hasSelectedGroup() {
     return Boolean(this.selectedGroupId);
+  }
+
+  get backupGroupOptions() {
+    return this.groups.filter((group) => group.id !== this.selectedGroupId && group.is_active);
   }
 
   get selectedCount() {
@@ -206,6 +213,7 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
       name: name.trim(),
       code: code?.trim() || undefined,
       is_active: true,
+      backup_zoom_group_id: null,
     }).subscribe({
       next: (created) => {
         this.managingGroups = false;
@@ -270,6 +278,29 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
       error: (err) => {
         this.managingGroups = false;
         this.error = err?.error?.message ?? 'No se pudo actualizar el grupo Zoom.';
+        this.cdr.detectChanges();
+      },
+    });
+  }
+
+  setSelectedBackupGroup(value: string) {
+    if (!this.selectedGroup || this.managingGroups || this.loading || this.saving) {
+      return;
+    }
+    this.managingGroups = true;
+    this.error = '';
+    this.message = '';
+    this.api.updateZoomGroup(this.selectedGroup.id, {
+      backup_zoom_group_id: value || null,
+    }).subscribe({
+      next: () => {
+        this.managingGroups = false;
+        this.message = value ? 'Grupo backup actualizado.' : 'Grupo backup quitado.';
+        this.loadPage();
+      },
+      error: (err) => {
+        this.managingGroups = false;
+        this.error = err?.error?.message ?? 'No se pudo actualizar el grupo backup.';
         this.cdr.detectChanges();
       },
     });
@@ -469,6 +500,9 @@ export class VideoconferenceZoomUsersPageComponent implements OnInit {
   private applyResponse(response: ZoomPoolResponse) {
     if (response?.group?.id) {
       this.selectedGroupId = response.group.id;
+      this.groups = this.groups.map((group) => group.id === response.group?.id
+        ? { ...group, backup_zoom_group_id: response.group.backup_zoom_group_id ?? null }
+        : group);
     }
     const users = Array.isArray(response?.users) ? response.users : [];
     const userMap = new Map(users.map((user) => [user.id, user]));

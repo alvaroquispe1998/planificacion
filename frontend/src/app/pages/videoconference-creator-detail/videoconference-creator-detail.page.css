@@ -212,6 +212,11 @@
   font-size: 0.8rem;
 }
 
+.info-subvalue--warn {
+  color: #8a5b00;
+  font-weight: 700;
+}
+
 .info-link {
   color: #3b7dd8;
   font-size: 0.88rem;
