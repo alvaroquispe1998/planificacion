@@ -42,6 +42,7 @@ export interface ManualMeeting {
     recurrence_json: Record<string, unknown> | null;
     status: ManualMeetingStatus;
     is_in_progress?: boolean;
+    is_finished?: boolean;
     can_cancel?: boolean;
     zoom_meeting_id: string | null;
     join_url: string | null;

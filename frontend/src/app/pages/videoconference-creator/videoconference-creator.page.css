@@ -308,12 +308,36 @@ select.input { cursor: pointer; }
   cursor: pointer;
   transition: all 0.12s;
 }
-.filter-chip:hover { border-color: #3b7dd8; color: #1e3458; }
-.filter-chip.active {
-  background: #1e3458;
-  border-color: #1e3458;
-  color: #fff;
-  font-weight: 600;
+.filter-chip:hover { border-color: #7890ad; color: #1e3458; }
+.filter-chip.active { font-weight: 700; }
+.filter-chip.filter-all.active {
+  background: #e8eef6; border-color: #91a4bb; color: #203247;
+  box-shadow: 0 0 0 2px rgba(145, 164, 187, 0.14);
+}
+.filter-chip.filter-pending.active {
+  background: #fff4d6; border-color: #f0c96a; color: #7a5600;
+  box-shadow: 0 0 0 2px rgba(240, 201, 106, 0.16);
+}
+.filter-chip.filter-progress.active {
+  background: #e5f0ff; border-color: #83b4f6; color: #174a8b;
+  box-shadow: 0 0 0 2px rgba(131, 180, 246, 0.16);
+}
+.filter-chip.filter-finished.active {
+  background: #e3f8ee; border-color: #8fd5ae; color: #1a6b40;
+  box-shadow: 0 0 0 2px rgba(143, 213, 174, 0.16);
+}
+.filter-chip.filter-warn.active {
+  background: #fff0df; border-color: #f1b271; color: #8a4b00;
+  box-shadow: 0 0 0 2px rgba(241, 178, 113, 0.16);
+}
+.filter-chip.filter-err.active,
+.filter-chip.filter-denied.active {
+  background: #ffe4e4; border-color: #ef9b9b; color: #9b1a1a;
+  box-shadow: 0 0 0 2px rgba(239, 155, 155, 0.16);
+}
+.filter-chip.filter-cancelled.active {
+  background: #eeeeee; border-color: #c8c8c8; color: #5f6368;
+  box-shadow: 0 0 0 2px rgba(160, 160, 160, 0.14);
 }
 
 /* ── Meetings list ────────────────────────────────────────────────── */
@@ -353,12 +377,13 @@ select.input { cursor: pointer; }
   border-radius: 2px;
   margin: 0.5rem 0;
 }
-.meeting-status-bar.badge-pending { background: #3b7dd8; }
-.meeting-status-bar.badge-progress { background: #f39c12; }
+.meeting-status-bar.badge-pending { background: #f0c96a; }
+.meeting-status-bar.badge-progress { background: #3b7dd8; }
 .meeting-status-bar.badge-finished { background: #2ecc71; }
 .meeting-status-bar.badge-warn { background: #f39c12; }
-.meeting-status-bar.badge-err { background: #e74c3c; }
-.meeting-status-bar.badge-cancelled { background: #bdc3c7; }
+.meeting-status-bar.badge-err,
+.meeting-status-bar.badge-denied { background: #e74c3c; }
+.meeting-status-bar.badge-cancelled { background: #a8adb3; }
 
 .meeting-body {
   flex: 1;
@@ -399,12 +424,12 @@ select.input { cursor: pointer; }
   font-size: 0.72rem;
   font-weight: 700;
 }
-.badge-pending { background: #e8efff; color: #2a4aaa; }
-.badge-progress { background: #fff4da; color: #8a5b00; }
+.badge-pending { background: #fff4d6; color: #7a5600; }
+.badge-progress { background: #e5f0ff; color: #174a8b; }
 .badge-finished { background: #e3f8ee; color: #1a6b40; }
-.badge-warn    { background: #fff4da; color: #8a5b00; }
+.badge-warn    { background: #fff0df; color: #8a4b00; }
 .badge-err     { background: #ffe4e4; color: #9b1a1a; }
-.badge-cancelled { background: #f0f0f0; color: #666; }
+.badge-cancelled { background: #eeeeee; color: #5f6368; }
 .badge-denied  { background: #ffe4e4; color: #9b2020; }
 
 .meeting-meta {

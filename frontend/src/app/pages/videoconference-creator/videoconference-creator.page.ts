@@ -332,6 +332,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST' || meeting.status === 'DENIED') {
             return meeting.status;
         }
+        if (meeting.is_finished === true) return 'FINISHED';
         if (this.isMeetingInProgress(meeting)) return 'IN_PROGRESS';
         if (this.isMeetingFinished(meeting)) return 'FINISHED';
         return 'PENDING';
@@ -363,6 +364,20 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         };
         const status = this.displayStatus(meeting);
         return map[status] ?? '';
+    }
+
+    filterClass(filter: StatusFilter): string {
+        const map: Record<StatusFilter, string> = {
+            ALL: 'filter-all',
+            PENDING: 'filter-pending',
+            IN_PROGRESS: 'filter-progress',
+            FINISHED: 'filter-finished',
+            DRAFT_NO_HOST: 'filter-warn',
+            ERROR: 'filter-err',
+            CANCELLED: 'filter-cancelled',
+            DENIED: 'filter-denied',
+        };
+        return map[filter] ?? '';
     }
 
     typeLabel(type: ManualMeeting['type']): string {
@@ -412,6 +427,8 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
             return false;
         }
+        if (meeting.is_finished === true) return false;
+        if (meeting.is_in_progress === true) return true;
         const now = new Date();
         if (meeting.type === 'WEEKLY') {
             return this.isWeeklyMeetingInProgress(meeting, now);
@@ -425,6 +442,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
         if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
             return false;
         }
+        if (meeting.is_finished === true) return true;
         const now = new Date();
         if (meeting.type === 'WEEKLY') {
             return this.isWeeklyMeetingFinished(meeting, now);

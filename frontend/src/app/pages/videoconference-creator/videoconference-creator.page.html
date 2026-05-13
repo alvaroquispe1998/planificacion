@@ -42,6 +42,7 @@
               *ngFor="let f of statusFilters"
               type="button"
               class="filter-chip"
+              [ngClass]="filterClass(f.value)"
               [class.active]="statusFilter === f.value"
               (click)="setStatusFilter(f.value)">
               {{ f.label }}
