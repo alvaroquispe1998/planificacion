@@ -5,6 +5,7 @@ export const ManualVideoconferenceStatusValues = [
     'CREATED',
     'DRAFT_NO_HOST',
     'APPROVED_WITH_BACKUP',
+    'DENIED',
     'ERROR',
     'CANCELLED',
 ] as const;
@@ -89,6 +90,10 @@ export class ManualVideoconferenceEntity {
 
     @Column({ type: 'text', nullable: true })
     error_message!: string | null;
+
+    /** Internet Message-ID of the TI alert email sent via MS Graph (for reply threading). */
+    @Column({ type: 'varchar', length: 512, nullable: true })
+    ti_alert_message_id!: string | null;
 
     @Column({ type: 'datetime' })
     created_at!: Date;

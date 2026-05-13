@@ -44,13 +44,19 @@
         </button>
         <button type="button" class="btn btn-approve"
           *ngIf="meeting.status === 'DRAFT_NO_HOST' && canApproveBackup"
-          [disabled]="approving || cancelling"
+          [disabled]="approving || cancelling || denying"
           (click)="approveBackup()">
           {{ approving ? 'Aprobando...' : '✓ Aprobar con grupo backup' }}
         </button>
+        <button type="button" class="btn btn-deny"
+          *ngIf="canDeny"
+          [disabled]="denying || approving || cancelling"
+          (click)="denyMeeting()">
+          {{ denying ? 'Denegando...' : '✕ Denegar solicitud' }}
+        </button>
         <button type="button" class="btn btn-danger"
           *ngIf="canCancel"
-          [disabled]="cancelling || syncing || approving"
+          [disabled]="cancelling || syncing || approving || denying"
           (click)="cancelMeeting()">
           <span *ngIf="!cancelling">
             {{ meeting.status === 'DRAFT_NO_HOST' ? '✕ Cancelar solicitud' : '✕ Cancelar reunión' }}

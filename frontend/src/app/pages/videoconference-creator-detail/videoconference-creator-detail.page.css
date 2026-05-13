@@ -125,6 +125,10 @@
   background: #0f7752; color: #fff;
 }
 .btn-approve:hover:not(:disabled) { background: #0a5c3c; }
+.btn-deny {
+  background: #9b2020; color: #fff;
+}
+.btn-deny:hover:not(:disabled) { background: #7a1818; }
 .btn-danger {
   background: #a92d2d; color: #fff;
 }
@@ -634,6 +638,7 @@
 .badge-warn    { background: #fff4da; color: #8a5b00; }
 .badge-err     { background: #ffe4e4; color: #9b1a1a; }
 .badge-cancelled { background: #f0f0f0; color: #666; }
+.badge-denied  { background: #ffe4e4; color: #9b2020; }
 
 @media (max-width: 760px) {
   .hero-card {

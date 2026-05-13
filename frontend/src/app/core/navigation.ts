@@ -206,12 +206,12 @@ export const APP_NAV_GROUPS: NavGroup[] = [
       },
       {
         key: 'videoconference_creator',
-        label: 'Crear Videoconferencias',
+        label: 'Reuniones',
         hint: 'Reuniones Zoom manuales',
         icon: 'camera',
         children: [
           {
-            label: 'Crear reunión',
+            label: 'Mis reuniones',
             path: '/videoconferences/creator',
             icon: 'spark',
             window: 'window.videoconference_creator',

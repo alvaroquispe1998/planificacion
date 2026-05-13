@@ -9,6 +9,7 @@ export type ManualMeetingStatus =
     | 'CREATED'
     | 'DRAFT_NO_HOST'
     | 'APPROVED_WITH_BACKUP'
+    | 'DENIED'
     | 'ERROR'
     | 'CANCELLED';
 export type ManualMeetingDisplayStatus =
@@ -16,6 +17,7 @@ export type ManualMeetingDisplayStatus =
     | 'IN_PROGRESS'
     | 'FINISHED'
     | 'DRAFT_NO_HOST'
+    | 'DENIED'
     | 'ERROR'
     | 'CANCELLED';
 
@@ -135,7 +137,7 @@ export class VideoconferenceCreatorApiService {
     }
 
     syncMeeting(id: string) {
-        return this.http.post<{ synced_instances: number; synced_participants: number; synced_recordings: number }>(`${BASE}/meetings/${id}/sync`, {});
+        return this.http.post<{ synced_instances: number; synced_participants: number; synced_recordings: number; recording_errors?: string[] }>(`${BASE}/meetings/${id}/sync`, {});
     }
 
     getZoomStatus(id: string) {
@@ -144,6 +146,10 @@ export class VideoconferenceCreatorApiService {
 
     approveDraft(id: string, dto: ApproveDraftDto = {}) {
         return this.http.post<ManualMeeting>(`${BASE}/meetings/${id}/approve-backup`, dto);
+    }
+
+    denyDraft(id: string) {
+        return this.http.post<ManualMeeting>(`${BASE}/meetings/${id}/deny`, {});
     }
 
     cancelMeeting(id: string) {

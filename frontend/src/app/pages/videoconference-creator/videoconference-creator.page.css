@@ -405,10 +405,12 @@ select.input { cursor: pointer; }
 .badge-warn    { background: #fff4da; color: #8a5b00; }
 .badge-err     { background: #ffe4e4; color: #9b1a1a; }
 .badge-cancelled { background: #f0f0f0; color: #666; }
+.badge-denied  { background: #ffe4e4; color: #9b2020; }
 
 .meeting-meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.75rem;
   font-size: 0.8rem;
   color: #60799b;

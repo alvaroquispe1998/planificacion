@@ -329,7 +329,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
     }
 
     displayStatus(meeting: ManualMeeting): ManualMeetingDisplayStatus {
-        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST') {
+        if (meeting.status === 'CANCELLED' || meeting.status === 'ERROR' || meeting.status === 'DRAFT_NO_HOST' || meeting.status === 'DENIED') {
             return meeting.status;
         }
         if (this.isMeetingInProgress(meeting)) return 'IN_PROGRESS';
@@ -343,6 +343,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
             IN_PROGRESS: 'En proceso',
             FINISHED: 'Finalizada',
             DRAFT_NO_HOST: 'Pendiente de host',
+            DENIED: 'Denegada',
             ERROR: 'Error',
             CANCELLED: 'Cancelada',
         };
@@ -356,6 +357,7 @@ export class VideoconferenceCreatorPageComponent implements OnInit, OnDestroy {
             IN_PROGRESS: 'badge-progress',
             FINISHED: 'badge-finished',
             DRAFT_NO_HOST: 'badge-warn',
+            DENIED: 'badge-denied',
             ERROR: 'badge-err',
             CANCELLED: 'badge-cancelled',
         };

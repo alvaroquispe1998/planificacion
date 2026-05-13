@@ -127,6 +127,16 @@ export class VideoconferenceCreatorController {
     }
 
     /**
+     * Denies a DRAFT_NO_HOST meeting. Sets status to DENIED and notifies TI.
+     * Requires approve_backup permission.
+     */
+    @Post('meetings/:id/deny')
+    @RequirePermissions('action.videoconference_creator.approve_backup')
+    async denyDraft(@Param('id') id: string) {
+        return this.service.denyDraft(id);
+    }
+
+    /**
      * Lists DRAFT_NO_HOST meetings for TI/admin review.
      */
     @Get('drafts')
