@@ -711,17 +711,16 @@ export class VideoconferenceCreatorService {
         meetingUrl: string;
     }): string {
         const isApproved = p.action === 'approved';
-        const headerBg = isApproved
-            ? 'linear-gradient(135deg,#1a5c36 0%,#1e8a50 100%)'
-            : 'linear-gradient(135deg,#6b1a1a 0%,#9b2020 100%)';
-        const icon = isApproved ? '✅' : '❌';
+        // Use solid background-color — Outlook desktop (Word engine) strips CSS gradients
+        const headerBgColor = isApproved ? '#1a5c36' : '#7a1a1a';
+        const icon = isApproved ? '\u2705' : '\u274c';
         const title = isApproved ? 'Solicitud aprobada' : 'Solicitud denegada';
         const bodyText = isApproved
-            ? `La solicitud de videoconferencia fue <strong style="color:#1a6b3a">aprobada</strong>. Se asignó el host <strong>${p.hostEmail}</strong> y la reunión fue creada en Zoom.`
-            : `La solicitud de videoconferencia fue <strong style="color:#9b2020">denegada</strong>. No se creará la reunión en Zoom.`;
+            ? `La solicitud de videoconferencia fue <strong style="color:#1a5c36">aprobada</strong>. Se asign\u00f3 el host <strong style="color:#1a2e4a">${p.hostEmail}</strong> y la reuni\u00f3n fue creada en Zoom.`
+            : `La solicitud de videoconferencia fue <strong style="color:#7a1a1a">denegada</strong>. No se crear\u00e1 la reuni\u00f3n en Zoom.`;
         const btnHtml = p.meetingUrl
             ? `<div style="margin-top:24px;text-align:center">
-                 <a href="${p.meetingUrl}" style="display:inline-block;padding:11px 24px;background:#1e3458;color:#fff;border-radius:9px;text-decoration:none;font-weight:700;font-size:13px">
+                 <a href="${p.meetingUrl}" style="display:inline-block;padding:11px 24px;background:#1e3458;color:#ffffff;border-radius:9px;text-decoration:none;font-weight:700;font-size:13px">
                    Ver solicitud
                  </a>
                </div>`
@@ -730,34 +729,34 @@ export class VideoconferenceCreatorService {
         return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="utf-8"></head>
-<body style="margin:0;padding:0;background:#e8edf4;font-family:'Segoe UI',Arial,sans-serif">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#e8edf4;padding:32px 16px">
+<body style="margin:0;padding:0;background:#dce4ef;font-family:'Segoe UI',Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#dce4ef;padding:32px 16px">
     <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.12)">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #c0cfdf">
         <tr>
-          <td style="background:${headerBg};padding:24px 36px">
-            <p style="margin:0 0 4px;color:rgba(255,255,255,.8);font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700">SISTEMA DE VIDEOCONFERENCIAS</p>
+          <td style="background-color:${headerBgColor};padding:24px 36px">
+            <p style="margin:0 0 4px;color:#c8e0c8;font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700">SISTEMA DE VIDEOCONFERENCIAS</p>
             <h1 style="margin:0;color:#ffffff;font-size:19px;font-weight:700">${icon} ${title}</h1>
           </td>
         </tr>
         <tr>
           <td style="padding:28px 36px;background:#ffffff">
-            <p style="margin:0 0 20px;color:#334e6b;font-size:14px;line-height:1.6">${bodyText}</p>
-            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #c8d8ea;border-radius:10px;overflow:hidden;font-size:14px">
+            <p style="margin:0 0 20px;color:#1a2e4a;font-size:14px;line-height:1.6">${bodyText}</p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #b8cfe0;border-radius:10px;overflow:hidden;font-size:14px">
               <tr style="background:#eef4fb">
-                <td style="padding:11px 16px;color:#4a6a88;font-weight:700;width:38%;border-bottom:1px solid #c8d8ea">Reunión</td>
-                <td style="padding:11px 16px;color:#1a2e4a;font-weight:700;border-bottom:1px solid #c8d8ea">${p.topic}</td>
+                <td style="padding:11px 16px;color:#2a4a6a;font-weight:700;width:38%;border-bottom:1px solid #b8cfe0">Reuni\u00f3n</td>
+                <td style="padding:11px 16px;color:#0d1f36;font-weight:700;border-bottom:1px solid #b8cfe0">${p.topic}</td>
               </tr>
               <tr style="background:#ffffff">
-                <td style="padding:11px 16px;color:#4a6a88;font-weight:700">Solicitante</td>
-                <td style="padding:11px 16px;color:#1a2e4a;font-weight:600">${p.creatorName}</td>
+                <td style="padding:11px 16px;color:#2a4a6a;font-weight:700">Solicitante</td>
+                <td style="padding:11px 16px;color:#0d1f36;font-weight:600">${p.creatorName}</td>
               </tr>
             </table>
             ${btnHtml}
           </td>
         </tr>
         <tr>
-          <td style="padding:14px 36px;background:#eef4fb;border-top:1px solid #c8d8ea;text-align:center;color:#6688aa;font-size:11px">
+          <td style="padding:14px 36px;background:#eef4fb;border-top:1px solid #b8cfe0;text-align:center;color:#4a6a88;font-size:11px">
             Universidad Autónoma de Ica — Sistema de Planificación Académica
           </td>
         </tr>
@@ -1180,7 +1179,7 @@ export class VideoconferenceCreatorService {
         const meetingUrl = p.systemUrl ? `${p.systemUrl}/videoconferences/creator/${p.meetingId}` : '';
         const btnHtml = meetingUrl
             ? `<div style="margin-top:28px;text-align:center">
-                 <a href="${meetingUrl}" style="display:inline-block;padding:13px 28px;background:#1e3458;color:#fff;border-radius:9px;text-decoration:none;font-weight:700;font-size:14px;letter-spacing:.02em">
+                 <a href="${meetingUrl}" style="display:inline-block;padding:13px 28px;background-color:#1e3458;color:#ffffff;border-radius:9px;text-decoration:none;font-weight:700;font-size:14px;letter-spacing:.02em">
                    Ver solicitud
                  </a>
                </div>`
@@ -1189,51 +1188,49 @@ export class VideoconferenceCreatorService {
         return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f0f4f9;font-family:'Segoe UI',Arial,sans-serif">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f9;padding:32px 16px">
+<body style="margin:0;padding:0;background-color:#dce4ef;font-family:'Segoe UI',Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#dce4ef;padding:32px 16px">
     <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10)">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #b8cfe0">
 
-        <!-- Header -->
+        <!-- Header: solid color, no gradient (Outlook desktop strips CSS gradients) -->
         <tr>
-          <td style="background:linear-gradient(135deg,#1e3458 0%,#1e5799 100%);padding:28px 36px">
-            <p style="margin:0 0 6px;color:#a8c4e8;font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700">SISTEMA DE VIDEOCONFERENCIAS</p>
-            <h1 style="margin:0;color:#fff;font-size:21px;font-weight:700;line-height:1.3">📹 Solicitud pendiente de host Zoom</h1>
+          <td style="background-color:#1e3a6e;padding:28px 36px">
+            <p style="margin:0 0 6px;color:#a8c8f0;font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700">SISTEMA DE VIDEOCONFERENCIAS</p>
+            <h1 style="margin:0;color:#ffffff;font-size:21px;font-weight:700;line-height:1.3">&#128249; Solicitud pendiente de host Zoom</h1>
           </td>
         </tr>
 
         <!-- Body -->
         <tr>
-          <td style="padding:32px 36px">
-            <p style="margin:0 0 24px;color:#60799b;font-size:14px;line-height:1.6">
-              Se envió una nueva solicitud de videoconferencia que <strong style="color:#c45000">no pudo asignarse automáticamente</strong> porque no hay hosts Zoom disponibles en el horario indicado.
+          <td style="padding:32px 36px;background-color:#ffffff">
+            <p style="margin:0 0 24px;color:#1a2e4a;font-size:14px;line-height:1.6">
+              Se envi\u00f3 una nueva solicitud de videoconferencia que <strong style="color:#b84400">no pudo asignarse autom\u00e1ticamente</strong> porque no hay hosts Zoom disponibles en el horario indicado.
             </p>
 
             <!-- Info table -->
-            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #dbe8f4;border-radius:10px;overflow:hidden;font-size:14px">
-              <tr style="background:#f7fafd">
-                <td style="padding:12px 16px;color:#6688aa;font-weight:700;width:38%;border-bottom:1px solid #dbe8f4">Reunión</td>
-                <td style="padding:12px 16px;color:#1e3458;font-weight:700;border-bottom:1px solid #dbe8f4">${p.topic}</td>
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #b8cfe0;border-radius:10px;overflow:hidden;font-size:14px">
+              <tr style="background-color:#eef4fb">
+                <td style="padding:12px 16px;color:#2a4a6a;font-weight:700;width:38%;border-bottom:1px solid #b8cfe0">Reuni\u00f3n</td>
+                <td style="padding:12px 16px;color:#0d1f36;font-weight:700;border-bottom:1px solid #b8cfe0">${p.topic}</td>
               </tr>
-              <tr>
-                <td style="padding:12px 16px;color:#6688aa;font-weight:700;border-bottom:1px solid #dbe8f4">Solicitante</td>
-                <td style="padding:12px 16px;color:#1e3458;font-weight:600;border-bottom:1px solid #dbe8f4">${p.creatorName} &lt;${p.fromEmail}&gt;</td>
+              <tr style="background-color:#ffffff">
+                <td style="padding:12px 16px;color:#2a4a6a;font-weight:700;border-bottom:1px solid #b8cfe0">Solicitante</td>
+                <td style="padding:12px 16px;color:#0d1f36;font-weight:600;border-bottom:1px solid #b8cfe0">${p.creatorName} &lt;${p.fromEmail}&gt;</td>
               </tr>
-              <tr style="background:#f7fafd">
-                <td style="padding:12px 16px;color:#6688aa;font-weight:700;border-bottom:1px solid #dbe8f4">Fecha</td>
-                <td style="padding:12px 16px;color:#1e3458;font-weight:600;border-bottom:1px solid #dbe8f4;text-transform:capitalize">${p.dateStr}</td>
+              <tr style="background-color:#eef4fb">
+                <td style="padding:12px 16px;color:#2a4a6a;font-weight:700;border-bottom:1px solid #b8cfe0">Fecha</td>
+                <td style="padding:12px 16px;color:#0d1f36;font-weight:600;border-bottom:1px solid #b8cfe0;text-transform:capitalize">${p.dateStr}</td>
               </tr>
-              <tr>
-                <td style="padding:12px 16px;color:#6688aa;font-weight:700;border-bottom:1px solid #dbe8f4">Hora · Duración</td>
-                <td style="padding:12px 16px;color:#1e3458;font-weight:600;border-bottom:1px solid #dbe8f4">${p.timeStr} · ${p.durationMinutes} min</td>
+              <tr style="background-color:#ffffff">
+                <td style="padding:12px 16px;color:#2a4a6a;font-weight:700;border-bottom:1px solid #b8cfe0">Hora &middot; Duraci\u00f3n</td>
+                <td style="padding:12px 16px;color:#0d1f36;font-weight:600;border-bottom:1px solid #b8cfe0">${p.timeStr} &middot; ${p.durationMinutes} min</td>
               </tr>
-              <tr style="background:#f7fafd">
-                <td style="padding:12px 16px;color:#6688aa;font-weight:700">Grupo Zoom</td>
-                <td style="padding:12px 16px;color:#1e3458;font-weight:600">${p.groupName}</td>
+              <tr style="background-color:#eef4fb">
+                <td style="padding:12px 16px;color:#2a4a6a;font-weight:700">Grupo Zoom</td>
+                <td style="padding:12px 16px;color:#0d1f36;font-weight:600">${p.groupName}</td>
               </tr>
             </table>
-
-            <!-- Warning banner removed -->
 
             ${btnHtml}
           </td>
@@ -1241,8 +1238,8 @@ export class VideoconferenceCreatorService {
 
         <!-- Footer -->
         <tr>
-          <td style="padding:16px 36px;background:#f7fafd;border-top:1px solid #dbe8f4;text-align:center;color:#9ab0c8;font-size:11px">
-            Universidad Autónoma de Ica — Sistema de Planificación Académica
+          <td style="padding:16px 36px;background-color:#eef4fb;border-top:1px solid #b8cfe0;text-align:center;color:#4a6a88;font-size:11px">
+            Universidad Aut\u00f3noma de Ica \u2014 Sistema de Planificaci\u00f3n Acad\u00e9mica
           </td>
         </tr>
 
