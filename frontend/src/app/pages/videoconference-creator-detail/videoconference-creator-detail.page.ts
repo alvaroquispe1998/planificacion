@@ -154,6 +154,7 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
                 }
                 this.detail = detail;
                 this.loading = false;
+                this.setInitialZoomStatus();
                 this.cdr.markForCheck();
             });
         });
@@ -173,17 +174,11 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         this.api.syncMeeting(this.meeting.id).subscribe({
             next: (result) => {
                 this.syncing = false;
-                const parts: string[] = [];
-                if (result.synced_instances > 0) parts.push(`${result.synced_instances} sesión(es)`);
-                if (result.synced_participants > 0) parts.push(`${result.synced_participants} participante(s)`);
-                if (result.synced_recordings > 0) parts.push(`${result.synced_recordings} grabación(es)`);
                 const hasErrors = result.recording_errors && result.recording_errors.length > 0;
-                if (parts.length > 0) {
-                    this.syncMsg = `Sincronizado: ${parts.join(', ')}.`;
-                } else if (hasErrors) {
+                if (hasErrors) {
                     this.syncMsg = `Sin datos nuevos, pero hubo un error al obtener grabaciones: ${result.recording_errors![0]}`;
                 } else {
-                    this.syncMsg = 'Ya está al día. No hay datos nuevos en Zoom.';
+                    this.syncMsg = 'Sincronización completada. La información visible fue actualizada desde Zoom.';
                 }
                 this.load(this.meeting!.id);
             },
@@ -302,6 +297,11 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
 
     checkZoomStatus(): void {
         if (!this.meeting?.zoom_meeting_id || this.checkingZoom) return;
+        if (this.displayStatus(this.meeting) === 'FINISHED') {
+            this.zoomStatus = { zoom_status: null, reason: 'LOCAL_FINISHED' };
+            this.cdr.markForCheck();
+            return;
+        }
         this.checkingZoom = true;
         this.zoomStatus = null;
         this.cdr.markForCheck();
@@ -321,6 +321,12 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
 
     zoomStatusLabel(): string {
         if (!this.zoomStatus) return '';
+        switch (this.zoomStatus.reason) {
+            case 'LOCAL_FINISHED': return 'Finalizada';
+            case 'LOCAL_CANCELLED': return 'Cancelada';
+            case 'LOCAL_DENIED': return 'Denegada';
+            case 'LOCAL_ERROR': return 'Con error';
+        }
         switch (this.zoomStatus.zoom_status) {
             case 'started': return '🔴 En curso ahora';
             case 'waiting': return '⏳ Esperando inicio';
@@ -329,10 +335,42 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     }
 
     zoomStatusClass(): string {
+        switch (this.zoomStatus?.reason) {
+            case 'LOCAL_FINISHED': return 'zoom-finished';
+            case 'LOCAL_CANCELLED': return 'zoom-cancelled';
+            case 'LOCAL_DENIED':
+            case 'LOCAL_ERROR':
+            case 'NOT_FOUND': return 'zoom-error';
+        }
         switch (this.zoomStatus?.zoom_status) {
             case 'started': return 'zoom-live';
             case 'waiting': return 'zoom-waiting';
             default: return 'zoom-offline';
+        }
+    }
+
+    private setInitialZoomStatus(): void {
+        if (!this.meeting) return;
+        const status = this.displayStatus(this.meeting);
+        if (status === 'FINISHED') {
+            this.zoomStatus = { zoom_status: null, reason: 'LOCAL_FINISHED' };
+            return;
+        }
+        if (status === 'CANCELLED') {
+            this.zoomStatus = { zoom_status: null, reason: 'LOCAL_CANCELLED' };
+            return;
+        }
+        if (status === 'DENIED') {
+            this.zoomStatus = { zoom_status: null, reason: 'LOCAL_DENIED' };
+            return;
+        }
+        if (status === 'ERROR') {
+            this.zoomStatus = { zoom_status: null, reason: 'LOCAL_ERROR' };
+            return;
+        }
+        this.zoomStatus = null;
+        if (this.meeting.zoom_meeting_id && !this.checkingZoom) {
+            this.checkZoomStatus();
         }
     }
 

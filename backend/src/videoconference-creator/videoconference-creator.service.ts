@@ -963,8 +963,9 @@ export class VideoconferenceCreatorService {
         const assignedHostIds = [...new Set(meetings.map((m) => m.assigned_zoom_user_id).filter(Boolean))] as string[];
         const backupHostIds = [...new Set(meetings.map((m) => m.backup_zoom_user_id).filter(Boolean))] as string[];
         const zoomUserIds = [...new Set([...assignedHostIds, ...backupHostIds])];
+        const meetingIds = meetings.map((m) => m.id);
 
-        const [creators, zoomUsers, zoomGroups] = await Promise.all([
+        const [creators, zoomUsers, zoomGroups, endedInstances] = await Promise.all([
             creatorIds.length
                 ? this.authUserRepo.find({ where: { id: In(creatorIds) }, select: ['id', 'display_name', 'username'] })
                 : Promise.resolve([]),
@@ -972,16 +973,29 @@ export class VideoconferenceCreatorService {
                 ? this.zoomUserRepo.find({ where: { id: In(zoomUserIds) } })
                 : Promise.resolve([]),
             this.zoomGroupRepo.find(),
+            meetingIds.length
+                ? this.instanceRepo.find({
+                    where: { manual_videoconference_id: In(meetingIds), status: 'ENDED' },
+                    select: ['id', 'manual_videoconference_id'] as any,
+                })
+                : Promise.resolve([]),
         ]);
 
         const creatorMap = new Map(creators.map((u) => [u.id, u.display_name || u.username]));
         const zoomUserMap = new Map(zoomUsers.map((u) => [u.id, u.name || u.email]));
         const zoomGroupMap = new Map(zoomGroups.map((group) => [group.id, group]));
+        const hasEndedInstanceMap = new Map<string, boolean>();
+        for (const instance of endedInstances) {
+            if (instance.manual_videoconference_id) {
+                hasEndedInstanceMap.set(instance.manual_videoconference_id, true);
+            }
+        }
 
         const now = new Date();
         return meetings.map((m) => {
-            const isInProgress = this.isMeetingInProgress(m, now);
-            const isFinished = this.isMeetingFinished(m, now);
+            const hasEndedInstance = hasEndedInstanceMap.get(m.id) === true;
+            const isFinished = this.isMeetingFinished(m, now) || (m.type === 'UNIQUE' && hasEndedInstance);
+            const isInProgress = isFinished ? false : this.isMeetingInProgress(m, now);
             return {
                 ...m,
                 creator_display_name: creatorMap.get(m.created_by_user_id) ?? null,
@@ -995,6 +1009,7 @@ export class VideoconferenceCreatorService {
                 backup_zoom_group_id: zoomGroupMap.get(m.zoom_group_id)?.backup_zoom_group_id ?? null,
                 backup_zoom_group_name: zoomGroupMap.get(zoomGroupMap.get(m.zoom_group_id)?.backup_zoom_group_id ?? '')?.name ?? null,
                 is_in_progress: isInProgress,
+                is_finished: isFinished,
                 can_cancel: m.status !== 'CANCELLED' && !isInProgress && !isFinished && (m.status === 'DRAFT_NO_HOST' || m.start_time > now),
             };
         });
