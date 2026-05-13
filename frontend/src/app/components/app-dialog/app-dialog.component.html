@@ -19,7 +19,7 @@
 
       <div class="dialog-actions">
         <button
-          *ngIf="dialog.kind === 'confirm'"
+          *ngIf="dialog.kind === 'confirm' || dialog.kind === 'prompt'"
           type="button"
           class="btn btn-secondary"
           (click)="cancel()">

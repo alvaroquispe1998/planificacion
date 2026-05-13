@@ -344,6 +344,36 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         return this.detail?.recordings ?? [];
     }
 
+    get videoRecordings(): MeetingRecording[] {
+        const bestByInstance = new Map<string, MeetingRecording>();
+        for (const recording of this.recordings.filter((item) => this.isVideoRecording(item))) {
+            const key = recording.meeting_instance_id || recording.id;
+            const current = bestByInstance.get(key);
+            if (!current || this.recordingScore(recording) > this.recordingScore(current)) {
+                bestByInstance.set(key, recording);
+            }
+        }
+        return [...bestByInstance.values()].sort((a, b) => {
+            const aTime = a.start_time ? new Date(a.start_time).getTime() : 0;
+            const bTime = b.start_time ? new Date(b.start_time).getTime() : 0;
+            return aTime - bTime;
+        });
+    }
+
+    get uniqueParticipants(): MeetingParticipant[] {
+        const participants = this.detail?.participants ?? [];
+        const seen = new Set<string>();
+        return participants.filter((participant) => {
+            const email = `${participant.email ?? ''}`.trim().toLowerCase();
+            const name = `${participant.display_name ?? ''}`.trim().toLowerCase();
+            const role = `${participant.role ?? ''}`.trim().toLowerCase();
+            const key = email || [name, role].filter(Boolean).join('|');
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
     get hasEndedInstances(): boolean {
         return (this.detail?.instances ?? []).some((i) => i['status'] === 'ENDED');
     }
@@ -509,6 +539,23 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
             OTHER: '📄',
         };
         return map[type] ?? '📄';
+    }
+
+    videoRecordingLabel(): string {
+        return 'Video';
+    }
+
+    private isVideoRecording(recording: MeetingRecording): boolean {
+        const type = `${recording.recording_type ?? ''}`.trim().toUpperCase();
+        const extension = `${recording.file_extension ?? ''}`.trim().toLowerCase();
+        return type === 'MP4' || extension === 'mp4';
+    }
+
+    private recordingScore(recording: MeetingRecording): number {
+        const size = Number(recording.file_size_bytes ?? 0);
+        return (recording.play_url ? 1_000_000_000 : 0)
+            + (recording.download_url ? 500_000_000 : 0)
+            + (Number.isFinite(size) ? size : 0);
     }
 
     private formatDateTime(value: string | Date): string {

@@ -188,16 +188,16 @@
     </div>
 
     <!-- ── Grabaciones + Participantes ──────────────────────────────── -->
-    <div class="bottom-panels" *ngIf="detail && (recordings.length > 0 || detail.participants.length > 0 || hasAnyInstances)">
+    <div class="bottom-panels" *ngIf="detail && (videoRecordings.length > 0 || uniqueParticipants.length > 0 || hasAnyInstances)">
 
       <!-- Participantes -->
-      <div class="panel panel--participants" *ngIf="detail.participants.length > 0">
+      <div class="panel panel--participants" *ngIf="uniqueParticipants.length > 0">
         <div class="panel-head">
           <h2 class="panel-title">Participantes</h2>
-          <span class="count-chip">{{ detail.participants.length }}</span>
+          <span class="count-chip">{{ uniqueParticipants.length }}</span>
         </div>
         <div class="participant-list">
-          <div class="participant-row" *ngFor="let p of detail.participants">
+          <div class="participant-row" *ngFor="let p of uniqueParticipants">
             <span class="participant-avatar">👤</span>
             <div class="participant-info">
               <p class="participant-name">{{ p.display_name || '—' }}</p>
@@ -209,18 +209,18 @@
       </div>
 
       <!-- Grabaciones -->
-      <div class="panel panel--recordings" *ngIf="recordings.length > 0 || hasAnyInstances">
+      <div class="panel panel--recordings" *ngIf="videoRecordings.length > 0 || hasAnyInstances">
         <div class="panel-head">
           <h2 class="panel-title">Grabaciones</h2>
-          <span class="count-chip" *ngIf="recordings.length > 0">{{ recordings.length }}</span>
+          <span class="count-chip" *ngIf="videoRecordings.length > 0">{{ videoRecordings.length }}</span>
         </div>
 
         <!-- Grabaciones disponibles -->
-        <div class="recording-list" *ngIf="recordings.length > 0">
-          <div class="recording-row" *ngFor="let rec of recordings">
-            <div class="recording-icon">{{ recordingIcon(rec.recording_type) }}</div>
+        <div class="recording-list" *ngIf="videoRecordings.length > 0">
+          <div class="recording-row" *ngFor="let rec of videoRecordings">
+            <div class="recording-icon" aria-label="Video"><span class="recording-video-icon"></span></div>
             <div class="recording-meta">
-              <p class="recording-type-label">{{ recordingTypeLabel(rec.recording_type) }}</p>
+              <p class="recording-type-label">{{ videoRecordingLabel() }}</p>
               <p class="recording-date">{{ rec.start_time ? (rec.start_time | date:'dd/MM/yyyy HH:mm') : 'Grabación' }}</p>
               <p class="recording-size" *ngIf="rec.file_size_bytes">{{ formatBytes(rec.file_size_bytes) }}</p>
             </div>
@@ -234,7 +234,7 @@
         </div>
 
         <!-- Sin grabaciones aún -->
-        <div class="recording-pending" *ngIf="recordings.length === 0">
+        <div class="recording-pending" *ngIf="videoRecordings.length === 0">
           <span class="recording-pending-icon">🎞️</span>
           <p class="recording-pending-title" *ngIf="hasEndedInstances">Grabación en proceso</p>
           <p class="recording-pending-title" *ngIf="!hasEndedInstances">Sin grabación aún</p>

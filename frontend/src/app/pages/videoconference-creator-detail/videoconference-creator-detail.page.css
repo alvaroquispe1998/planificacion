@@ -557,10 +557,28 @@
 .recording-icon {
   width: 2.2rem; height: 2.2rem;
   border-radius: 10px;
-  background: #fff0e8;
+  background: #e8efff;
   display: flex; align-items: center; justify-content: center;
-  font-size: 1.1rem;
   flex-shrink: 0;
+}
+
+.recording-video-icon {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 13px;
+  border-radius: 4px;
+  background: #2a4aaa;
+}
+
+.recording-video-icon::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  top: 3px;
+  border-left: 7px solid #2a4aaa;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
 }
 
 .recording-meta { flex: 1; min-width: 0; }
