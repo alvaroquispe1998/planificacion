@@ -387,7 +387,14 @@ export class VideoconferenceCreatorService {
 
             // Sync recordings — always replace (delete + re-insert) so status changes (processing→available) are picked up
             try {
-                const recordings = await this.zoomService.listMeetingRecordings(inst.uuid);
+                // Try UUID first (instance-specific); fall back to numeric ID if Zoom returns nothing
+                let recordings = await this.zoomService.listMeetingRecordings(inst.uuid);
+                if (!recordings.length && mv.zoom_meeting_id) {
+                    recordings = await this.zoomService.listMeetingRecordings(mv.zoom_meeting_id);
+                    if (recordings.length) {
+                        console.log(`[VideoconferenceCreator] syncFromZoom: recordings fetched via numeric meeting ID ${mv.zoom_meeting_id}`);
+                    }
+                }
                 const validTypes = ['MP4', 'M4A', 'CHAT', 'TRANSCRIPT', 'VTT', 'OTHER'] as const;
                 // Delete existing recordings for this instance before re-inserting
                 await this.recordingRepo.delete({ meeting_instance_id: instanceId });
@@ -514,7 +521,7 @@ export class VideoconferenceCreatorService {
         return mv;
     }
 
-    /** Sends a reply (approve or deny) in the same email thread as the original TI alert. */
+    /** Sends a reply (approve or deny) to the requester. Tries to thread it as a reply in TI's mailbox. */
     private async sendReplyEmail(
         mv: ManualVideoconferenceEntity,
         action: 'approved' | 'denied',
@@ -527,19 +534,19 @@ export class VideoconferenceCreatorService {
             const tenantId = (dbConfig?.ms_tenant_id ?? process.env['MS_TENANT_ID'] ?? '').trim();
             const clientId = (dbConfig?.ms_client_id ?? process.env['MS_CLIENT_ID'] ?? '').trim();
             const clientSecret = (dbConfig?.ms_client_secret ?? process.env['MS_CLIENT_SECRET'] ?? '').trim();
-            const tiRecipient = (dbConfig?.mail_ti_recipient ?? process.env['MAIL_TI_RECIPIENT'] ?? '').trim();
+            const tiMailbox = (dbConfig?.mail_ti_recipient ?? process.env['MAIL_TI_RECIPIENT'] ?? '').trim();
             const systemUrl = (dbConfig?.system_public_url ?? process.env['SYSTEM_PUBLIC_URL'] ?? '').trim().replace(/\/$/, '');
 
-            if (!tenantId || !clientId || !clientSecret || !tiRecipient) return;
+            if (!tenantId || !clientId || !clientSecret || !tiMailbox) return;
 
-            // Get creator info for fromEmail
+            // Get creator info — this is the RECIPIENT of the reply
             const creator = await this.authUserRepo.findOne({
                 where: { id: mv.created_by_user_id },
                 select: ['id', 'email', 'display_name', 'username'] as any,
             });
-            const fromEmail = creator?.email?.trim();
-            if (!fromEmail) return;
-            const creatorName = (creator as any).display_name || (creator as any).username || fromEmail;
+            const creatorEmail = creator?.email?.trim();
+            if (!creatorEmail) return;
+            const creatorName = (creator as any).display_name || (creator as any).username || creatorEmail;
 
             const accessToken = await this.getMsGraphToken(tenantId, clientId, clientSecret);
             if (!accessToken) return;
@@ -569,51 +576,104 @@ export class VideoconferenceCreatorService {
                 });
             }
 
-            // Build message body with threading headers if we have the original message ID
-            const messageBody: Record<string, unknown> = {
-                subject,
-                body: { contentType: 'HTML', content: html },
-                toRecipients: [{ emailAddress: { address: tiRecipient } }],
-                from: { emailAddress: { address: fromEmail, name: creatorName } },
-            };
+            let emailSent = false;
 
+            // ── Attempt 1: threaded reply via createReply in TI's mailbox ──────────
             if (mv.ti_alert_message_id) {
-                messageBody['singleValueExtendedProperties'] = [
-                    { id: 'String 0x0070', value: mv.ti_alert_message_id },   // PR_CONVERSATION_TOPIC
-                    { id: 'String 0x1042', value: mv.ti_alert_message_id },   // In-Reply-To
-                    { id: 'String 0x1039', value: mv.ti_alert_message_id },   // References
-                ];
+                try {
+                    // Find the original alert in TI's inbox by its RFC Message-ID
+                    const escaped = mv.ti_alert_message_id.replace(/'/g, "''");
+                    const searchRes = await fetch(
+                        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages` +
+                        `?$filter=internetMessageId eq '${escaped}'&$select=id&$top=1`,
+                        { headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15_000) },
+                    );
+                    if (searchRes.ok) {
+                        const searchData = await searchRes.json() as Record<string, unknown>;
+                        const msgs = Array.isArray(searchData['value']) ? searchData['value'] as Record<string, unknown>[] : [];
+                        const origGraphId = typeof msgs[0]?.['id'] === 'string' ? msgs[0]['id'] as string : undefined;
+                        if (origGraphId) {
+                            // Create a draft reply (automatically FROM TI, threads correctly)
+                            const replyDraftRes = await fetch(
+                                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages/${encodeURIComponent(origGraphId)}/createReply`,
+                                {
+                                    method: 'POST',
+                                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        message: {
+                                            subject,
+                                            body: { contentType: 'HTML', content: html },
+                                            toRecipients: [{ emailAddress: { address: creatorEmail, name: creatorName } }],
+                                        },
+                                    }),
+                                    signal: AbortSignal.timeout(15_000),
+                                },
+                            );
+                            if (replyDraftRes.ok) {
+                                const replyDraft = await replyDraftRes.json() as Record<string, unknown>;
+                                const replyDraftId = typeof replyDraft['id'] === 'string' ? replyDraft['id'] as string : undefined;
+                                if (replyDraftId) {
+                                    const sendRes = await fetch(
+                                        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages/${encodeURIComponent(replyDraftId)}/send`,
+                                        { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15_000) },
+                                    );
+                                    if (sendRes.ok) {
+                                        emailSent = true;
+                                        console.log(`[VideoconferenceCreator] sendReplyEmail: ${action} threaded reply sent from ${tiMailbox} to ${creatorEmail}`);
+                                    } else {
+                                        console.warn(`[VideoconferenceCreator] sendReplyEmail: send threaded ${sendRes.status}`);
+                                    }
+                                }
+                            } else {
+                                console.warn(`[VideoconferenceCreator] sendReplyEmail: createReply ${replyDraftRes.status}`);
+                            }
+                        }
+                    }
+                } catch (threadErr) {
+                    console.warn('[VideoconferenceCreator] sendReplyEmail: threaded send failed, falling back', threadErr);
+                }
             }
 
-            const createRes = await fetch(
-                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/messages`,
-                {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-                    body: JSON.stringify(messageBody),
-                    signal: AbortSignal.timeout(15_000),
-                },
-            );
-            if (!createRes.ok) {
-                console.warn(`[VideoconferenceCreator] sendReplyEmail createMessage ${createRes.status}`);
-                return;
-            }
-            const createdMsg = await createRes.json() as Record<string, unknown>;
-            const graphMsgId = createdMsg['id'] as string | undefined;
-            if (!graphMsgId) return;
-
-            const sendRes = await fetch(
-                `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fromEmail)}/messages/${encodeURIComponent(graphMsgId)}/send`,
-                {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${accessToken}` },
-                    signal: AbortSignal.timeout(15_000),
-                },
-            );
-            if (!sendRes.ok) {
-                console.warn(`[VideoconferenceCreator] sendReplyEmail send ${sendRes.status}`);
-            } else {
-                console.log(`[VideoconferenceCreator] sendReplyEmail: ${action} reply sent to ${tiRecipient}`);
+            // ── Attempt 2: fallback — new message FROM TI TO creator ─────────────
+            if (!emailSent) {
+                const messageBody: Record<string, unknown> = {
+                    subject,
+                    body: { contentType: 'HTML', content: html },
+                    toRecipients: [{ emailAddress: { address: creatorEmail, name: creatorName } }],
+                    from: { emailAddress: { address: tiMailbox, name: 'Asistencia TI' } },
+                };
+                if (mv.ti_alert_message_id) {
+                    messageBody['singleValueExtendedProperties'] = [
+                        { id: 'String 0x0070', value: mv.ti_alert_message_id },
+                        { id: 'String 0x1042', value: mv.ti_alert_message_id },
+                    ];
+                }
+                const createRes = await fetch(
+                    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages`,
+                    {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(messageBody),
+                        signal: AbortSignal.timeout(15_000),
+                    },
+                );
+                if (!createRes.ok) {
+                    const errBody = await createRes.text();
+                    console.warn(`[VideoconferenceCreator] sendReplyEmail fallback createMessage ${createRes.status}: ${errBody.slice(0, 300)}`);
+                    return;
+                }
+                const createdMsg = await createRes.json() as Record<string, unknown>;
+                const graphMsgId = typeof createdMsg['id'] === 'string' ? createdMsg['id'] as string : undefined;
+                if (!graphMsgId) return;
+                const sendRes = await fetch(
+                    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(tiMailbox)}/messages/${encodeURIComponent(graphMsgId)}/send`,
+                    { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(15_000) },
+                );
+                if (sendRes.ok) {
+                    console.log(`[VideoconferenceCreator] sendReplyEmail: ${action} reply sent from ${tiMailbox} to ${creatorEmail}`);
+                } else {
+                    console.warn(`[VideoconferenceCreator] sendReplyEmail fallback send ${sendRes.status}`);
+                }
             }
         } catch (err) {
             console.warn('[VideoconferenceCreator] sendReplyEmail error:', err);
@@ -670,34 +730,34 @@ export class VideoconferenceCreatorService {
         return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="utf-8"></head>
-<body style="margin:0;padding:0;background:#f0f4f9;font-family:'Segoe UI',Arial,sans-serif">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f9;padding:32px 16px">
+<body style="margin:0;padding:0;background:#e8edf4;font-family:'Segoe UI',Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#e8edf4;padding:32px 16px">
     <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10)">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.12)">
         <tr>
           <td style="background:${headerBg};padding:24px 36px">
-            <p style="margin:0 0 4px;color:rgba(255,255,255,.7);font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700">SISTEMA DE VIDEOCONFERENCIAS</p>
-            <h1 style="margin:0;color:#fff;font-size:19px;font-weight:700">${icon} ${title}</h1>
+            <p style="margin:0 0 4px;color:rgba(255,255,255,.8);font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700">SISTEMA DE VIDEOCONFERENCIAS</p>
+            <h1 style="margin:0;color:#ffffff;font-size:19px;font-weight:700">${icon} ${title}</h1>
           </td>
         </tr>
         <tr>
-          <td style="padding:28px 36px">
-            <p style="margin:0 0 20px;color:#60799b;font-size:14px;line-height:1.6">${bodyText}</p>
-            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #dbe8f4;border-radius:10px;overflow:hidden;font-size:14px">
-              <tr style="background:#f7fafd">
-                <td style="padding:11px 16px;color:#6688aa;font-weight:700;width:38%;border-bottom:1px solid #dbe8f4">Reunión</td>
-                <td style="padding:11px 16px;color:#1e3458;font-weight:700;border-bottom:1px solid #dbe8f4">${p.topic}</td>
+          <td style="padding:28px 36px;background:#ffffff">
+            <p style="margin:0 0 20px;color:#334e6b;font-size:14px;line-height:1.6">${bodyText}</p>
+            <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #c8d8ea;border-radius:10px;overflow:hidden;font-size:14px">
+              <tr style="background:#eef4fb">
+                <td style="padding:11px 16px;color:#4a6a88;font-weight:700;width:38%;border-bottom:1px solid #c8d8ea">Reunión</td>
+                <td style="padding:11px 16px;color:#1a2e4a;font-weight:700;border-bottom:1px solid #c8d8ea">${p.topic}</td>
               </tr>
-              <tr>
-                <td style="padding:11px 16px;color:#6688aa;font-weight:700">Solicitante</td>
-                <td style="padding:11px 16px;color:#1e3458;font-weight:600">${p.creatorName}</td>
+              <tr style="background:#ffffff">
+                <td style="padding:11px 16px;color:#4a6a88;font-weight:700">Solicitante</td>
+                <td style="padding:11px 16px;color:#1a2e4a;font-weight:600">${p.creatorName}</td>
               </tr>
             </table>
             ${btnHtml}
           </td>
         </tr>
         <tr>
-          <td style="padding:14px 36px;background:#f7fafd;border-top:1px solid #dbe8f4;text-align:center;color:#9ab0c8;font-size:11px">
+          <td style="padding:14px 36px;background:#eef4fb;border-top:1px solid #c8d8ea;text-align:center;color:#6688aa;font-size:11px">
             Universidad Autónoma de Ica — Sistema de Planificación Académica
           </td>
         </tr>
