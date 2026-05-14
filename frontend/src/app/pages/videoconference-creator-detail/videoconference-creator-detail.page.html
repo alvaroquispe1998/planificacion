@@ -1,16 +1,16 @@
 <div class="detail-page meetings-ui">
 
   <!-- Loading -->
-  <div *ngIf="loading" class="meetings-loading">
+  <div *ngIf="loading" class="mu-state-center">
     <mat-spinner diameter="36"></mat-spinner>
     <span>Cargando…</span>
   </div>
 
   <!-- Error -->
-  <div *ngIf="error && !loading" class="meetings-error">
+  <div *ngIf="error && !loading" class="mu-state-center mu-state-center--error">
     <mat-icon>error_outline</mat-icon>
     <p>{{ error }}</p>
-    <div class="flex items-center gap-2">
+    <div style="display:flex;gap:8px">
       <button mat-stroked-button color="primary" (click)="retryLoad()">
         <mat-icon>refresh</mat-icon> Reintentar
       </button>
@@ -22,362 +22,280 @@
 
   <ng-container *ngIf="!loading && meeting">
 
-    <!-- ── Hero / Cabecera ──────────────────────────────────────────── -->
-    <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80">
-      <mat-card-content class="!p-6">
-        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
-          <div class="flex items-start gap-3 min-w-0">
-            <span class="meetings-header-icon">
-              <mat-icon>videocam</mat-icon>
-            </span>
-            <div class="min-w-0">
-              <p class="text-[11px] font-semibold tracking-[0.14em] text-slate-400 uppercase mb-1">
-                Videoconferencia
-              </p>
-              <h1 class="text-2xl font-semibold text-slate-800 leading-tight truncate">{{ meeting.topic }}</h1>
-              <p class="text-sm text-slate-500 mt-1">{{ statusContext(meeting) }}</p>
-              <p class="text-sm text-slate-600 mt-2" *ngIf="meeting.agenda">{{ meeting.agenda }}</p>
-
-              <div class="mt-3 flex items-center gap-2 flex-wrap">
-                <span class="meeting-pill" [ngClass]="'pill-' + statusClass(meeting)">
-                  {{ statusLabel(meeting) }}
-                </span>
-                <span class="meeting-pill meeting-pill--type inline-flex items-center gap-1">
-                  <mat-icon class="!text-[14px] !w-[14px] !h-[14px] leading-none">
-                    {{ meeting.type === 'WEEKLY' ? 'event_repeat' : 'event' }}
-                  </mat-icon>
-                  {{ meeting.type === 'WEEKLY' ? 'Semanal recurrente' : 'Reunión única' }}
-                </span>
-              </div>
+    <!-- ── Cabecera ────────────────────────────────────────────────── -->
+    <div class="mu-card" style="padding:24px;margin-bottom:16px">
+      <div class="mu-page-header" style="margin-bottom:0">
+        <div class="mu-page-header__left">
+          <span class="mu-page-icon"><mat-icon>videocam</mat-icon></span>
+          <div>
+            <p class="mu-eyebrow">Videoconferencia</p>
+            <h1 class="mu-page-title">
+              {{ meeting.topic }}
+            </h1>
+            <p class="mu-page-subtitle">{{ statusContext(meeting) }}</p>
+            <p *ngIf="meeting.agenda" style="font-size:13.5px;color:#475569;margin:6px 0 0">{{ meeting.agenda }}</p>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+              <span class="mu-pill" [ngClass]="'mu-pill-' + statusClass(meeting)">{{ statusLabel(meeting) }}</span>
+              <span class="mu-pill mu-pill--type" style="display:inline-flex;align-items:center;gap:3px">
+                <mat-icon style="font-size:13px;width:13px;height:13px">{{ meeting.type === 'WEEKLY' ? 'event_repeat' : 'event' }}</mat-icon>
+                {{ meeting.type === 'WEEKLY' ? 'Semanal recurrente' : 'Reunión única' }}
+              </span>
             </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2 shrink-0">
-            <button mat-stroked-button (click)="back()">
-              <mat-icon>arrow_back</mat-icon> Volver
-            </button>
-            <button mat-flat-button color="primary"
-              *ngIf="canSync"
-              [disabled]="syncing || cancelling"
-              (click)="sync()">
-              <mat-icon [class.spinning]="syncing">sync</mat-icon>
-              {{ syncing ? 'Sincronizando…' : 'Sincronizar desde Zoom' }}
-            </button>
-            <button mat-flat-button color="primary" class="!bg-emerald-600"
-              *ngIf="meeting.status === 'DRAFT_NO_HOST' && canApproveBackup"
-              [disabled]="approving || cancelling || denying"
-              (click)="approveBackup()">
-              <mat-icon>check_circle</mat-icon>
-              {{ approving ? 'Aprobando…' : 'Aprobar con grupo backup' }}
-            </button>
-            <button mat-stroked-button color="warn"
-              *ngIf="canDeny"
-              [disabled]="denying || approving || cancelling"
-              (click)="denyMeeting()">
-              <mat-icon>block</mat-icon>
-              {{ denying ? 'Denegando…' : 'Denegar solicitud' }}
-            </button>
-            <button mat-stroked-button color="warn"
-              *ngIf="canCancel"
-              [disabled]="cancelling || syncing || approving || denying"
-              (click)="cancelMeeting()">
-              <mat-icon>cancel</mat-icon>
-              <ng-container *ngIf="!cancelling">
-                {{ meeting.status === 'DRAFT_NO_HOST' ? 'Cancelar solicitud' : 'Cancelar reunión' }}
-              </ng-container>
-              <ng-container *ngIf="cancelling">
-                {{ meeting.status === 'DRAFT_NO_HOST' ? 'Cancelando solicitud…' : 'Cancelando…' }}
-              </ng-container>
-            </button>
           </div>
         </div>
-      </mat-card-content>
-    </mat-card>
-
-    <div *ngIf="syncMsg"
-      class="flex items-start gap-2 text-sm text-sky-800 bg-sky-50 border border-sky-100 rounded-xl px-4 py-2.5">
-      <mat-icon class="!text-[18px] !w-[18px] !h-[18px] text-sky-600">info</mat-icon>
-      <span>{{ syncMsg }}</span>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <button mat-stroked-button (click)="back()">
+            <mat-icon>arrow_back</mat-icon> Volver
+          </button>
+          <button mat-flat-button color="primary" *ngIf="canSync"
+            [disabled]="syncing || cancelling" (click)="sync()">
+            <mat-icon [class.mu-spin]="syncing">sync</mat-icon>
+            {{ syncing ? 'Sincronizando…' : 'Sincronizar desde Zoom' }}
+          </button>
+          <button mat-flat-button color="primary" style="background:#16a34a"
+            *ngIf="meeting.status === 'DRAFT_NO_HOST' && canApproveBackup"
+            [disabled]="approving || cancelling || denying"
+            (click)="approveBackup()">
+            <mat-icon>check_circle</mat-icon>
+            {{ approving ? 'Aprobando…' : 'Aprobar con grupo backup' }}
+          </button>
+          <button mat-stroked-button color="warn" *ngIf="canDeny"
+            [disabled]="denying || approving || cancelling" (click)="denyMeeting()">
+            <mat-icon>block</mat-icon>
+            {{ denying ? 'Denegando…' : 'Denegar solicitud' }}
+          </button>
+          <button mat-stroked-button color="warn" *ngIf="canCancel"
+            [disabled]="cancelling || syncing || approving || denying" (click)="cancelMeeting()">
+            <mat-icon>cancel</mat-icon>
+            <ng-container *ngIf="!cancelling">
+              {{ meeting.status === 'DRAFT_NO_HOST' ? 'Cancelar solicitud' : 'Cancelar reunión' }}
+            </ng-container>
+            <ng-container *ngIf="cancelling">
+              {{ meeting.status === 'DRAFT_NO_HOST' ? 'Cancelando solicitud…' : 'Cancelando…' }}
+            </ng-container>
+          </button>
+        </div>
+      </div>
     </div>
 
-    <!-- ── Info grid ────────────────────────────────────────────────── -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-
-      <!-- Horario -->
-      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80 lg:col-span-2">
-        <mat-card-content class="!p-5">
-          <p class="info-label-modern">
-            <mat-icon class="info-label-icon">schedule</mat-icon> Horario
-          </p>
-          <div class="grid grid-cols-3 gap-4 mt-3">
-            <div class="info-stat">
-              <span class="info-stat-label">Inicio</span>
-              <span class="info-stat-value">{{ meeting.start_time | date:'dd/MM/yyyy HH:mm' }}</span>
-            </div>
-            <div class="info-stat">
-              <span class="info-stat-label">Fin</span>
-              <span class="info-stat-value">{{ calculatedEndTime(meeting) | date:'dd/MM/yyyy HH:mm' }}</span>
-            </div>
-            <div class="info-stat">
-              <span class="info-stat-label">Duración</span>
-              <span class="info-stat-value">{{ meeting.duration_minutes }} min</span>
-            </div>
-          </div>
-        </mat-card-content>
-      </mat-card>
-
-      <!-- Zoom -->
-      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80"
-        *ngIf="meeting.zoom_meeting_id || meeting.assigned_zoom_user_name">
-        <mat-card-content class="!p-5">
-          <p class="info-label-modern">
-            <mat-icon class="info-label-icon">tag</mat-icon> Zoom Meeting ID
-          </p>
-          <p class="font-mono text-lg text-slate-800 mt-1 mb-3 tracking-wider">
-            {{ meeting.zoom_meeting_id || '—' }}
-          </p>
-
-          <div *ngIf="meeting.assigned_zoom_user_name" class="pt-2 border-t border-slate-100">
-            <p class="info-label-modern">
-              <mat-icon class="info-label-icon">person</mat-icon> Host asignado
-            </p>
-            <div class="flex items-center gap-2 mt-1.5">
-              <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-indigo-50 text-indigo-600">
-                <mat-icon class="!text-[16px] !w-[16px] !h-[16px]">person</mat-icon>
-              </span>
-              <span class="text-sm text-slate-700 truncate">{{ meeting.assigned_zoom_user_name }}</span>
-            </div>
-          </div>
-
-          <div *ngIf="canSync" class="mt-3 flex items-center gap-2 flex-wrap">
-            <button mat-stroked-button (click)="checkZoomStatus()" [disabled]="checkingZoom" class="!h-8 !text-xs">
-              <mat-icon class="!text-[16px] !w-[16px] !h-[16px]">verified</mat-icon>
-              {{ checkingZoom ? 'Verificando…' : 'Verificar en Zoom' }}
-            </button>
-            <span *ngIf="zoomStatus" class="meeting-pill" [ngClass]="'pill-' + zoomStatusClass()">
-              {{ zoomStatusLabel() }}
-            </span>
-          </div>
-        </mat-card-content>
-      </mat-card>
-
-      <!-- Diagnóstico admin -->
-      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80"
-        *ngIf="meeting.status === 'DRAFT_NO_HOST' && canApproveBackup">
-        <mat-card-content class="!p-5">
-          <p class="info-label-modern">
-            <mat-icon class="info-label-icon">admin_panel_settings</mat-icon> Diagnóstico admin
-          </p>
-          <p class="text-sm text-slate-700 mt-1">{{ meeting.zoom_group_name || 'Grupo principal' }}</p>
-          <p class="text-xs text-slate-500 mt-1" *ngIf="meeting.backup_zoom_group_name">
-            Backup: {{ meeting.backup_zoom_group_name }}
-          </p>
-          <p class="text-xs text-amber-700 mt-1 flex items-center gap-1" *ngIf="!meeting.backup_zoom_group_name">
-            <mat-icon class="!text-[14px] !w-[14px] !h-[14px]">warning</mat-icon> Backup no configurado
-          </p>
-        </mat-card-content>
-      </mat-card>
-
-      <!-- Enlaces -->
-      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80 lg:col-span-3"
-        *ngIf="meeting.start_url || meeting.join_url">
-        <mat-card-content class="!p-5">
-          <p class="info-label-modern">
-            <mat-icon class="info-label-icon">link</mat-icon> Enlaces
-          </p>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-            <div *ngIf="meeting.start_url"
-              class="flex items-center gap-3 p-3 rounded-xl border border-slate-200/80 hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors">
-              <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600">
-                <mat-icon>videocam</mat-icon>
-              </span>
-              <a [href]="meeting.start_url" target="_blank" rel="noopener noreferrer"
-                class="flex-1 text-sm font-medium text-indigo-700 hover:text-indigo-900 truncate">
-                Iniciar como host <mat-icon class="!text-[14px] !w-[14px] !h-[14px] align-middle">open_in_new</mat-icon>
-              </a>
-              <button mat-icon-button matTooltip="Copiar enlace" (click)="copyToClipboard(meeting.start_url)">
-                <mat-icon>content_copy</mat-icon>
-              </button>
-            </div>
-            <div *ngIf="meeting.join_url"
-              class="flex items-center gap-3 p-3 rounded-xl border border-slate-200/80 hover:border-emerald-300 hover:bg-emerald-50/40 transition-colors">
-              <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-emerald-50 text-emerald-600">
-                <mat-icon>school</mat-icon>
-              </span>
-              <a [href]="meeting.join_url" target="_blank" rel="noopener noreferrer"
-                class="flex-1 text-sm font-medium text-emerald-700 hover:text-emerald-900 truncate">
-                Entrar como participante <mat-icon class="!text-[14px] !w-[14px] !h-[14px] align-middle">open_in_new</mat-icon>
-              </a>
-              <button mat-icon-button matTooltip="Copiar enlace" (click)="copyToClipboard(meeting.join_url)">
-                <mat-icon>content_copy</mat-icon>
-              </button>
-            </div>
-          </div>
-        </mat-card-content>
-      </mat-card>
-
-      <!-- Recurrencia -->
-      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80" *ngIf="recurrenceDays">
-        <mat-card-content class="!p-5">
-          <p class="info-label-modern">
-            <mat-icon class="info-label-icon">event_repeat</mat-icon> Días de recurrencia
-          </p>
-          <p class="text-sm text-slate-700 mt-1">{{ recurrenceDays }}</p>
-        </mat-card-content>
-      </mat-card>
-
-      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80" *ngIf="recurrenceEndDate">
-        <mat-card-content class="!p-5">
-          <p class="info-label-modern">
-            <mat-icon class="info-label-icon">event_available</mat-icon> Fin de recurrencia
-          </p>
-          <p class="text-sm text-slate-700 mt-1">{{ recurrenceEndDate }}</p>
-        </mat-card-content>
-      </mat-card>
-
+    <!-- Alerta sync -->
+    <div *ngIf="syncMsg" class="mu-alert mu-alert--ok" style="margin:0 0 14px">
+      <mat-icon>info</mat-icon> {{ syncMsg }}
     </div>
 
-    <!-- Error message -->
-    <div *ngIf="meeting.error_message"
-      class="flex items-start gap-2 text-sm text-red-800 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-      <mat-icon class="!text-[20px] !w-[20px] !h-[20px] text-red-600">error</mat-icon>
+    <!-- Alerta error -->
+    <div *ngIf="meeting.error_message" class="mu-alert mu-alert--err" style="margin:0 0 14px">
+      <mat-icon>error</mat-icon>
       <span><strong>Error al crear en Zoom:</strong> {{ meeting.error_message }}</span>
     </div>
 
-    <!-- ── Sesiones realizadas ──────────────────────────────────────── -->
-    <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80" *ngIf="detail">
-      <mat-card-content class="!p-5">
-        <div class="flex items-center gap-2 mb-3">
-          <mat-icon class="info-label-icon">event_note</mat-icon>
-          <h2 class="text-base font-semibold text-slate-800">Sesiones realizadas</h2>
-          <span class="meetings-count-chip">{{ detail.instances.length }}</span>
+    <!-- ── Grid info ───────────────────────────────────────────────── -->
+    <div class="mu-detail-grid" style="margin-bottom:16px">
+
+      <!-- Horario -->
+      <div class="mu-info-card" style="grid-column:span 2">
+        <p class="mu-info-card__label"><mat-icon>schedule</mat-icon> Horario</p>
+        <div class="mu-stat-row">
+          <div class="mu-stat">
+            <div class="mu-stat__label">Inicio</div>
+            <div class="mu-stat__value">{{ meeting.start_time | date:'dd/MM/yyyy HH:mm' }}</div>
+          </div>
+          <div class="mu-stat">
+            <div class="mu-stat__label">Fin (estimado)</div>
+            <div class="mu-stat__value">{{ calculatedEndTime(meeting) | date:'HH:mm' }}</div>
+          </div>
+          <div class="mu-stat">
+            <div class="mu-stat__label">Duración</div>
+            <div class="mu-stat__value">{{ meeting.duration_minutes }} min</div>
+          </div>
         </div>
+      </div>
 
-        <div *ngIf="detail.instances.length === 0"
-          class="flex flex-col items-center text-center py-6 text-slate-500 text-sm">
-          <mat-icon class="!text-[40px] !w-10 !h-10 text-slate-300 mb-2">event_busy</mat-icon>
-          Ninguna sesión registrada. Usa "Sincronizar desde Zoom" para descargar datos.
+      <!-- Zoom -->
+      <div class="mu-info-card" *ngIf="meeting.zoom_meeting_id || meeting.assigned_zoom_user_name">
+        <p class="mu-info-card__label"><mat-icon>tag</mat-icon> Zoom Meeting ID</p>
+        <p style="font-family:monospace;font-size:16px;font-weight:700;color:#0f172a;margin:4px 0 10px;letter-spacing:0.05em">
+          {{ meeting.zoom_meeting_id || '—' }}
+        </p>
+        <div *ngIf="meeting.assigned_zoom_user_name" style="padding-top:10px;border-top:1px solid #f1f5f9">
+          <p class="mu-info-card__label"><mat-icon>person</mat-icon> Host asignado</p>
+          <p style="font-size:13.5px;color:#334155;margin:4px 0 0">{{ meeting.assigned_zoom_user_name }}</p>
         </div>
+        <div *ngIf="canSync" style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button mat-stroked-button (click)="checkZoomStatus()" [disabled]="checkingZoom" style="height:32px;font-size:12px">
+            <mat-icon style="font-size:16px;width:16px;height:16px">verified</mat-icon>
+            {{ checkingZoom ? 'Verificando…' : 'Verificar en Zoom' }}
+          </button>
+          <span *ngIf="zoomStatus" class="mu-pill" [ngClass]="'mu-pill-' + zoomStatusClass()">{{ zoomStatusLabel() }}</span>
+        </div>
+      </div>
 
-        <ul *ngIf="detail.instances.length > 0" class="divide-y divide-slate-100">
-          <li *ngFor="let inst of detail.instances"
-            class="flex items-center justify-between gap-3 py-2.5">
-            <div class="flex items-center gap-2 text-sm text-slate-700">
-              <mat-icon class="!text-[18px] !w-[18px] !h-[18px] text-slate-400">calendar_today</mat-icon>
-              <span>{{ inst.actual_start ? (inst.actual_start | date:'dd/MM/yyyy HH:mm') : '—' }}</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span *ngIf="inst.duration_minutes != null"
-                class="meeting-pill bg-slate-100 text-slate-600 border-slate-200">
-                <mat-icon class="!text-[12px] !w-[12px] !h-[12px] mr-1">timer</mat-icon>
-                {{ inst.duration_minutes }} min
-              </span>
-              <span class="meeting-pill" [ngClass]="'pill-instance-' + (inst.status ?? 'unknown')">
-                {{ instanceStatusLabel(inst.status) }}
-              </span>
-            </div>
-          </li>
-        </ul>
-      </mat-card-content>
-    </mat-card>
+      <!-- Admin diag -->
+      <div class="mu-info-card" *ngIf="meeting.status === 'DRAFT_NO_HOST' && canApproveBackup">
+        <p class="mu-info-card__label"><mat-icon>admin_panel_settings</mat-icon> Diagnóstico admin</p>
+        <p style="font-size:13.5px;color:#334155;margin:4px 0">{{ meeting.zoom_group_name || 'Grupo principal' }}</p>
+        <p style="font-size:12px;color:#64748b" *ngIf="meeting.backup_zoom_group_name">
+          Backup: {{ meeting.backup_zoom_group_name }}
+        </p>
+        <div *ngIf="!meeting.backup_zoom_group_name" class="mu-alert mu-alert--err" style="padding:6px 10px;margin-top:8px;font-size:12px">
+          <mat-icon>warning</mat-icon> Backup no configurado
+        </div>
+      </div>
 
-    <!-- ── Participantes + Grabaciones ──────────────────────────────── -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4"
+      <!-- Recurrencia -->
+      <div class="mu-info-card" *ngIf="recurrenceDays">
+        <p class="mu-info-card__label"><mat-icon>event_repeat</mat-icon> Días de recurrencia</p>
+        <p style="font-size:13.5px;color:#334155;margin:4px 0">{{ recurrenceDays }}</p>
+      </div>
+      <div class="mu-info-card" *ngIf="recurrenceEndDate">
+        <p class="mu-info-card__label"><mat-icon>event_available</mat-icon> Fin de recurrencia</p>
+        <p style="font-size:13.5px;color:#334155;margin:4px 0">{{ recurrenceEndDate }}</p>
+      </div>
+
+      <!-- Links -->
+      <div class="mu-info-card mu-info-card--full" *ngIf="meeting.start_url || meeting.join_url">
+        <p class="mu-info-card__label"><mat-icon>link</mat-icon> Enlaces</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+          <div *ngIf="meeting.start_url" class="mu-link-row">
+            <span class="mu-link-row__icon mu-link-row__icon--host"><mat-icon>videocam</mat-icon></span>
+            <div class="mu-link-row__text">
+              <p style="font-size:11px;font-weight:700;letter-spacing:0.1em;color:#94a3b8;text-transform:uppercase;margin:0 0 2px">Host</p>
+              <a [href]="meeting.start_url" target="_blank" rel="noopener noreferrer" class="mu-link-row__host-link">
+                Iniciar como host <mat-icon style="font-size:12px;width:12px;height:12px;vertical-align:middle">open_in_new</mat-icon>
+              </a>
+            </div>
+            <button mat-icon-button matTooltip="Copiar enlace" (click)="copyToClipboard(meeting.start_url)">
+              <mat-icon>content_copy</mat-icon>
+            </button>
+          </div>
+          <div *ngIf="meeting.join_url" class="mu-link-row">
+            <span class="mu-link-row__icon mu-link-row__icon--join"><mat-icon>school</mat-icon></span>
+            <div class="mu-link-row__text">
+              <p style="font-size:11px;font-weight:700;letter-spacing:0.1em;color:#94a3b8;text-transform:uppercase;margin:0 0 2px">Participante</p>
+              <a [href]="meeting.join_url" target="_blank" rel="noopener noreferrer" class="mu-link-row__join-link">
+                Entrar como participante <mat-icon style="font-size:12px;width:12px;height:12px;vertical-align:middle">open_in_new</mat-icon>
+              </a>
+            </div>
+            <button mat-icon-button matTooltip="Copiar enlace" (click)="copyToClipboard(meeting.join_url)">
+              <mat-icon>content_copy</mat-icon>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── Sesiones ────────────────────────────────────────────────── -->
+    <div class="mu-card" style="margin-bottom:16px;padding:20px" *ngIf="detail">
+      <div class="mu-section-head">
+        <mat-icon>event_note</mat-icon>
+        <h2>Sesiones realizadas</h2>
+        <span class="mu-count-chip">{{ detail.instances.length }}</span>
+      </div>
+
+      <div *ngIf="detail.instances.length === 0"
+        style="display:flex;flex-direction:column;align-items:center;padding:36px 16px;text-align:center;gap:4px">
+        <mat-icon style="font-size:40px;width:40px;height:40px;color:#cbd5e1;margin-bottom:8px">event_busy</mat-icon>
+        <p style="font-size:14px;font-weight:600;color:#475569;margin:0">Ninguna sesión registrada</p>
+        <p style="font-size:12.5px;color:#94a3b8;margin:0">Usa «Sincronizar desde Zoom» para descargar datos.</p>
+      </div>
+
+      <div *ngIf="detail.instances.length > 0" class="mu-session-list">
+        <div *ngFor="let inst of detail.instances" class="mu-session-row">
+          <div class="mu-session-date">
+            <mat-icon>calendar_today</mat-icon>
+            {{ inst.actual_start ? (inst.actual_start | date:'dd/MM/yyyy HH:mm') : '—' }}
+          </div>
+          <div class="mu-session-chips">
+            <span *ngIf="inst.duration_minutes != null" class="mu-pill mu-pill-badge-cancelled">
+              <mat-icon style="font-size:12px;width:12px;height:12px">timer</mat-icon>
+              {{ inst.duration_minutes }} min
+            </span>
+            <span class="mu-pill" [ngClass]="'mu-pill-instance-' + (inst.status ?? 'unknown')">
+              {{ instanceStatusLabel(inst.status) }}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Participantes + Grabaciones ────────────────────────────── -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px"
       *ngIf="detail && (videoRecordings.length > 0 || participantSessionGroups.length > 0 || hasAnyInstances)">
 
       <!-- Participantes -->
-      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80"
-        *ngIf="participantSessionGroups.length > 0">
-        <mat-card-content class="!p-5">
-          <div class="flex items-center gap-2 mb-3">
-            <mat-icon class="info-label-icon">groups</mat-icon>
-            <h2 class="text-base font-semibold text-slate-800">Participantes</h2>
-            <span class="meetings-count-chip">{{ totalVisibleParticipants }}</span>
-          </div>
+      <div class="mu-card" style="padding:20px" *ngIf="participantSessionGroups.length > 0">
+        <div class="mu-section-head">
+          <mat-icon>groups</mat-icon>
+          <h2>Participantes</h2>
+          <span class="mu-count-chip">{{ totalVisibleParticipants }}</span>
+        </div>
 
-          <div class="space-y-4">
-            <section *ngFor="let group of participantSessionGroups">
-              <div class="flex items-center gap-2 px-2 py-1.5 bg-slate-50 rounded-lg text-xs text-slate-600">
-                <mat-icon class="!text-[14px] !w-[14px] !h-[14px]">save</mat-icon>
-                <span class="font-medium">
-                  {{ group.instance?.actual_start ? (group.instance?.actual_start | date:'dd/MM/yyyy HH:mm') : 'Sesión sin fecha' }}
-                </span>
-                <span class="meetings-count-chip !text-[10px] !min-w-[18px] !h-[18px] !px-1.5 ml-auto">
-                  {{ group.participants.length }}
-                </span>
-              </div>
-              <ul class="mt-2 space-y-1">
-                <li *ngFor="let p of group.participants"
-                  class="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-slate-50 transition-colors">
-                  <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-50 text-indigo-600 shrink-0">
-                    <mat-icon class="!text-[18px] !w-[18px] !h-[18px]">person</mat-icon>
-                  </span>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm text-slate-800 truncate">{{ p.display_name || '—' }}</p>
-                    <p class="text-xs text-slate-500 truncate" *ngIf="p.email">{{ p.email }}</p>
-                  </div>
-                  <span *ngIf="p.role && p.role !== 'NO_ROLE' && p.role !== 'UNKNOWN'"
-                    class="meeting-pill bg-violet-50 text-violet-700 border-violet-200">{{ p.role }}</span>
-                </li>
-              </ul>
-            </section>
+        <div class="mu-participant-group" *ngFor="let group of participantSessionGroups">
+          <div class="mu-participant-group-head">
+            <mat-icon>schedule</mat-icon>
+            <span>{{ group.instance?.actual_start ? (group.instance?.actual_start | date:'dd/MM/yyyy HH:mm') : 'Sesión sin fecha' }}</span>
+            <span class="mu-count-chip" style="font-size:10px;min-width:18px;height:18px;padding:0 5px;margin-left:auto">
+              {{ group.participants.length }}
+            </span>
           </div>
-        </mat-card-content>
-      </mat-card>
+          <div class="mu-participant-row" *ngFor="let p of group.participants">
+            <span class="mu-participant-avatar"><mat-icon>person</mat-icon></span>
+            <div class="mu-participant-info">
+              <p class="mu-participant-name">{{ p.display_name || '—' }}</p>
+              <p class="mu-participant-email" *ngIf="p.email">{{ p.email }}</p>
+            </div>
+            <span *ngIf="p.role && p.role !== 'NO_ROLE' && p.role !== 'UNKNOWN'"
+              class="mu-pill" style="background:#f5f3ff;color:#7c3aed;border-color:#ddd6fe">{{ p.role }}</span>
+          </div>
+        </div>
+      </div>
 
       <!-- Grabaciones -->
-      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80"
+      <div class="mu-card" style="padding:20px"
         *ngIf="videoRecordings.length > 0 || hasAnyInstances">
-        <mat-card-content class="!p-5">
-          <div class="flex items-center gap-2 mb-3">
-            <mat-icon class="info-label-icon">movie</mat-icon>
-            <h2 class="text-base font-semibold text-slate-800">Grabaciones</h2>
-            <span class="meetings-count-chip" *ngIf="videoRecordings.length > 0">{{ videoRecordings.length }}</span>
-          </div>
+        <div class="mu-section-head">
+          <mat-icon>movie</mat-icon>
+          <h2>Grabaciones</h2>
+          <span *ngIf="videoRecordings.length > 0" class="mu-count-chip">{{ videoRecordings.length }}</span>
+        </div>
 
-          <ul *ngIf="videoRecordings.length > 0" class="space-y-2">
-            <li *ngFor="let rec of videoRecordings"
-              class="flex items-center gap-3 p-3 rounded-xl border border-slate-200/70 hover:border-indigo-300 hover:bg-indigo-50/30 transition-colors">
-              <span class="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600">
-                <mat-icon>videocam</mat-icon>
-              </span>
-              <div class="flex-1 min-w-0">
-                <p class="text-[11px] font-semibold tracking-wide text-slate-400 uppercase">
-                  {{ videoRecordingLabel() }}
-                </p>
-                <p class="text-sm text-slate-800 truncate">
-                  {{ rec.start_time ? (rec.start_time | date:'dd/MM/yyyy HH:mm') : 'Grabación' }}
-                </p>
-                <p class="text-xs text-slate-500" *ngIf="rec.file_size_bytes">{{ formatBytes(rec.file_size_bytes) }}</p>
+        <div *ngIf="videoRecordings.length > 0">
+          <div *ngFor="let rec of videoRecordings" class="mu-recording-row">
+            <span class="mu-recording-icon"><mat-icon>videocam</mat-icon></span>
+            <div class="mu-recording-meta">
+              <div class="mu-recording-sublabel">{{ videoRecordingLabel() }}</div>
+              <div class="mu-recording-date">
+                {{ rec.start_time ? (rec.start_time | date:'dd/MM/yyyy HH:mm') : 'Grabación' }}
               </div>
-              <div class="flex items-center gap-1">
-                <a *ngIf="rec.play_url" mat-stroked-button [href]="rec.play_url" target="_blank"
-                  rel="noopener noreferrer" class="!h-8 !text-xs">
-                  <mat-icon class="!text-[16px] !w-[16px] !h-[16px]">play_arrow</mat-icon> Ver
-                </a>
-                <a *ngIf="rec.download_url" mat-flat-button color="primary" [href]="rec.download_url" target="_blank"
-                  rel="noopener noreferrer" class="!h-8 !text-xs">
-                  <mat-icon class="!text-[16px] !w-[16px] !h-[16px]">download</mat-icon> Descargar
-                </a>
-              </div>
-            </li>
-          </ul>
-
-          <div *ngIf="videoRecordings.length === 0"
-            class="flex flex-col items-center text-center py-8 px-4">
-            <mat-icon class="!text-[44px] !w-11 !h-11 text-slate-300 mb-2">movie</mat-icon>
-            <p class="text-slate-700 font-medium" *ngIf="hasEndedInstances">Grabación en proceso</p>
-            <p class="text-slate-700 font-medium" *ngIf="!hasEndedInstances">Sin grabación aún</p>
-            <p class="text-xs text-slate-500 mt-1 max-w-xs" *ngIf="hasEndedInstances">
-              Zoom puede tardar unos minutos en procesar la grabación.
-              Usa <strong>Sincronizar desde Zoom</strong> para actualizar.
-            </p>
-            <p class="text-xs text-slate-500 mt-1 max-w-xs" *ngIf="!hasEndedInstances">
-              La grabación estará disponible cuando la sesión finalice.
-            </p>
+              <div class="mu-recording-size" *ngIf="rec.file_size_bytes">{{ formatBytes(rec.file_size_bytes) }}</div>
+            </div>
+            <div class="mu-recording-actions">
+              <a *ngIf="rec.play_url" mat-stroked-button [href]="rec.play_url" target="_blank"
+                rel="noopener noreferrer" style="height:32px;font-size:12px">
+                <mat-icon style="font-size:16px;width:16px;height:16px">play_arrow</mat-icon> Ver
+              </a>
+              <a *ngIf="rec.download_url" mat-flat-button color="primary" [href]="rec.download_url" target="_blank"
+                rel="noopener noreferrer" style="height:32px;font-size:12px">
+                <mat-icon style="font-size:16px;width:16px;height:16px">download</mat-icon> Descargar
+              </a>
+            </div>
           </div>
-        </mat-card-content>
-      </mat-card>
+        </div>
+
+        <div *ngIf="videoRecordings.length === 0" class="mu-recording-pending">
+          <mat-icon>movie</mat-icon>
+          <p class="mu-recording-pending__title">
+            {{ hasEndedInstances ? 'Grabación en proceso' : 'Sin grabación aún' }}
+          </p>
+          <p class="mu-recording-pending__hint" *ngIf="hasEndedInstances">
+            Zoom puede tardar unos minutos en procesar la grabación. Usa <strong>Sincronizar desde Zoom</strong> para actualizar.
+          </p>
+          <p class="mu-recording-pending__hint" *ngIf="!hasEndedInstances">
+            La grabación estará disponible cuando la sesión finalice.
+          </p>
+        </div>
+      </div>
 
     </div>
 
