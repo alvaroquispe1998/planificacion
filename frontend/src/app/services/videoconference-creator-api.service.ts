@@ -79,6 +79,7 @@ export interface CreateMeetingDto {
 }
 
 export interface MeetingInstance {
+    id: string;
     zoom_meeting_uuid?: string;
     actual_start?: string;
     duration_minutes?: number;
@@ -87,6 +88,7 @@ export interface MeetingInstance {
 }
 
 export interface MeetingParticipant {
+    meeting_instance_id?: string;
     display_name?: string;
     email?: string;
     role?: string;

@@ -105,7 +105,7 @@
         </div>
         <div class="zoom-status-row" *ngIf="canSync">
           <button type="button" class="btn-zoom-check" (click)="checkZoomStatus()" [disabled]="checkingZoom">
-            {{ checkingZoom ? 'Verificando...' : '⬤ Estado en Zoom' }}
+            {{ checkingZoom ? 'Verificando...' : '⬤ Verificar en Zoom' }}
           </button>
           <span *ngIf="zoomStatus" class="zoom-live-chip" [ngClass]="zoomStatusClass()">{{ zoomStatusLabel() }}</span>
         </div>
@@ -188,23 +188,30 @@
     </div>
 
     <!-- ── Grabaciones + Participantes ──────────────────────────────── -->
-    <div class="bottom-panels" *ngIf="detail && (videoRecordings.length > 0 || uniqueParticipants.length > 0 || hasAnyInstances)">
+    <div class="bottom-panels" *ngIf="detail && (videoRecordings.length > 0 || participantSessionGroups.length > 0 || hasAnyInstances)">
 
       <!-- Participantes -->
-      <div class="panel panel--participants" *ngIf="uniqueParticipants.length > 0">
+      <div class="panel panel--participants" *ngIf="participantSessionGroups.length > 0">
         <div class="panel-head">
           <h2 class="panel-title">Participantes</h2>
-          <span class="count-chip">{{ uniqueParticipants.length }}</span>
+          <span class="count-chip">{{ totalVisibleParticipants }}</span>
         </div>
         <div class="participant-list">
-          <div class="participant-row" *ngFor="let p of uniqueParticipants">
-            <span class="participant-avatar">👤</span>
-            <div class="participant-info">
-              <p class="participant-name">{{ p.display_name || '—' }}</p>
-              <p class="participant-email" *ngIf="p.email">{{ p.email }}</p>
+          <section class="participant-session" *ngFor="let group of participantSessionGroups">
+            <div class="participant-session-head">
+              <span class="participant-session-icon">▣</span>
+              <span>{{ group.instance?.actual_start ? (group.instance?.actual_start | date:'dd/MM/yyyy HH:mm') : 'Sesión sin fecha' }}</span>
+              <span class="count-chip">{{ group.participants.length }}</span>
             </div>
-            <span class="participant-role" *ngIf="p.role && p.role !== 'NO_ROLE' && p.role !== 'UNKNOWN'">{{ p.role }}</span>
-          </div>
+            <div class="participant-row" *ngFor="let p of group.participants">
+              <span class="participant-avatar">👤</span>
+              <div class="participant-info">
+                <p class="participant-name">{{ p.display_name || '—' }}</p>
+                <p class="participant-email" *ngIf="p.email">{{ p.email }}</p>
+              </div>
+              <span class="participant-role" *ngIf="p.role && p.role !== 'NO_ROLE' && p.role !== 'UNKNOWN'">{{ p.role }}</span>
+            </div>
+          </section>
         </div>
       </div>
 

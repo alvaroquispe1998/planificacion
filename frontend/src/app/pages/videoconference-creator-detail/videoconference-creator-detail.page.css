@@ -497,6 +497,31 @@
 /* Participantes */
 .participant-list { display: grid; }
 
+.participant-session {
+  display: grid;
+  border-bottom: 1px solid #eef4fb;
+}
+
+.participant-session:last-child {
+  border-bottom: none;
+}
+
+.participant-session-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1rem;
+  background: #f7fafd;
+  color: #476383;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.participant-session-icon {
+  color: #3b7dd8;
+  font-size: 0.82rem;
+}
+
 .participant-row {
   display: flex;
   align-items: center;
