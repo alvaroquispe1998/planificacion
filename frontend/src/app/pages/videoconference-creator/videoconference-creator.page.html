@@ -1,208 +1,163 @@
-<div class="vc-page meetings-ui">
+﻿<div class="vc-page meetings-ui">
 
-  <!-- Cargando perfil -->
-  <div *ngIf="loading" class="meetings-loading">
+  <!-- Loading -->
+  <div *ngIf="loading" class="mu-state-center">
     <mat-spinner diameter="36"></mat-spinner>
     <span>Cargando…</span>
   </div>
 
-  <div *ngIf="!loading && error && !profile" class="meetings-error">
+  <!-- Error de perfil -->
+  <div *ngIf="!loading && error && !profile" class="mu-state-center mu-state-center--error">
     <mat-icon>error_outline</mat-icon>
     <p>{{ error }}</p>
-    <button mat-stroked-button color="primary" (click)="load()">
+    <button mat-stroked-button (click)="load()">
       <mat-icon>refresh</mat-icon> Reintentar
     </button>
   </div>
 
   <ng-container *ngIf="!loading && profile">
 
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- VISTA: HISTORIAL                                   -->
-    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- ═══════════════════  HISTORIAL  ═══════════════════ -->
     <ng-container *ngIf="view === 'list'">
 
-      <!-- Header -->
-      <header class="flex items-start justify-between gap-4 mb-6">
-        <div class="flex items-start gap-3">
-          <span class="meetings-header-icon">
-            <mat-icon>videocam</mat-icon>
-          </span>
+      <div class="mu-page-header">
+        <div class="mu-page-header__left">
+          <span class="mu-page-icon"><mat-icon>videocam</mat-icon></span>
           <div>
-            <p class="text-[11px] font-semibold tracking-[0.14em] text-slate-400 uppercase mb-1">
-              Videoconferencias
-            </p>
-            <h1 class="text-2xl font-semibold text-slate-800 leading-tight flex items-center gap-2">
+            <p class="mu-eyebrow">Videoconferencias</p>
+            <h1 class="mu-page-title">
               Mis reuniones
-              <span *ngIf="draftCount > 0"
-                class="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                <mat-icon class="!text-[14px] !w-[14px] !h-[14px] leading-none">priority_high</mat-icon>
-                {{ draftLabel }}
+              <span *ngIf="draftCount > 0" class="mu-draft-badge">
+                <mat-icon>priority_high</mat-icon> {{ draftLabel }}
               </span>
             </h1>
-            <p class="text-sm text-slate-500 mt-0.5">
-              Gestiona y monitorea las videoconferencias creadas desde la plataforma.
-            </p>
+            <p class="mu-page-subtitle">Gestiona y monitorea tus videoconferencias Zoom.</p>
           </div>
         </div>
-        <button mat-flat-button color="primary" class="!rounded-full !px-5 !h-10" (click)="view = 'form'">
-          <mat-icon>add</mat-icon>
-          Nueva videoconferencia
-        </button>
-      </header>
-
-      <!-- Card lista -->
-      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80">
-        <mat-card-content class="!p-0">
-
-          <!-- Toolbar de filtros -->
-          <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
-            <mat-button-toggle-group
-              [value]="statusFilter"
-              (change)="setStatusFilter($event.value)"
-              hideSingleSelectionIndicator
-              class="meetings-filter-toggle">
-              <mat-button-toggle *ngFor="let f of statusFilters" [value]="f.value">
-                {{ f.label }}
-              </mat-button-toggle>
-            </mat-button-toggle-group>
-            <button mat-icon-button matTooltip="Recargar lista" (click)="refreshMeetings()"
-              [disabled]="loadingMeetings" aria-label="Recargar">
-              <mat-icon [class.spinning]="loadingMeetings">refresh</mat-icon>
-            </button>
-          </div>
-
-          <!-- Loader -->
-          <div *ngIf="loadingMeetings" class="flex items-center justify-center gap-3 py-10 text-slate-500 text-sm">
-            <mat-spinner diameter="22"></mat-spinner>
-            Actualizando…
-          </div>
-
-          <!-- Vacío -->
-          <div *ngIf="!loadingMeetings && filteredMeetings.length === 0"
-            class="flex flex-col items-center justify-center text-center py-16 px-6">
-            <mat-icon class="!text-[56px] !w-14 !h-14 text-slate-300 mb-3">event_busy</mat-icon>
-            <p class="text-slate-600 font-medium">No hay videoconferencias en esta categoría.</p>
-            <p class="text-sm text-slate-400 mt-1 mb-4">Crea una nueva reunión para comenzar.</p>
-            <button mat-flat-button color="primary" class="!rounded-full" (click)="view = 'form'">
-              <mat-icon>add</mat-icon> Crear primera reunión
-            </button>
-          </div>
-
-          <!-- Lista de reuniones -->
-          <ul *ngIf="!loadingMeetings && filteredMeetings.length > 0" class="divide-y divide-slate-100">
-            <li *ngFor="let m of paginatedMeetings"
-              class="meeting-row group flex items-stretch gap-4 px-5 py-4 cursor-pointer transition-colors hover:bg-slate-50/70"
-              (click)="openDetail(m.id)">
-              <span class="w-1 rounded-full self-stretch" [ngClass]="'bar-' + statusClass(m)"></span>
-
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="font-semibold text-slate-800 truncate">{{ m.topic }}</span>
-                  <span class="meeting-pill meeting-pill--type">{{ typeLabel(m.type) }}</span>
-                  <span class="meeting-pill" [ngClass]="'pill-' + statusClass(m)">
-                    {{ statusLabel(m) }}
-                  </span>
-                </div>
-                <div class="mt-1.5 flex items-center gap-x-4 gap-y-1 flex-wrap text-[13px] text-slate-500">
-                  <span class="inline-flex items-center gap-1.5">
-                    <mat-icon class="meeting-meta-icon">schedule</mat-icon>
-                    {{ m.start_time | date:'dd/MM/yyyy HH:mm' }} – {{ calculatedEndTime(m) | date:'HH:mm' }}
-                  </span>
-                  <span class="inline-flex items-center gap-1.5">
-                    <mat-icon class="meeting-meta-icon">timer</mat-icon>
-                    {{ m.duration_minutes }} min
-                  </span>
-                  <span *ngIf="m.zoom_meeting_id" class="inline-flex items-center gap-1.5 font-mono text-slate-500">
-                    <mat-icon class="meeting-meta-icon">tag</mat-icon>
-                    {{ m.zoom_meeting_id }}
-                  </span>
-                  <span *ngIf="m.creator_display_name" class="inline-flex items-center gap-1.5">
-                    <mat-icon class="meeting-meta-icon">person</mat-icon>
-                    {{ m.creator_display_name }}
-                  </span>
-                  <span *ngIf="m.assigned_zoom_user_name"
-                    class="inline-flex items-center gap-1.5 text-indigo-600 font-medium">
-                    <mat-icon class="meeting-meta-icon">videocam</mat-icon>
-                    {{ m.assigned_zoom_user_name }}
-                  </span>
-                </div>
-                <div *ngIf="m.error_message"
-                  class="mt-2 inline-flex items-start gap-2 text-[12.5px] text-red-700 bg-red-50 border border-red-100 px-2.5 py-1 rounded-md">
-                  <mat-icon class="meeting-meta-icon !text-red-600">error</mat-icon>
-                  {{ m.error_message }}
-                </div>
-              </div>
-
-              <span class="self-center text-slate-300 group-hover:text-indigo-500 transition-colors">
-                <mat-icon>chevron_right</mat-icon>
-              </span>
-            </li>
-          </ul>
-
-          <!-- Paginación -->
-          <div *ngIf="!loadingMeetings && filteredMeetings.length > 0"
-            class="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-100 text-sm text-slate-500">
-            <span>{{ pageStart }} – {{ pageEnd }} de {{ filteredMeetings.length }}</span>
-            <div *ngIf="showPagination" class="flex items-center gap-1">
-              <button mat-icon-button (click)="previousPage()" [disabled]="currentPage === 1" aria-label="Anterior">
-                <mat-icon>chevron_left</mat-icon>
-              </button>
-              <span class="px-2 text-slate-700 font-medium">{{ currentPage }} / {{ totalPages }}</span>
-              <button mat-icon-button (click)="nextPage()" [disabled]="currentPage === totalPages" aria-label="Siguiente">
-                <mat-icon>chevron_right</mat-icon>
-              </button>
-            </div>
-          </div>
-
-        </mat-card-content>
-      </mat-card>
-    </ng-container>
-
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- VISTA: FORMULARIO                                  -->
-    <!-- ═══════════════════════════════════════════════════ -->
-    <ng-container *ngIf="view === 'form'">
-
-      <div class="page-header">
-        <div>
-          <p class="section-eyebrow">NUEVA VIDEOCONFERENCIA</p>
-          <h1 class="page-title">Crear reuni&#243;n Zoom</h1>
-        </div>
-        <button type="button" class="btn btn-secondary" (click)="view = 'list'">
-          &#8592; Volver al historial
+        <button mat-flat-button color="primary" class="mu-btn-cta" (click)="view = 'form'">
+          <mat-icon>add</mat-icon> Nueva videoconferencia
         </button>
       </div>
 
-      <div class="card form-card">
-        <div *ngIf="successMsg" class="alert alert-ok">
-          <strong>&#10003;</strong> {{ successMsg }}
-        </div>
-        <div *ngIf="error && !saving" class="alert alert-err">
-          {{ error }}
+      <div class="mu-card">
+
+        <!-- Filtros -->
+        <div class="mu-toolbar">
+          <mat-button-toggle-group [value]="statusFilter" (change)="setStatusFilter($event.value)"
+            hideSingleSelectionIndicator class="mu-filter-group">
+            <mat-button-toggle *ngFor="let f of statusFilters" [value]="f.value">{{ f.label }}</mat-button-toggle>
+          </mat-button-toggle-group>
+          <button mat-icon-button (click)="refreshMeetings()" [disabled]="loadingMeetings" matTooltip="Recargar lista">
+            <mat-icon [class.mu-spin]="loadingMeetings">refresh</mat-icon>
+          </button>
         </div>
 
-        <form (ngSubmit)="submit()" class="form-grid">
+        <!-- Loader inline -->
+        <div *ngIf="loadingMeetings" class="mu-inline-loader">
+          <mat-spinner diameter="20"></mat-spinner><span>Actualizando…</span>
+        </div>
 
-          <!-- Tipo -->
-          <div class="field field--full" *ngIf="profile.can_create_unique || profile.can_create_weekly">
-            <span class="field-label">Tipo de reuni&#243;n</span>
-            <div class="type-tabs">
-              <button type="button" class="type-tab"
-                [class.active]="formMode === 'UNIQUE'"
+        <!-- Vacío -->
+        <div *ngIf="!loadingMeetings && filteredMeetings.length === 0" class="mu-empty">
+          <mat-icon>event_busy</mat-icon>
+          <p class="mu-empty__title">No hay videoconferencias en esta categoría</p>
+          <p class="mu-empty__hint">Crea una nueva reunión para comenzar.</p>
+          <button mat-flat-button color="primary" (click)="view = 'form'">
+            <mat-icon>add</mat-icon> Crear primera reunión
+          </button>
+        </div>
+
+        <!-- Lista -->
+        <ul *ngIf="!loadingMeetings && filteredMeetings.length > 0" class="mu-list">
+          <li *ngFor="let m of paginatedMeetings" class="mu-row" (click)="openDetail(m.id)">
+            <span class="mu-row__bar" [ngClass]="'mu-bar-' + statusClass(m)"></span>
+            <div class="mu-row__body">
+              <div class="mu-row__top">
+                <span class="mu-row__topic">{{ m.topic }}</span>
+                <span class="mu-pill mu-pill--type">{{ typeLabel(m.type) }}</span>
+                <span class="mu-pill" [ngClass]="'mu-pill-' + statusClass(m)">{{ statusLabel(m) }}</span>
+              </div>
+              <div class="mu-row__meta">
+                <span><mat-icon>schedule</mat-icon>{{ m.start_time | date:'dd/MM/yyyy HH:mm' }} – {{ calculatedEndTime(m) | date:'HH:mm' }}</span>
+                <span><mat-icon>timer</mat-icon>{{ m.duration_minutes }} min</span>
+                <span *ngIf="m.zoom_meeting_id"><mat-icon>tag</mat-icon>{{ m.zoom_meeting_id }}</span>
+                <span *ngIf="m.creator_display_name"><mat-icon>person</mat-icon>{{ m.creator_display_name }}</span>
+                <span *ngIf="m.assigned_zoom_user_name" class="mu-row__host">
+                  <mat-icon>videocam</mat-icon>{{ m.assigned_zoom_user_name }}
+                </span>
+              </div>
+              <div *ngIf="m.error_message" class="mu-row__error">
+                <mat-icon>error</mat-icon>{{ m.error_message }}
+              </div>
+            </div>
+            <mat-icon class="mu-row__arrow">chevron_right</mat-icon>
+          </li>
+        </ul>
+
+        <!-- Paginación -->
+        <div *ngIf="!loadingMeetings && filteredMeetings.length > 0" class="mu-pagination">
+          <span>{{ pageStart }} – {{ pageEnd }} de {{ filteredMeetings.length }}</span>
+          <div *ngIf="showPagination" class="mu-pagination__nav">
+            <button mat-icon-button (click)="previousPage()" [disabled]="currentPage === 1">
+              <mat-icon>chevron_left</mat-icon>
+            </button>
+            <span>{{ currentPage }} / {{ totalPages }}</span>
+            <button mat-icon-button (click)="nextPage()" [disabled]="currentPage === totalPages">
+              <mat-icon>chevron_right</mat-icon>
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </ng-container>
+
+    <!-- ═══════════════════  FORMULARIO  ═══════════════════ -->
+    <ng-container *ngIf="view === 'form'">
+
+      <div class="mu-page-header">
+        <div class="mu-page-header__left">
+          <span class="mu-page-icon mu-page-icon--add"><mat-icon>add_box</mat-icon></span>
+          <div>
+            <p class="mu-eyebrow">Nueva videoconferencia</p>
+            <h1 class="mu-page-title">Crear reunión Zoom</h1>
+          </div>
+        </div>
+        <button mat-stroked-button (click)="view = 'list'">
+          <mat-icon>arrow_back</mat-icon> Volver al historial
+        </button>
+      </div>
+
+      <div class="mu-card mu-form-card">
+
+        <div *ngIf="successMsg" class="mu-alert mu-alert--ok">
+          <mat-icon>check_circle</mat-icon> {{ successMsg }}
+        </div>
+        <div *ngIf="error && !saving" class="mu-alert mu-alert--err">
+          <mat-icon>error</mat-icon> {{ error }}
+        </div>
+
+        <form (ngSubmit)="submit()" class="mu-form">
+
+          <!-- Tipo de reunión -->
+          <div *ngIf="profile.can_create_unique || profile.can_create_weekly" class="mu-form__section">
+            <p class="mu-section-label">Tipo de reunión</p>
+            <div class="mu-type-grid">
+              <button type="button" class="mu-type-card"
+                [class.mu-type-card--active]="formMode === 'UNIQUE'"
                 [disabled]="!profile.can_create_unique"
                 (click)="formMode = 'UNIQUE'">
-                <span class="type-tab-icon">&#128197;</span>
-                <span class="type-tab-text">
-                  <strong>&#218;nica</strong>
-                  <small>Una sola sesi&#243;n</small>
+                <span class="mu-type-card__icon"><mat-icon>event</mat-icon></span>
+                <span class="mu-type-card__text">
+                  <strong>Única</strong>
+                  <small>Una sola sesión</small>
                 </span>
               </button>
-              <button type="button" class="type-tab"
-                [class.active]="formMode === 'WEEKLY'"
+              <button type="button" class="mu-type-card"
+                [class.mu-type-card--active]="formMode === 'WEEKLY'"
                 [disabled]="!profile.can_create_weekly"
                 (click)="formMode = 'WEEKLY'">
-                <span class="type-tab-icon">&#128257;</span>
-                <span class="type-tab-text">
+                <span class="mu-type-card__icon"><mat-icon>event_repeat</mat-icon></span>
+                <span class="mu-type-card__text">
                   <strong>Semanal recurrente</strong>
                   <small>Se repite cada semana</small>
                 </span>
@@ -210,81 +165,80 @@
             </div>
           </div>
 
-          <!-- Grupo -->
-          <div class="field">
-            <label class="field-label" for="groupId">Grupo de hosts Zoom</label>
-            <select id="groupId" [(ngModel)]="formGroupId" name="groupId" required class="input">
-              <option value="">&#8212; Selecciona un grupo &#8212;</option>
-              <option *ngFor="let g of availableGroups" [value]="g.id">{{ g.name }}</option>
-            </select>
-          </div>
+          <div class="mu-form__grid">
 
-          <!-- Tema -->
-          <div class="field">
-            <label class="field-label" for="topic">Tema</label>
-            <input id="topic" type="text" [(ngModel)]="formTopic" name="topic" required
-              maxlength="300" placeholder="T&#237;tulo de la reuni&#243;n" class="input" />
-          </div>
+            <mat-form-field appearance="outline" class="mu-field">
+              <mat-label>Grupo de hosts Zoom</mat-label>
+              <mat-icon matPrefix>groups</mat-icon>
+              <mat-select [(ngModel)]="formGroupId" name="groupId" required>
+                <mat-option value="">— Selecciona un grupo —</mat-option>
+                <mat-option *ngFor="let g of availableGroups" [value]="g.id">{{ g.name }}</mat-option>
+              </mat-select>
+            </mat-form-field>
 
-          <!-- Agenda -->
-          <div class="field field--full">
-            <label class="field-label" for="agenda">Agenda (opcional)</label>
-            <textarea id="agenda" [(ngModel)]="formAgenda" name="agenda"
-              rows="2" maxlength="2000" placeholder="Descripci&#243;n o puntos a tratar" class="input"></textarea>
-          </div>
+            <mat-form-field appearance="outline" class="mu-field">
+              <mat-label>Tema</mat-label>
+              <mat-icon matPrefix>title</mat-icon>
+              <input matInput [(ngModel)]="formTopic" name="topic" required
+                maxlength="300" placeholder="Título de la reunión" />
+            </mat-form-field>
 
-          <!-- Fecha y duraci&#243;n -->
-          <div class="field">
-            <label class="field-label" for="startTime">Fecha y hora de inicio</label>
-            <input id="startTime" type="datetime-local" [(ngModel)]="formStartTime" name="startTime"
-              required [min]="minDateTime" class="input"
-              [class.input--error]="formStartTime && startTimeError" />
-            <span *ngIf="formStartTime && startTimeError" class="field-error">{{ startTimeError }}</span>
-          </div>
-          <div class="field">
-            <label class="field-label" for="duration">Duraci&#243;n (minutos)</label>
-            <input id="duration" type="number" [(ngModel)]="formDuration" name="duration"
-              required min="15" max="720" class="input"
-              [class.input--error]="formDuration < 15 || formDuration > 720" />
-            <span *ngIf="formDuration < 15 || formDuration > 720" class="field-error">
-              La duraci&#243;n debe estar entre 15 y 720 minutos.
-            </span>
-          </div>
+            <mat-form-field appearance="outline" class="mu-field mu-field--full">
+              <mat-label>Agenda (opcional)</mat-label>
+              <textarea matInput [(ngModel)]="formAgenda" name="agenda"
+                rows="3" maxlength="2000" placeholder="Descripción o puntos a tratar"></textarea>
+            </mat-form-field>
 
-          <!-- Recurrencia semanal -->
-          <ng-container *ngIf="formMode === 'WEEKLY'">
-            <div class="field">
-              <label class="field-label" for="recEndDate">Fecha fin de recurrencia</label>
-              <input id="recEndDate" type="date" [(ngModel)]="formRecurrenceEndDate"
-                name="recEndDate" [min]="minRecurrenceDate" class="input"
-                [class.input--error]="formRecurrenceEndDate && recurrenceEndError" />
-              <span *ngIf="formRecurrenceEndDate && recurrenceEndError" class="field-error">
-                {{ recurrenceEndError }}
-              </span>
-            </div>
-            <div class="field">
-              <span class="field-label">D&#237;a de la semana</span>
-              <div class="day-picker">
-                <label *ngFor="let d of weekdayOptions" class="day-chip"
-                  [class.selected]="formRecurrenceWeeklyDays === d.value">
-                  <input type="radio" [(ngModel)]="formRecurrenceWeeklyDays"
-                    name="recWeeklyDays" [value]="d.value" />
-                  {{ d.label }}
-                </label>
+            <mat-form-field appearance="outline" class="mu-field">
+              <mat-label>Fecha y hora de inicio</mat-label>
+              <mat-icon matPrefix>calendar_today</mat-icon>
+              <input matInput type="datetime-local" [(ngModel)]="formStartTime"
+                name="startTime" required [min]="minDateTime" />
+              <mat-error *ngIf="formStartTime && startTimeError">{{ startTimeError }}</mat-error>
+            </mat-form-field>
+
+            <mat-form-field appearance="outline" class="mu-field">
+              <mat-label>Duración (minutos)</mat-label>
+              <mat-icon matPrefix>timer</mat-icon>
+              <input matInput type="number" [(ngModel)]="formDuration" name="duration"
+                required min="15" max="720" />
+              <mat-error *ngIf="formDuration < 15 || formDuration > 720">
+                La duración debe estar entre 15 y 720 minutos.
+              </mat-error>
+            </mat-form-field>
+
+            <ng-container *ngIf="formMode === 'WEEKLY'">
+              <mat-form-field appearance="outline" class="mu-field">
+                <mat-label>Fecha fin de recurrencia</mat-label>
+                <mat-icon matPrefix>event_available</mat-icon>
+                <input matInput type="date" [(ngModel)]="formRecurrenceEndDate"
+                  name="recEndDate" [min]="minRecurrenceDate" />
+                <mat-error *ngIf="formRecurrenceEndDate && recurrenceEndError">{{ recurrenceEndError }}</mat-error>
+              </mat-form-field>
+
+              <div class="mu-field mu-day-field">
+                <p class="mu-section-label">Día de la semana</p>
+                <div class="mu-day-picker">
+                  <label *ngFor="let d of weekdayOptions" class="mu-day-chip"
+                    [class.mu-day-chip--active]="formRecurrenceWeeklyDays === d.value">
+                    <input type="radio" [(ngModel)]="formRecurrenceWeeklyDays"
+                      name="recWeeklyDays" [value]="d.value" />
+                    {{ d.label }}
+                  </label>
+                </div>
               </div>
-            </div>
-          </ng-container>
+            </ng-container>
 
-          <div class="field field--full form-actions">
-            <button type="button" class="btn btn-secondary" (click)="view = 'list'" [disabled]="saving">
+          </div>
+
+          <div class="mu-form__actions">
+            <button type="button" mat-stroked-button (click)="view = 'list'" [disabled]="saving">
               Cancelar
             </button>
-            <button type="submit" class="btn btn-primary btn-submit"
+            <button type="submit" mat-flat-button color="primary"
               [disabled]="saving || !canCreate || !formTopic || !formGroupId || !formStartTime || !!startTimeError || !!recurrenceEndError || formDuration < 15 || formDuration > 720">
-              <span *ngIf="!saving">Crear videoconferencia</span>
-              <span *ngIf="saving" class="btn-saving">
-                <span class="spinner spinner--sm"></span> Creando...
-              </span>
+              <mat-spinner *ngIf="saving" diameter="16" class="mu-btn-spinner"></mat-spinner>
+              {{ saving ? 'Creando…' : 'Crear videoconferencia' }}
             </button>
           </div>
 

@@ -5,8 +5,11 @@ import { Router } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCardModule } from '@angular/material/card';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSelectModule } from '@angular/material/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { timeout, catchError } from 'rxjs/operators';
 import { firstValueFrom, of } from 'rxjs';
@@ -32,8 +35,11 @@ type StatusFilter = 'ALL' | ManualMeetingDisplayStatus;
         MatButtonModule,
         MatButtonToggleModule,
         MatCardModule,
+        MatFormFieldModule,
         MatIconModule,
+        MatInputModule,
         MatProgressSpinnerModule,
+        MatSelectModule,
         MatTooltipModule,
     ],
     templateUrl: './videoconference-creator.page.html',
