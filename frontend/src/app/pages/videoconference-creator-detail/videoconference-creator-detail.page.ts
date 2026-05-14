@@ -1,6 +1,11 @@
 import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
+import { MatButtonModule } from '@angular/material/button';
+import { MatCardModule } from '@angular/material/card';
+import { MatIconModule } from '@angular/material/icon';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { Subject, of } from 'rxjs';
 import { takeUntil, timeout, catchError, retry } from 'rxjs/operators';
 import {
@@ -23,7 +28,14 @@ type ParticipantSessionGroup = {
 @Component({
     selector: 'app-videoconference-creator-detail-page',
     standalone: true,
-    imports: [CommonModule],
+    imports: [
+        CommonModule,
+        MatButtonModule,
+        MatCardModule,
+        MatIconModule,
+        MatProgressSpinnerModule,
+        MatTooltipModule,
+    ],
     templateUrl: './videoconference-creator-detail.page.html',
     styleUrl: './videoconference-creator-detail.page.css',
 })
@@ -441,7 +453,18 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
     }
 
     get totalVisibleParticipants(): number {
-        return this.participantSessionGroups.reduce((total, group) => total + group.participants.length, 0);
+        const seen = new Set<string>();
+        for (const group of this.participantSessionGroups) {
+            for (const participant of group.participants) {
+                const email = `${participant.email ?? ''}`.trim().toLowerCase();
+                const name = `${participant.display_name ?? ''}`.trim().toLowerCase();
+                const role = `${participant.role ?? ''}`.trim().toLowerCase();
+                const key = email || [name, role].filter(Boolean).join('|');
+                if (!key) continue;
+                seen.add(key);
+            }
+        }
+        return seen.size;
     }
 
     get hasEndedInstances(): boolean {

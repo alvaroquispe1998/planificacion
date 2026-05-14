@@ -1,15 +1,17 @@
-<div class="vc-page">
+<div class="vc-page meetings-ui">
 
   <!-- Cargando perfil -->
-  <div *ngIf="loading" class="full-loading">
-    <span class="spinner"></span>
-    <span>Cargando...</span>
+  <div *ngIf="loading" class="meetings-loading">
+    <mat-spinner diameter="36"></mat-spinner>
+    <span>Cargando…</span>
   </div>
 
-  <div *ngIf="!loading && error && !profile" class="full-error">
-    <div class="full-error-icon">&#9888;</div>
+  <div *ngIf="!loading && error && !profile" class="meetings-error">
+    <mat-icon>error_outline</mat-icon>
     <p>{{ error }}</p>
-    <button class="btn btn-secondary" (click)="load()">Reintentar</button>
+    <button mat-stroked-button color="primary" (click)="load()">
+      <mat-icon>refresh</mat-icon> Reintentar
+    </button>
   </div>
 
   <ng-container *ngIf="!loading && profile">
@@ -19,91 +21,141 @@
     <!-- ═══════════════════════════════════════════════════ -->
     <ng-container *ngIf="view === 'list'">
 
-      <div class="page-header">
-        <div>
-          <p class="section-eyebrow">VIDEOCONFERENCIAS</p>
-          <h1 class="page-title">
-            Mis reuniones
-            <span class="badge-count" *ngIf="draftCount > 0">
-              {{ draftLabel }}
-            </span>
-          </h1>
-        </div>
-        <button type="button" class="btn btn-primary btn-new" (click)="view = 'form'">
-          + Nueva videoconferencia
-        </button>
-      </div>
-
-      <div class="card list-card">
-
-        <div class="list-toolbar">
-          <div class="filter-bar">
-            <button
-              *ngFor="let f of statusFilters"
-              type="button"
-              class="filter-chip"
-              [ngClass]="filterClass(f.value)"
-              [class.active]="statusFilter === f.value"
-              (click)="setStatusFilter(f.value)">
-              {{ f.label }}
-            </button>
-          </div>
-          <button type="button" class="btn btn-icon" (click)="refreshMeetings()"
-            [disabled]="loadingMeetings" title="Recargar lista">
-            <span [class.spinning]="loadingMeetings">&#8635;</span>
-          </button>
-        </div>
-
-        <div *ngIf="loadingMeetings" class="list-loading">
-          <span class="spinner spinner--sm"></span> Actualizando...
-        </div>
-
-        <div *ngIf="!loadingMeetings && filteredMeetings.length === 0" class="empty-state">
-          <p>No hay videoconferencias en esta categor&#237;a.</p>
-          <button type="button" class="btn btn-primary" style="margin-top:0.75rem"
-            (click)="view = 'form'">
-            Crear primera reuni&#243;n
-          </button>
-        </div>
-
-        <div class="meeting-list" *ngIf="!loadingMeetings && filteredMeetings.length > 0">
-          <div class="meeting-row" *ngFor="let m of paginatedMeetings" (click)="openDetail(m.id)">
-            <div class="meeting-status-bar" [ngClass]="statusClass(m)"></div>
-            <div class="meeting-body">
-              <div class="meeting-main">
-                <span class="meeting-topic">{{ m.topic }}</span>
-                <span class="meeting-type-pill">{{ typeLabel(m.type) }}</span>
-                <span class="badge" [ngClass]="statusClass(m)">{{ statusLabel(m) }}</span>
-              </div>
-              <div class="meeting-meta">
-                <span>{{ m.start_time | date:'dd/MM/yyyy HH:mm' }} - {{ calculatedEndTime(m) | date:'HH:mm' }}</span>
-                <span>{{ m.duration_minutes }} min</span>
-                <span *ngIf="m.zoom_meeting_id" class="meeting-meta-id">ID: {{ m.zoom_meeting_id }}</span>
-                <span *ngIf="m.creator_display_name" class="meeting-creator">{{ m.creator_display_name }}</span>
-                <span *ngIf="m.assigned_zoom_user_name" class="meeting-host">🎥 {{ m.assigned_zoom_user_name }}</span>
-              </div>
-              <div *ngIf="m.error_message" class="meeting-error-msg">{{ m.error_message }}</div>
-            </div>
-            <span class="meeting-arrow">&#8250;</span>
-          </div>
-        </div>
-
-        <div class="pagination-bar" *ngIf="!loadingMeetings && filteredMeetings.length > 0">
-          <span class="pagination-summary">
-            {{ pageStart }} - {{ pageEnd }} de {{ filteredMeetings.length }}
+      <!-- Header -->
+      <header class="flex items-start justify-between gap-4 mb-6">
+        <div class="flex items-start gap-3">
+          <span class="meetings-header-icon">
+            <mat-icon>videocam</mat-icon>
           </span>
-          <div class="pagination-actions" *ngIf="showPagination">
-            <button type="button" class="btn page-btn" (click)="previousPage()" [disabled]="currentPage === 1">
-              &#8249;
-            </button>
-            <span class="page-indicator">{{ currentPage }} / {{ totalPages }}</span>
-            <button type="button" class="btn page-btn" (click)="nextPage()" [disabled]="currentPage === totalPages">
-              &#8250;
-            </button>
+          <div>
+            <p class="text-[11px] font-semibold tracking-[0.14em] text-slate-400 uppercase mb-1">
+              Videoconferencias
+            </p>
+            <h1 class="text-2xl font-semibold text-slate-800 leading-tight flex items-center gap-2">
+              Mis reuniones
+              <span *ngIf="draftCount > 0"
+                class="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                <mat-icon class="!text-[14px] !w-[14px] !h-[14px] leading-none">priority_high</mat-icon>
+                {{ draftLabel }}
+              </span>
+            </h1>
+            <p class="text-sm text-slate-500 mt-0.5">
+              Gestiona y monitorea las videoconferencias creadas desde la plataforma.
+            </p>
           </div>
         </div>
+        <button mat-flat-button color="primary" class="!rounded-full !px-5 !h-10" (click)="view = 'form'">
+          <mat-icon>add</mat-icon>
+          Nueva videoconferencia
+        </button>
+      </header>
 
-      </div>
+      <!-- Card lista -->
+      <mat-card appearance="outlined" class="meetings-card !rounded-2xl !border-slate-200/80">
+        <mat-card-content class="!p-0">
+
+          <!-- Toolbar de filtros -->
+          <div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+            <mat-button-toggle-group
+              [value]="statusFilter"
+              (change)="setStatusFilter($event.value)"
+              hideSingleSelectionIndicator
+              class="meetings-filter-toggle">
+              <mat-button-toggle *ngFor="let f of statusFilters" [value]="f.value">
+                {{ f.label }}
+              </mat-button-toggle>
+            </mat-button-toggle-group>
+            <button mat-icon-button matTooltip="Recargar lista" (click)="refreshMeetings()"
+              [disabled]="loadingMeetings" aria-label="Recargar">
+              <mat-icon [class.spinning]="loadingMeetings">refresh</mat-icon>
+            </button>
+          </div>
+
+          <!-- Loader -->
+          <div *ngIf="loadingMeetings" class="flex items-center justify-center gap-3 py-10 text-slate-500 text-sm">
+            <mat-spinner diameter="22"></mat-spinner>
+            Actualizando…
+          </div>
+
+          <!-- Vacío -->
+          <div *ngIf="!loadingMeetings && filteredMeetings.length === 0"
+            class="flex flex-col items-center justify-center text-center py-16 px-6">
+            <mat-icon class="!text-[56px] !w-14 !h-14 text-slate-300 mb-3">event_busy</mat-icon>
+            <p class="text-slate-600 font-medium">No hay videoconferencias en esta categoría.</p>
+            <p class="text-sm text-slate-400 mt-1 mb-4">Crea una nueva reunión para comenzar.</p>
+            <button mat-flat-button color="primary" class="!rounded-full" (click)="view = 'form'">
+              <mat-icon>add</mat-icon> Crear primera reunión
+            </button>
+          </div>
+
+          <!-- Lista de reuniones -->
+          <ul *ngIf="!loadingMeetings && filteredMeetings.length > 0" class="divide-y divide-slate-100">
+            <li *ngFor="let m of paginatedMeetings"
+              class="meeting-row group flex items-stretch gap-4 px-5 py-4 cursor-pointer transition-colors hover:bg-slate-50/70"
+              (click)="openDetail(m.id)">
+              <span class="w-1 rounded-full self-stretch" [ngClass]="'bar-' + statusClass(m)"></span>
+
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-semibold text-slate-800 truncate">{{ m.topic }}</span>
+                  <span class="meeting-pill meeting-pill--type">{{ typeLabel(m.type) }}</span>
+                  <span class="meeting-pill" [ngClass]="'pill-' + statusClass(m)">
+                    {{ statusLabel(m) }}
+                  </span>
+                </div>
+                <div class="mt-1.5 flex items-center gap-x-4 gap-y-1 flex-wrap text-[13px] text-slate-500">
+                  <span class="inline-flex items-center gap-1.5">
+                    <mat-icon class="meeting-meta-icon">schedule</mat-icon>
+                    {{ m.start_time | date:'dd/MM/yyyy HH:mm' }} – {{ calculatedEndTime(m) | date:'HH:mm' }}
+                  </span>
+                  <span class="inline-flex items-center gap-1.5">
+                    <mat-icon class="meeting-meta-icon">timer</mat-icon>
+                    {{ m.duration_minutes }} min
+                  </span>
+                  <span *ngIf="m.zoom_meeting_id" class="inline-flex items-center gap-1.5 font-mono text-slate-500">
+                    <mat-icon class="meeting-meta-icon">tag</mat-icon>
+                    {{ m.zoom_meeting_id }}
+                  </span>
+                  <span *ngIf="m.creator_display_name" class="inline-flex items-center gap-1.5">
+                    <mat-icon class="meeting-meta-icon">person</mat-icon>
+                    {{ m.creator_display_name }}
+                  </span>
+                  <span *ngIf="m.assigned_zoom_user_name"
+                    class="inline-flex items-center gap-1.5 text-indigo-600 font-medium">
+                    <mat-icon class="meeting-meta-icon">videocam</mat-icon>
+                    {{ m.assigned_zoom_user_name }}
+                  </span>
+                </div>
+                <div *ngIf="m.error_message"
+                  class="mt-2 inline-flex items-start gap-2 text-[12.5px] text-red-700 bg-red-50 border border-red-100 px-2.5 py-1 rounded-md">
+                  <mat-icon class="meeting-meta-icon !text-red-600">error</mat-icon>
+                  {{ m.error_message }}
+                </div>
+              </div>
+
+              <span class="self-center text-slate-300 group-hover:text-indigo-500 transition-colors">
+                <mat-icon>chevron_right</mat-icon>
+              </span>
+            </li>
+          </ul>
+
+          <!-- Paginación -->
+          <div *ngIf="!loadingMeetings && filteredMeetings.length > 0"
+            class="flex items-center justify-between gap-3 px-5 py-3 border-t border-slate-100 text-sm text-slate-500">
+            <span>{{ pageStart }} – {{ pageEnd }} de {{ filteredMeetings.length }}</span>
+            <div *ngIf="showPagination" class="flex items-center gap-1">
+              <button mat-icon-button (click)="previousPage()" [disabled]="currentPage === 1" aria-label="Anterior">
+                <mat-icon>chevron_left</mat-icon>
+              </button>
+              <span class="px-2 text-slate-700 font-medium">{{ currentPage }} / {{ totalPages }}</span>
+              <button mat-icon-button (click)="nextPage()" [disabled]="currentPage === totalPages" aria-label="Siguiente">
+                <mat-icon>chevron_right</mat-icon>
+              </button>
+            </div>
+          </div>
+
+        </mat-card-content>
+      </mat-card>
     </ng-container>
 
     <!-- ═══════════════════════════════════════════════════ -->
