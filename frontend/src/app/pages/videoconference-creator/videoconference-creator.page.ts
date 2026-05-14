@@ -2,6 +2,12 @@ import { CommonModule } from '@angular/common';
 import { ChangeDetectorRef, Component, NgZone, OnDestroy, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
+import { MatButtonModule } from '@angular/material/button';
+import { MatButtonToggleModule } from '@angular/material/button-toggle';
+import { MatCardModule } from '@angular/material/card';
+import { MatIconModule } from '@angular/material/icon';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { timeout, catchError } from 'rxjs/operators';
 import { firstValueFrom, of } from 'rxjs';
 import {
@@ -20,7 +26,16 @@ type StatusFilter = 'ALL' | ManualMeetingDisplayStatus;
 @Component({
     selector: 'app-videoconference-creator-page',
     standalone: true,
-    imports: [CommonModule, FormsModule],
+    imports: [
+        CommonModule,
+        FormsModule,
+        MatButtonModule,
+        MatButtonToggleModule,
+        MatCardModule,
+        MatIconModule,
+        MatProgressSpinnerModule,
+        MatTooltipModule,
+    ],
     templateUrl: './videoconference-creator.page.html',
     styleUrl: './videoconference-creator.page.css',
 })

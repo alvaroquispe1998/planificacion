@@ -6,6 +6,7 @@ import {
   provideZoneChangeDetection,
 } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { provideAnimationsAsync } from '@angular/platform-browser/animations/async';
 import { AuthService } from './core/auth.service';
 import { authInterceptor } from './core/auth.interceptor';
 import { routes } from './app.routes';
@@ -14,6 +15,7 @@ export const appConfig: ApplicationConfig = {
   providers: [
     provideZoneChangeDetection({ eventCoalescing: true, runCoalescing: true }),
     provideBrowserGlobalErrorListeners(),
+    provideAnimationsAsync(),
     provideRouter(routes),
     provideHttpClient(withInterceptors([authInterceptor])),
     {
