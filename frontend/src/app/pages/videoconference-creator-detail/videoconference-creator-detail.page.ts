@@ -15,6 +15,11 @@ import {
 import { AuthService } from '../../core/auth.service';
 import { DialogService } from '../../core/dialog.service';
 
+type ParticipantSessionGroup = {
+    instance: MeetingInstance | null;
+    participants: MeetingParticipant[];
+};
+
 @Component({
     selector: 'app-videoconference-creator-detail-page',
     standalone: true,
@@ -412,12 +417,58 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         });
     }
 
+    get participantSessionGroups(): ParticipantSessionGroup[] {
+        const participantsByInstance = new Map<string, MeetingParticipant[]>();
+        for (const participant of this.detail?.participants ?? []) {
+            const instanceId = `${participant.meeting_instance_id ?? ''}`.trim() || 'unknown';
+            const bucket = participantsByInstance.get(instanceId) ?? [];
+            bucket.push(participant);
+            participantsByInstance.set(instanceId, bucket);
+        }
+
+        const groups: ParticipantSessionGroup[] = [];
+        for (const instance of this.detail?.instances ?? []) {
+            const participants = this.deduplicateParticipants(participantsByInstance.get(instance.id) ?? []);
+            if (participants.length) groups.push({ instance, participants });
+            participantsByInstance.delete(instance.id);
+        }
+
+        for (const participants of participantsByInstance.values()) {
+            const unique = this.deduplicateParticipants(participants);
+            if (unique.length) groups.push({ instance: null, participants: unique });
+        }
+        return groups;
+    }
+
+    get totalVisibleParticipants(): number {
+        return this.participantSessionGroups.reduce((total, group) => total + group.participants.length, 0);
+    }
+
     get hasEndedInstances(): boolean {
         return (this.detail?.instances ?? []).some((i) => i['status'] === 'ENDED');
     }
 
     get hasAnyInstances(): boolean {
         return (this.detail?.instances ?? []).length > 0;
+    }
+
+    get latestActivityTime(): Date | null {
+        const candidates: Date[] = [];
+        for (const instance of this.detail?.instances ?? []) {
+            const value = instance.actual_start;
+            if (value) {
+                const date = new Date(value);
+                if (!Number.isNaN(date.getTime())) candidates.push(date);
+            }
+        }
+        for (const recording of this.videoRecordings) {
+            if (recording.start_time) {
+                const date = new Date(recording.start_time);
+                if (!Number.isNaN(date.getTime())) candidates.push(date);
+            }
+        }
+        if (!candidates.length) return null;
+        return candidates.reduce((latest, current) => current > latest ? current : latest);
     }
 
     instanceStatusLabel(status: string | undefined): string {
@@ -492,7 +543,8 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
             return `Reunión en curso. Finaliza a las ${this.formatTime(end)}`;
         }
         if (status === 'FINISHED') {
-            return meeting.type === 'WEEKLY' ? 'Recurrencia finalizada' : `Finalizó el ${this.formatDateTime(end)}`;
+            const finishedAt = this.latestActivityTime ?? end;
+            return meeting.type === 'WEEKLY' ? 'Recurrencia finalizada' : `Última sesión registrada el ${this.formatDateTime(finishedAt)}`;
         }
         if (status === 'CANCELLED') return 'Esta reunión fue cancelada';
         if (status === 'DENIED') return 'La solicitud fue denegada por TI';
@@ -594,6 +646,19 @@ export class VideoconferenceCreatorDetailPageComponent implements OnInit, OnDest
         return (recording.play_url ? 1_000_000_000 : 0)
             + (recording.download_url ? 500_000_000 : 0)
             + (Number.isFinite(size) ? size : 0);
+    }
+
+    private deduplicateParticipants(participants: MeetingParticipant[]): MeetingParticipant[] {
+        const seen = new Set<string>();
+        return participants.filter((participant) => {
+            const email = `${participant.email ?? ''}`.trim().toLowerCase();
+            const name = `${participant.display_name ?? ''}`.trim().toLowerCase();
+            const role = `${participant.role ?? ''}`.trim().toLowerCase();
+            const key = email || [name, role].filter(Boolean).join('|');
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
     }
 
     private formatDateTime(value: string | Date): string {

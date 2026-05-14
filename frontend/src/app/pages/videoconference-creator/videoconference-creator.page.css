@@ -309,35 +309,61 @@ select.input { cursor: pointer; }
   transition: all 0.12s;
 }
 .filter-chip:hover { border-color: #7890ad; color: #1e3458; }
-.filter-chip.active { font-weight: 700; }
+.filter-chip.filter-all {
+  background: #e8eef6; border-color: #91a4bb; color: #203247;
+}
+.filter-chip.filter-pending {
+  background: #fff4d6; border-color: #f0c96a; color: #7a5600;
+}
+.filter-chip.filter-progress {
+  background: #e5f0ff; border-color: #83b4f6; color: #174a8b;
+}
+.filter-chip.filter-finished {
+  background: #e3f8ee; border-color: #8fd5ae; color: #1a6b40;
+}
+.filter-chip.filter-warn {
+  background: #fff0df; border-color: #f1b271; color: #8a4b00;
+}
+.filter-chip.filter-err,
+.filter-chip.filter-denied {
+  background: #ffe4e4; border-color: #ef9b9b; color: #9b1a1a;
+}
+.filter-chip.filter-cancelled {
+  background: #eeeeee; border-color: #c8c8c8; color: #5f6368;
+}
+.filter-chip.active {
+  border-width: 2px;
+  font-weight: 800;
+  transform: translateY(-1px);
+}
 .filter-chip.filter-all.active {
   background: #e8eef6; border-color: #91a4bb; color: #203247;
-  box-shadow: 0 0 0 2px rgba(145, 164, 187, 0.14);
+  box-shadow: 0 0 0 3px rgba(145, 164, 187, 0.22);
 }
 .filter-chip.filter-pending.active {
   background: #fff4d6; border-color: #f0c96a; color: #7a5600;
-  box-shadow: 0 0 0 2px rgba(240, 201, 106, 0.16);
+  box-shadow: 0 0 0 3px rgba(240, 201, 106, 0.24);
 }
 .filter-chip.filter-progress.active {
   background: #e5f0ff; border-color: #83b4f6; color: #174a8b;
-  box-shadow: 0 0 0 2px rgba(131, 180, 246, 0.16);
+  box-shadow: 0 0 0 3px rgba(131, 180, 246, 0.24);
 }
 .filter-chip.filter-finished.active {
   background: #e3f8ee; border-color: #8fd5ae; color: #1a6b40;
-  box-shadow: 0 0 0 2px rgba(143, 213, 174, 0.16);
+  box-shadow: 0 0 0 3px rgba(143, 213, 174, 0.24);
 }
 .filter-chip.filter-warn.active {
   background: #fff0df; border-color: #f1b271; color: #8a4b00;
-  box-shadow: 0 0 0 2px rgba(241, 178, 113, 0.16);
+  box-shadow: 0 0 0 3px rgba(241, 178, 113, 0.24);
 }
 .filter-chip.filter-err.active,
 .filter-chip.filter-denied.active {
   background: #ffe4e4; border-color: #ef9b9b; color: #9b1a1a;
-  box-shadow: 0 0 0 2px rgba(239, 155, 155, 0.16);
+  box-shadow: 0 0 0 3px rgba(239, 155, 155, 0.24);
 }
 .filter-chip.filter-cancelled.active {
   background: #eeeeee; border-color: #c8c8c8; color: #5f6368;
-  box-shadow: 0 0 0 2px rgba(160, 160, 160, 0.14);
+  box-shadow: 0 0 0 3px rgba(160, 160, 160, 0.22);
 }
 
 /* ── Meetings list ────────────────────────────────────────────────── */
