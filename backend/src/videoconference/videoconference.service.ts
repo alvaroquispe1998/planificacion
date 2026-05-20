@@ -200,6 +200,10 @@ type ZoomPoolUser = {
     email: string | null;
 };
 
+function hasNonEmptyEmail<T extends { email: string | null }>(user: T): user is T & { email: string } {
+    return Boolean(user.email);
+}
+
 type ZoomPoolLicenseSnapshot = {
     ok: boolean;
     error: string | null;
@@ -1792,38 +1796,39 @@ export class VideoconferenceService implements OnModuleInit {
             // This catches meetings created directly in Zoom outside the system.
             // Deduplicate by reference-week slot to avoid counting the same weekly
             // slot once per generated date.
-            for (const zoomUser of zoomUsers) {
-                if (!zoomUser.email) {
-                    continue;
-                }
-                const seenRemoteSlots = new Set<string>();
-                try {
-                    const remoteMeetings = await this.zoomAccountService.listUserMeetingsByTypes(
-                        zoomUser.email,
-                        ['live', 'upcoming'],
-                    );
-                    for (const meeting of remoteMeetings) {
-                        if (dbMeetingIds.has(meeting.id)) {
-                            // Already counted via the DB record
-                            continue;
+            await Promise.all(
+                zoomUsers
+                    .filter(hasNonEmptyEmail)
+                    .map(async (zoomUser) => {
+                        const seenRemoteSlots = new Set<string>();
+                        try {
+                            const remoteMeetings = await this.zoomAccountService.listUserMeetingsByTypes(
+                                zoomUser.email,
+                                ['live', 'upcoming'],
+                            );
+                            for (const meeting of remoteMeetings) {
+                                if (dbMeetingIds.has(meeting.id)) {
+                                    // Already counted via the DB record
+                                    continue;
+                                }
+                                const slot = zoomMeetingToReferenceWeekSlot(meeting);
+                                if (!slot) {
+                                    continue;
+                                }
+                                const remoteSlotKey = `${slot.start.getTime()}::${slot.end.getTime()}`;
+                                if (seenRemoteSlots.has(remoteSlotKey)) {
+                                    continue;
+                                }
+                                seenRemoteSlots.add(remoteSlotKey);
+                                const current = simulatedReservations.get(zoomUser.zoom_user_id) ?? [];
+                                current.push({ scheduled_start: slot.start, scheduled_end: slot.end });
+                                simulatedReservations.set(zoomUser.zoom_user_id, current);
+                            }
+                        } catch {
+                            // Zoom API unavailable — continue without remote meetings for this user
                         }
-                        const slot = zoomMeetingToReferenceWeekSlot(meeting);
-                        if (!slot) {
-                            continue;
-                        }
-                        const remoteSlotKey = `${slot.start.getTime()}::${slot.end.getTime()}`;
-                        if (seenRemoteSlots.has(remoteSlotKey)) {
-                            continue;
-                        }
-                        seenRemoteSlots.add(remoteSlotKey);
-                        const current = simulatedReservations.get(zoomUser.zoom_user_id) ?? [];
-                        current.push({ scheduled_start: slot.start, scheduled_end: slot.end });
-                        simulatedReservations.set(zoomUser.zoom_user_id, current);
-                    }
-                } catch {
-                    // Zoom API unavailable — continue without remote meetings for this user
-                }
-            }
+                    }),
+            );
         }
 
         const virtualReservations = new Map<string, SimulatedReservation[]>();
@@ -2023,6 +2028,28 @@ export class VideoconferenceService implements OnModuleInit {
         );
         const existingLookup = await this.loadExistingConferenceLookup(familyOccurrences);
         const remoteMeetingsCache = new Map<string, ZoomMeetingSummary[] | null>();
+        // Pre-warm Zoom API for all pool users in parallel to avoid serial HTTP calls
+        // inside findAvailableZoomUser for each occurrence.
+        await Promise.all(
+            input.zoomUsers
+                .filter(hasNonEmptyEmail)
+                .map(async (user) => {
+                    try {
+                        const meetings = await this.zoomAccountService.listUserMeetingsByTypes(
+                            user.email,
+                            ['live', 'upcoming'],
+                        );
+                        remoteMeetingsCache.set(user.zoom_user_id, meetings);
+                    } catch {
+                        remoteMeetingsCache.set(user.zoom_user_id, null);
+                    }
+                }),
+        );
+        // Pre-load active local meetings for all pool users in one query to avoid
+        // N×M DB queries inside findAvailableZoomUser (one per occurrence per user checked).
+        const localMeetingsSnapshot = await this.buildLocalMeetingsSnapshot(
+            input.zoomUsers.map((u) => u.zoom_user_id),
+        );
         const simulatedReservations = new Map<string, SimulatedReservation[]>();
         const virtualReservations = new Map<string, SimulatedReservation[]>();
         const items: AssignmentPreviewItem[] = [];
@@ -2066,6 +2093,7 @@ export class VideoconferenceService implements OnModuleInit {
                 simulatedReservations,
                 input.licenseSnapshot,
                 input.hostRuleMap?.get(ownerOccurrence.row.schedule_id) ?? null,
+                localMeetingsSnapshot,
             );
 
             if (ownerResult.preview_status === 'NO_AVAILABLE_ZOOM_USER') {
@@ -2114,6 +2142,7 @@ export class VideoconferenceService implements OnModuleInit {
         simulatedReservations: Map<string, SimulatedReservation[]>,
         licenseSnapshot: ZoomPoolLicenseSnapshot,
         hostRule: { rule_id: string; zoom_user_id: string | null; zoom_user_email: string | null; zoom_user_name: string | null; zoom_group_id: string | null; zoom_group_name: string | null; lock_host: boolean; skip_zoom: boolean } | null = null,
+        localMeetingsSnapshot?: Map<string, PlanningSubsectionVideoconferenceEntity[]>,
     ) {
         const validationError = this.validateScheduleForGeneration(occurrence.row);
         if (validationError) {
@@ -2210,6 +2239,7 @@ export class VideoconferenceService implements OnModuleInit {
             maxConcurrent,
             remoteMeetingsCache,
             simulatedReservations,
+            localMeetingsSnapshot,
         );
         const selectedZoomUser = findResult.user;
         if (!selectedZoomUser) {
@@ -3375,6 +3405,30 @@ export class VideoconferenceService implements OnModuleInit {
             ),
         );
         const remoteMeetingsCache = new Map<string, ZoomMeetingSummary[] | null>();
+        // Pre-warm Zoom API for all pool users in parallel to avoid serial HTTP calls
+        // inside findAvailableZoomUser for each occurrence.
+        await Promise.all(
+            zoomUsers
+                .filter(hasNonEmptyEmail)
+                .map(async (user) => {
+                    try {
+                        const meetings = await this.zoomAccountService.listUserMeetingsByTypes(
+                            user.email,
+                            ['live', 'upcoming'],
+                        );
+                        remoteMeetingsCache.set(user.zoom_user_id, meetings);
+                    } catch {
+                        remoteMeetingsCache.set(user.zoom_user_id, null);
+                    }
+                }),
+        );
+        // Pre-load active local meetings for all pool users in one query to avoid
+        // N×M DB queries inside findAvailableZoomUser (one per occurrence per user checked).
+        const allPoolUserIds = [
+            ...zoomUsers.map((u) => u.zoom_user_id),
+            ...[...extraZoomPools.values()].flatMap((p) => p.users.map((u) => u.zoom_user_id)),
+        ];
+        const localMeetingsSnapshot = await this.buildLocalMeetingsSnapshot(allPoolUserIds);
         const results: GenerateResultItem[] = [];
 
         for (const missingScheduleId of missingScheduleIds) {
@@ -3484,6 +3538,7 @@ export class VideoconferenceService implements OnModuleInit {
                 effectiveGroupName,
                 zoomConfig.timezone,
                 recurrentRange,
+                localMeetingsSnapshot,
             );
 
             for (const ownerResult of ownerResults) {
@@ -4599,6 +4654,7 @@ export class VideoconferenceService implements OnModuleInit {
         preferredGroupName?: string | null,
         timezone = 'America/Lima',
         recurrentRange?: { startDate: string; endDate: string } | null,
+        localMeetingsSnapshot?: Map<string, PlanningSubsectionVideoconferenceEntity[]>,
     ): Promise<GenerateResultItem[]> {
         const now = new Date();
         const conferenceDates = recurrentRange
@@ -4719,6 +4775,8 @@ export class VideoconferenceService implements OnModuleInit {
                 zoomPoolUsers,
                 maxConcurrent,
                 remoteMeetingsCache,
+                undefined,
+                localMeetingsSnapshot,
             );
             selectedZoomUser = findResult.user;
         }
@@ -7661,6 +7719,33 @@ export class VideoconferenceService implements OnModuleInit {
         };
     }
 
+    private async buildLocalMeetingsSnapshot(
+        zoomUserIds: string[],
+    ): Promise<Map<string, PlanningSubsectionVideoconferenceEntity[]>> {
+        const snapshot = new Map<string, PlanningSubsectionVideoconferenceEntity[]>();
+        const ids = zoomUserIds.filter(Boolean);
+        if (!ids.length) {
+            return snapshot;
+        }
+        const rows = await this.planningVideoconferencesRepo.find({
+            where: {
+                zoom_user_id: In(ids),
+                status: In([...ACTIVE_CONFERENCE_STATUSES]),
+                link_mode: 'OWNED',
+            },
+            select: ['zoom_user_id', 'zoom_meeting_id', 'scheduled_start', 'scheduled_end'],
+        });
+        for (const row of rows) {
+            if (!row.zoom_user_id) {
+                continue;
+            }
+            const bucket = snapshot.get(row.zoom_user_id) ?? [];
+            bucket.push(row);
+            snapshot.set(row.zoom_user_id, bucket);
+        }
+        return snapshot;
+    }
+
     private async findAvailableZoomUser<T extends ZoomPoolUser>(
         scheduledStart: Date,
         scheduledEnd: Date,
@@ -7668,6 +7753,7 @@ export class VideoconferenceService implements OnModuleInit {
         maxConcurrent: number,
         remoteMeetingsCache: Map<string, ZoomMeetingSummary[] | null>,
         simulatedReservations?: Map<string, SimulatedReservation[]>,
+        localMeetingsSnapshot?: Map<string, PlanningSubsectionVideoconferenceEntity[]>,
     ): Promise<{ user: T; diagnosis: string } | { user: null; diagnosis: string }> {
         const windowStart = addMinutes(scheduledStart, -MEETING_MARGIN_MINUTES);
         const windowEnd = addMinutes(scheduledEnd, MEETING_MARGIN_MINUTES);
@@ -7693,16 +7779,20 @@ export class VideoconferenceService implements OnModuleInit {
             // If remote meetings are unavailable, proceed with local data only
             // rather than skipping the user entirely.
 
-            const localMeetings = await this.planningVideoconferencesRepo
-                .createQueryBuilder('conference')
-                .where('conference.zoom_user_id = :zoomUserId', { zoomUserId: zoomUser.zoom_user_id })
-                .andWhere('conference.status IN (:...statuses)', {
-                    statuses: [...ACTIVE_CONFERENCE_STATUSES],
-                })
-                .andWhere("conference.link_mode = 'OWNED'")
-                .andWhere('conference.scheduled_start < :windowEnd', { windowEnd })
-                .andWhere('conference.scheduled_end > :windowStart', { windowStart })
-                .getMany();
+            const localMeetings = localMeetingsSnapshot?.has(zoomUser.zoom_user_id)
+                ? (localMeetingsSnapshot.get(zoomUser.zoom_user_id) ?? []).filter(
+                    (m) => m.scheduled_start < windowEnd && m.scheduled_end > windowStart,
+                )
+                : await this.planningVideoconferencesRepo
+                    .createQueryBuilder('conference')
+                    .where('conference.zoom_user_id = :zoomUserId', { zoomUserId: zoomUser.zoom_user_id })
+                    .andWhere('conference.status IN (:...statuses)', {
+                        statuses: [...ACTIVE_CONFERENCE_STATUSES],
+                    })
+                    .andWhere("conference.link_mode = 'OWNED'")
+                    .andWhere('conference.scheduled_start < :windowEnd', { windowEnd })
+                    .andWhere('conference.scheduled_end > :windowStart', { windowStart })
+                    .getMany();
 
             const localMeetingIds = new Set(
                 localMeetings
@@ -7743,8 +7833,12 @@ export class VideoconferenceService implements OnModuleInit {
                 // Skip remote meetings that overlap with an unmatched local record —
                 // they are very likely the same meeting (created in a previous chunk
                 // but not yet reconciled, so zoom_meeting_id is null in the DB).
+                // We compare start times (within 5 min) rather than overlap ranges to
+                // avoid incorrectly discarding unrelated meetings that happen to share
+                // the same time window (e.g. a manually-created CDI meeting whose live
+                // fallback duration inflates its effective end to 12 hours).
                 const likelyDuplicate = unmatchedLocalWindows.some((w) =>
-                    doesOverlap(w.start, w.end, remoteStart, remoteEnd),
+                    Math.abs(w.start.getTime() - remoteStart.getTime()) <= 5 * 60 * 1000,
                 );
                 return !likelyDuplicate;
             }).length
@@ -7813,13 +7907,19 @@ export class VideoconferenceService implements OnModuleInit {
                     return false;
                 }
                 const sameTopic = normalizeLoose(meeting.topic) === normalizeLoose(topic);
+                const isLive = meeting.source_type === 'live';
+                // Live meetings in Zoom often return duration=0 (the meeting is already running),
+                // so we skip the duration check for them to avoid false negatives.
+                // Also, live meetings may have a slightly different start_time (actual host-join time
+                // vs scheduled), so we allow a wider 10-minute window.
+                const timeToleranceMs = isLive ? 10 * 60 * 1000 : 2 * 60 * 1000;
                 const durationDelta =
-                    meeting.duration_minutes === null
+                    isLive || meeting.duration_minutes === null
                         ? 0
                         : Math.abs(meeting.duration_minutes - durationMinutes);
                 return (
                     sameTopic &&
-                    Math.abs(meetingStart.getTime() - scheduledStart.getTime()) <= 2 * 60 * 1000 &&
+                    Math.abs(meetingStart.getTime() - scheduledStart.getTime()) <= timeToleranceMs &&
                     durationDelta <= 2
                 );
             });

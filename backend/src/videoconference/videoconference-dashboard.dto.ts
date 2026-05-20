@@ -39,6 +39,7 @@ export interface DashboardTodayUpcomingItem {
     zoomUserEmail: string | null;
     zoomUserName: string | null;
     joinUrl: string | null;
+    startUrl: string | null;
 }
 
 export interface DashboardTodayErrorItem {
@@ -160,6 +161,7 @@ export interface DashboardHostSession {
     sectionLabel: string | null;
     teacherName: string | null;
     joinUrl: string | null;
+    startUrl: string | null;
 }
 
 export interface DashboardHostCalendarResponse {

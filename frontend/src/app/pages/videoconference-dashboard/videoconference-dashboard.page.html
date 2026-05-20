@@ -115,7 +115,10 @@
                                     <div class="session-item__title">{{ it.courseCode || '—' }} · <span class="session-item__name">{{ it.courseName }}</span></div>
                                     <div class="session-item__meta">{{ it.sectionLabel || '—' }} · {{ it.teacherName || 'Sin docente' }}</div>
                                     <div class="session-item__host">{{ it.zoomUserName || it.zoomUserEmail || '—' }}</div>
-                                    <a *ngIf="it.joinUrl" [href]="it.joinUrl" target="_blank" rel="noopener" class="session-item__cta">Unirse</a>
+                                    <div class="session-item__actions">
+                                        <a *ngIf="it.joinUrl" [href]="it.joinUrl" target="_blank" rel="noopener" class="session-item__cta">Unirse</a>
+                                        <a *ngIf="it.startUrl" [href]="it.startUrl" target="_blank" rel="noopener" class="session-item__cta session-item__cta--monitor">Monitorear</a>
+                                    </div>
                                 </article>
                             </ng-container>
                             <ng-template #noOngoing>
@@ -138,7 +141,10 @@
                                     <div class="session-item__title">{{ it.courseCode || '—' }} · <span class="session-item__name">{{ it.courseName }}</span></div>
                                     <div class="session-item__meta">{{ it.sectionLabel || '—' }} · {{ it.teacherName || 'Sin docente' }}</div>
                                     <div class="session-item__host">{{ it.zoomUserName || it.zoomUserEmail || '—' }}</div>
-                                    <a *ngIf="it.joinUrl" [href]="it.joinUrl" target="_blank" rel="noopener" class="session-item__cta">Abrir</a>
+                                    <div class="session-item__actions">
+                                        <a *ngIf="it.joinUrl" [href]="it.joinUrl" target="_blank" rel="noopener" class="session-item__cta">Abrir</a>
+                                        <a *ngIf="it.startUrl" [href]="it.startUrl" target="_blank" rel="noopener" class="session-item__cta session-item__cta--monitor">Monitorear</a>
+                                    </div>
                                 </article>
                             </ng-container>
                             <ng-template #noUpcomingP>
@@ -522,6 +528,9 @@
                 <button type="button" class="btn-flat" (click)="closeSessionModal()">Cerrar</button>
                 <a *ngIf="selectedSession.joinUrl" class="btn-primary" [href]="selectedSession.joinUrl" target="_blank" rel="noopener">
                     Abrir en Zoom
+                </a>
+                <a *ngIf="selectedSession.startUrl" class="btn-primary btn-primary--monitor" [href]="selectedSession.startUrl" target="_blank" rel="noopener">
+                    Monitorear
                 </a>
             </footer>
         </div>

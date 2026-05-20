@@ -28,6 +28,7 @@ import { VideoconferenceModule } from '../videoconference/videoconference.module
 import { PlanningSubsectionVideoconferenceEntity } from '../videoconference/videoconference.entity';
 import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
+import { ReconcileTaskService } from './reconcile-task.service';
 
 @Module({
   imports: [
@@ -55,7 +56,7 @@ import { AuditService } from './audit.service';
     ]),
   ],
   controllers: [AuditController],
-  providers: [AuditService],
+  providers: [AuditService, ReconcileTaskService],
   exports: [AuditService],
 })
 export class AuditModule {}

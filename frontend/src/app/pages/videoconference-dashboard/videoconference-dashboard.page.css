@@ -1100,6 +1100,15 @@
     transform: translateY(-1px);
 }
 
+.vc-modal__footer .btn-primary--monitor {
+    background: linear-gradient(180deg, #0f766e, #0f5f59);
+    box-shadow: 0 2px 6px rgba(15, 118, 110, 0.3);
+}
+
+.vc-modal__footer .btn-primary--monitor:hover {
+    background: linear-gradient(180deg, #0f5f59, #115e59);
+}
+
 /* =========================================================
    SESIONES DEL DIA (En curso / Pendientes / Pasadas)
    ========================================================= */
@@ -1281,9 +1290,15 @@
     letter-spacing: 0.4px;
 }
 
+.session-item__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+}
+
 .session-item__cta {
     align-self: flex-start;
-    margin-top: 4px;
     padding: 4px 10px;
     background: #2563eb;
     color: #ffffff;
@@ -1297,12 +1312,28 @@
     background: #1d4ed8;
 }
 
+.session-item__cta--monitor {
+    background: #0f766e;
+}
+
+.session-item__cta--monitor:hover {
+    background: #0f5f59;
+}
+
 .session-item--ongoing .session-item__cta {
     background: #16a34a;
 }
 
 .session-item--ongoing .session-item__cta:hover {
     background: #15803d;
+}
+
+.session-item--ongoing .session-item__cta--monitor {
+    background: #0f766e;
+}
+
+.session-item--ongoing .session-item__cta--monitor:hover {
+    background: #0f5f59;
 }
 
 @keyframes vc-pulse {
