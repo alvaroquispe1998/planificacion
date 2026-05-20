@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -36,6 +36,7 @@ import {
     DashboardTodaySummary,
     DashboardTodayUpcomingItem,
 } from './videoconference-dashboard.dto';
+import { ZoomAccountService } from './zoom-account.service';
 
 /**
  * Servicio que produce las agregaciones del dashboard de videoconferencias.
@@ -67,6 +68,7 @@ export class VideoconferenceDashboardService {
         private readonly schedulesRepo: Repository<PlanningSubsectionScheduleEntity>,
         @InjectRepository(PlanningScheduleConflictV2Entity)
         private readonly conflictsRepo: Repository<PlanningScheduleConflictV2Entity>,
+        private readonly zoomAccountService: ZoomAccountService,
     ) { }
 
     /**
@@ -932,6 +934,33 @@ export class VideoconferenceDashboardService {
             severity: r.severity,
             count: Number(r.cnt) || 0,
         }));
+    }
+
+    async getFreshStartUrl(videoconferenceId: string): Promise<{ startUrl: string }> {
+        const id = (videoconferenceId ?? '').trim();
+        if (!id) {
+            throw new BadRequestException('videoconferenceId es requerido');
+        }
+
+        const record = await this.vcRepo.findOne({ where: { id } });
+        if (!record) {
+            throw new NotFoundException('Videoconferencia no encontrada.');
+        }
+        if (!record.zoom_meeting_id) {
+            throw new BadRequestException('La videoconferencia no tiene meeting ID de Zoom.');
+        }
+
+        const meeting = await this.zoomAccountService.getMeeting(record.zoom_meeting_id);
+        if (!meeting?.start_url) {
+            throw new BadRequestException('Zoom no devolvio un enlace de anfitrion actualizado.');
+        }
+
+        record.start_url = meeting.start_url;
+        record.join_url = meeting.join_url ?? record.join_url;
+        record.updated_at = new Date();
+        await this.vcRepo.save(record);
+
+        return { startUrl: meeting.start_url };
     }
 
     // =====================================================================

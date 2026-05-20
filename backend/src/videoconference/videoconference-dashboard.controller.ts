@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { WINDOW_PERMISSIONS } from '../auth/auth.constants';
 import { RequirePermissions } from '../auth/permissions.decorator';
 import { VideoconferenceDashboardService } from './videoconference-dashboard.service';
@@ -40,6 +40,11 @@ export class VideoconferenceDashboardController {
     @Get('today/sessions')
     async getTodaySessions(@Query('date') date?: string) {
         return this.service.getTodaySessions(date);
+    }
+
+    @Post('sessions/:id/start-url')
+    async getFreshStartUrl(@Param('id') id: string) {
+        return this.service.getFreshStartUrl(id);
     }
 
     // ----- Period coverage -----
