@@ -233,6 +233,7 @@ export class VideoconferenceDashboardService {
             .addSelect('vc.zoom_user_email', 'zoom_user_email')
             .addSelect('vc.zoom_user_name', 'zoom_user_name')
             .addSelect('vc.join_url', 'join_url')
+            .addSelect('vc.start_url', 'start_url')
             .addSelect('off.course_code', 'course_code')
             .addSelect('off.course_name', 'course_name')
             .addSelect('sec.code', 'section_code')
@@ -250,6 +251,7 @@ export class VideoconferenceDashboardService {
                 zoom_user_email: string | null;
                 zoom_user_name: string | null;
                 join_url: string | null;
+                start_url: string | null;
                 course_code: string | null;
                 course_name: string | null;
                 section_code: string | null;
@@ -271,6 +273,7 @@ export class VideoconferenceDashboardService {
             zoomUserEmail: r.zoom_user_email,
             zoomUserName: r.zoom_user_name,
             joinUrl: r.join_url,
+            startUrl: r.start_url,
         }));
     }
 
@@ -470,6 +473,7 @@ export class VideoconferenceDashboardService {
             .addSelect('vc.zoom_user_email', 'zoom_user_email')
             .addSelect('vc.zoom_user_name', 'zoom_user_name')
             .addSelect('vc.join_url', 'join_url')
+            .addSelect('vc.start_url', 'start_url')
             .addSelect('off.course_code', 'course_code')
             .addSelect('off.course_name', 'course_name')
             .addSelect('sec.code', 'section_code')
@@ -486,6 +490,7 @@ export class VideoconferenceDashboardService {
                 zoom_user_email: string | null;
                 zoom_user_name: string | null;
                 join_url: string | null;
+                start_url: string | null;
                 course_code: string | null;
                 course_name: string | null;
                 section_code: string | null;
@@ -507,6 +512,7 @@ export class VideoconferenceDashboardService {
             zoomUserEmail: r.zoom_user_email,
             zoomUserName: r.zoom_user_name,
             joinUrl: r.join_url,
+            startUrl: r.start_url,
         }));
 
         const now = Date.now();
@@ -999,6 +1005,7 @@ export class VideoconferenceDashboardService {
             .addSelect('vc.topic', 'topic')
             .addSelect('vc.status', 'status')
             .addSelect('vc.join_url', 'join_url')
+            .addSelect('vc.start_url', 'start_url')
             .addSelect('off.course_code', 'course_code')
             .addSelect('off.course_name', 'course_name')
             .addSelect('sec.code', 'section_code')
@@ -1014,6 +1021,7 @@ export class VideoconferenceDashboardService {
                 topic: string | null;
                 status: string;
                 join_url: string | null;
+                start_url: string | null;
                 course_code: string | null;
                 course_name: string | null;
                 section_code: string | null;
@@ -1036,6 +1044,7 @@ export class VideoconferenceDashboardService {
             sectionLabel: this.buildSectionLabel(r.section_code, r.subsection_code),
             teacherName: r.teacher_full_name ?? r.teacher_name ?? null,
             joinUrl: r.join_url,
+            startUrl: r.start_url,
         }));
 
         return { zoomUserId, from, to, sessions };

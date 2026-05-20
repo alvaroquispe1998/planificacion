@@ -23,7 +23,7 @@ import {
     ZoomGroupUserEntity,
     ZoomConfigEntity,
 } from '../videoconference/videoconference.entity';
-import { ZoomAccountService } from '../videoconference/zoom-account.service';
+import { ZoomAccountService, ZoomMeetingSummary } from '../videoconference/zoom-account.service';
 import {
     ApproveDraftBackupDto,
     CreateManualVideoconferenceDto,
@@ -33,9 +33,14 @@ import {
 
 const MEETING_MARGIN_MINUTES = 10;
 const DEFAULT_MAX_CONCURRENT_MEETINGS = 2;
+const LIMA_UTC_OFFSET_MS = 5 * 60 * 60 * 1000;
 const TI_PENDING_CATEGORY = 'FALTA ATENDER';
 const TI_ATTENDED_CATEGORY = 'ATENDIDO';
 const TI_ATTENDED_FOLDER = 'ATENDIDO';
+
+function hasNonEmptyEmail<T extends { email: string | null }>(user: T): user is T & { email: string } {
+    return Boolean(user.email);
+}
 
 function escapeHtml(value: string): string {
     return value
@@ -235,6 +240,10 @@ export class VideoconferenceCreatorService {
             order: { sort_order: 'ASC' },
         });
 
+        // Pre-warm Zoom API for all group users in parallel to avoid serial HTTP calls
+        // inside hasHostCapacity when iterating through candidate hosts.
+        const remoteMeetingsCache = await this.buildRemoteMeetingsCache(groupUsers.map((gu) => gu.zoom_user_id));
+
         let availableHostId: string | null = null;
         let availableHostEmail: string | null = null;
 
@@ -242,7 +251,7 @@ export class VideoconferenceCreatorService {
             const zoomUser = await this.zoomUserRepo.findOne({ where: { id: gu.zoom_user_id } });
             if (!zoomUser) continue;
 
-            const hasCapacity = await this.hasHostCapacity(zoomUser.id, startDate, endDate, maxConcurrent, null);
+            const hasCapacity = await this.hasHostCapacity(zoomUser.id, zoomUser.email, startDate, endDate, maxConcurrent, null, remoteMeetingsCache);
             if (hasCapacity) {
                 availableHostId = zoomUser.id;
                 availableHostEmail = zoomUser.email;
@@ -1085,10 +1094,12 @@ export class VideoconferenceCreatorService {
             where: { group_id: group.id, is_active: true },
             order: { sort_order: 'ASC' },
         });
+        // Pre-warm Zoom API for all group users in parallel
+        const remoteMeetingsCache = await this.buildRemoteMeetingsCache(groupUsers.map((gu) => gu.zoom_user_id));
         for (const groupUser of groupUsers) {
             const zoomUser = await this.zoomUserRepo.findOne({ where: { id: groupUser.zoom_user_id } });
             if (!zoomUser) continue;
-            const hasCapacity = await this.hasHostCapacity(zoomUser.id, start, end, maxConcurrent, null);
+            const hasCapacity = await this.hasHostCapacity(zoomUser.id, zoomUser.email, start, end, maxConcurrent, null, remoteMeetingsCache);
             if (hasCapacity) {
                 return { user: zoomUser, groupUser };
             }
@@ -1103,13 +1114,17 @@ export class VideoconferenceCreatorService {
 
     private async hasHostCapacity(
         zoomUserId: string,
+        zoomUserEmail: string,
         start: Date,
         end: Date,
         maxConcurrent: number,
         excludeId: string | null,
+        remoteMeetingsCache?: Map<string, ZoomMeetingSummary[] | null>,
     ): Promise<boolean> {
         const windowStart = addMinutes(start, -MEETING_MARGIN_MINUTES);
         const windowEnd = addMinutes(end, MEETING_MARGIN_MINUTES);
+
+        // 1. Count meetings tracked in our own (manual) table
         const qb = this.mvRepo
             .createQueryBuilder('mv')
             .where('mv.assigned_zoom_user_id = :zoomUserId', { zoomUserId })
@@ -1121,8 +1136,53 @@ export class VideoconferenceCreatorService {
             qb.andWhere('mv.id != :excludeId', { excludeId });
         }
 
-        const count = await qb.getCount();
-        return count < maxConcurrent;
+        const dbCount = await qb.getCount();
+        if (dbCount >= maxConcurrent) {
+            return false;
+        }
+
+        // 2. Also consult Zoom API for meetings not tracked in this table
+        // (e.g. meetings created by the planning module or directly in Zoom)
+        const trackedInDb = await this.mvRepo.find({
+            where: { assigned_zoom_user_id: zoomUserId },
+            select: ['zoom_meeting_id'],
+        });
+        const trackedZoomIds = new Set(
+            trackedInDb.map((m) => m.zoom_meeting_id).filter((id): id is string => Boolean(id)),
+        );
+
+        let zoomApiCount = 0;
+        try {
+            // Use pre-warmed cache if provided (avoids one HTTP call per host in the loop);
+            // fall back to a live API call when called outside a batch context.
+            const remoteMeetings = remoteMeetingsCache?.has(zoomUserId)
+                ? (remoteMeetingsCache.get(zoomUserId) ?? [])
+                : await this.zoomService.listUserMeetingsByTypes(zoomUserEmail, ['live', 'upcoming']);
+            for (const meeting of remoteMeetings) {
+                if (trackedZoomIds.has(meeting.id)) {
+                    // Already counted via the DB record above
+                    continue;
+                }
+                if (!meeting.start_time || !meeting.duration_minutes) {
+                    continue;
+                }
+                // Zoom returns start_time in UTC; convert to Lima-local to match how
+                // the DB stores times (dto.start_time parsed without timezone = server-local = UTC in Docker).
+                const remoteUtc = new Date(meeting.start_time);
+                if (Number.isNaN(remoteUtc.getTime())) {
+                    continue;
+                }
+                const mStart = new Date(remoteUtc.getTime() - LIMA_UTC_OFFSET_MS);
+                const mEnd = addMinutes(mStart, meeting.duration_minutes);
+                if (mStart < windowEnd && mEnd > windowStart) {
+                    zoomApiCount++;
+                }
+            }
+        } catch {
+            // Zoom API unavailable — rely on DB count only
+        }
+
+        return (dbCount + zoomApiCount) < maxConcurrent;
     }
 
     private async getMaxConcurrentMeetings(): Promise<number> {
@@ -1132,6 +1192,31 @@ export class VideoconferenceCreatorService {
             return DEFAULT_MAX_CONCURRENT_MEETINGS;
         }
         return Math.max(1, Math.floor(value));
+    }
+
+    /** Pre-warms Zoom API for a list of zoom user IDs in parallel.
+     *  The cache is keyed by zoom_user_id (not email) to match how hasHostCapacity looks it up. */
+    private async buildRemoteMeetingsCache(
+        zoomUserIds: string[],
+    ): Promise<Map<string, ZoomMeetingSummary[] | null>> {
+        const cache = new Map<string, ZoomMeetingSummary[] | null>();
+        const ids = zoomUserIds.filter(Boolean);
+        if (!ids.length) return cache;
+
+        const zoomUsers = await this.zoomUserRepo.find({ where: { id: In(ids) } });
+        await Promise.all(
+            zoomUsers
+                .filter(hasNonEmptyEmail)
+                .map(async (u) => {
+                    try {
+                        const meetings = await this.zoomService.listUserMeetingsByTypes(u.email, ['live', 'upcoming']);
+                        cache.set(u.id, meetings);
+                    } catch {
+                        cache.set(u.id, null);
+                    }
+                }),
+        );
+        return cache;
     }
 
     private buildRecurrenceJson(dto: CreateManualVideoconferenceDto): Record<string, unknown> | null {
