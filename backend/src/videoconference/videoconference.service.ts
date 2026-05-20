@@ -7915,7 +7915,7 @@ export class VideoconferenceService implements OnModuleInit {
                     return false;
                 }
                 const durationDelta =
-                    meeting.duration_minutes === null
+                    isLive || meeting.duration_minutes === null
                         ? 0
                         : Math.abs(meeting.duration_minutes - durationMinutes);
                 return (
