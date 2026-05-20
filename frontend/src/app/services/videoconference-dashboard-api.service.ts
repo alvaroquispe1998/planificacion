@@ -301,4 +301,11 @@ export class VideoconferenceDashboardApiService {
             params,
         });
     }
+
+    getFreshStartUrl(videoconferenceId: string): Observable<{ startUrl: string }> {
+        return this.http.post<{ startUrl: string }>(
+            `${this.base}/sessions/${encodeURIComponent(videoconferenceId)}/start-url`,
+            {},
+        );
+    }
 }

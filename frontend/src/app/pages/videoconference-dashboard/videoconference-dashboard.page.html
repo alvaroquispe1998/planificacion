@@ -117,7 +117,9 @@
                                     <div class="session-item__host">{{ it.zoomUserName || it.zoomUserEmail || '—' }}</div>
                                     <div class="session-item__actions">
                                         <a *ngIf="it.joinUrl" [href]="it.joinUrl" target="_blank" rel="noopener" class="session-item__cta">Unirse</a>
-                                        <a *ngIf="it.startUrl" [href]="it.startUrl" target="_blank" rel="noopener" class="session-item__cta session-item__cta--monitor">Monitorear</a>
+                                        <button *ngIf="it.startUrl" type="button" class="session-item__cta session-item__cta--monitor" (click)="monitorSession(it)" [disabled]="isMonitoring(it)">
+                                            {{ isMonitoring(it) ? 'Abriendo...' : 'Monitorear' }}
+                                        </button>
                                     </div>
                                 </article>
                             </ng-container>
@@ -143,7 +145,9 @@
                                     <div class="session-item__host">{{ it.zoomUserName || it.zoomUserEmail || '—' }}</div>
                                     <div class="session-item__actions">
                                         <a *ngIf="it.joinUrl" [href]="it.joinUrl" target="_blank" rel="noopener" class="session-item__cta">Abrir</a>
-                                        <a *ngIf="it.startUrl" [href]="it.startUrl" target="_blank" rel="noopener" class="session-item__cta session-item__cta--monitor">Monitorear</a>
+                                        <button *ngIf="it.startUrl" type="button" class="session-item__cta session-item__cta--monitor" (click)="monitorSession(it)" [disabled]="isMonitoring(it)">
+                                            {{ isMonitoring(it) ? 'Abriendo...' : 'Monitorear' }}
+                                        </button>
                                     </div>
                                 </article>
                             </ng-container>
@@ -529,9 +533,9 @@
                 <a *ngIf="selectedSession.joinUrl" class="btn-primary" [href]="selectedSession.joinUrl" target="_blank" rel="noopener">
                     Abrir en Zoom
                 </a>
-                <a *ngIf="selectedSession.startUrl" class="btn-primary btn-primary--monitor" [href]="selectedSession.startUrl" target="_blank" rel="noopener">
-                    Monitorear
-                </a>
+                <button *ngIf="selectedSession.startUrl" type="button" class="btn-primary btn-primary--monitor" (click)="monitorSession(selectedSession)" [disabled]="isMonitoring(selectedSession)">
+                    {{ isMonitoring(selectedSession) ? 'Abriendo...' : 'Monitorear' }}
+                </button>
             </footer>
         </div>
     </div>

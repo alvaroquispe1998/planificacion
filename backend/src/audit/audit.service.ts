@@ -504,10 +504,13 @@ export class AuditService {
           .filter((item) => recordString(item, 'status') === 'MATCHED')
           .reduce((sum, item) => sum + recordNumber(item, 'count'), 0),
         errors: summaryRows
-          .filter((item) => recordString(item, 'status') === 'ERROR')
+          .filter((item) =>
+            recordString(item, 'status') === 'ERROR' ||
+            recordString(item, 'audit_sync_status') === 'ERROR'
+          )
           .reduce((sum, item) => sum + recordNumber(item, 'count'), 0),
         pending_audit: summaryRows
-          .filter((item) => recordString(item, 'audit_sync_status') === 'PENDING')
+          .filter((item) => recordString(item, 'audit_sync_status') !== 'SYNCED')
           .reduce((sum, item) => sum + recordNumber(item, 'count'), 0),
       },
       page,
@@ -552,8 +555,8 @@ export class AuditService {
       .addSelect('MAX(vc.conference_date)', 'last_conference_date')
       .addSelect('COUNT(*)', 'session_count')
       .addSelect("SUM(CASE WHEN vc.status = 'MATCHED' THEN 1 ELSE 0 END)", 'matched_count')
-      .addSelect("SUM(CASE WHEN vc.status = 'ERROR' THEN 1 ELSE 0 END)", 'error_count')
-      .addSelect("SUM(CASE WHEN COALESCE(vc.audit_sync_status, 'PENDING') = 'PENDING' THEN 1 ELSE 0 END)", 'pending_audit_count')
+      .addSelect("SUM(CASE WHEN vc.status = 'ERROR' OR COALESCE(vc.audit_sync_status, 'PENDING') = 'ERROR' THEN 1 ELSE 0 END)", 'error_count')
+      .addSelect("SUM(CASE WHEN COALESCE(vc.audit_sync_status, 'PENDING') <> 'SYNCED' THEN 1 ELSE 0 END)", 'pending_audit_count')
       .addSelect("SUM(CASE WHEN vc.deleted_at IS NOT NULL OR vc.delete_status = 'DELETED' THEN 1 ELSE 0 END)", 'deleted_count')
       .addSelect(`SUM(CASE WHEN ${syncStateOutdatedSql} THEN 0 ELSE 1 END)`, 'current_count')
       .addSelect(`SUM(CASE WHEN ${syncStateOutdatedSql} THEN 1 ELSE 0 END)`, 'outdated_count')
@@ -758,7 +761,7 @@ export class AuditService {
       requestedRecord.link_mode === 'INHERITED' && requestedRecord.owner_videoconference_id
         ? requestedRecord.owner_videoconference_id
         : requestedRecord.id;
-    const record =
+    let record =
       syncOwnerId === requestedRecord.id
         ? requestedRecord
         : await this.planningVideoconferencesRepo.findOne({ where: { id: syncOwnerId } });
@@ -779,11 +782,20 @@ export class AuditService {
         await this.planningVideoconferencesRepo.save(record);
         await this.syncInheritedAuditState(record.id);
       }
+      const reconciledRecord = await this.planningVideoconferencesRepo.findOne({ where: { id: record.id } });
+      if (!reconciledRecord?.zoom_meeting_id) {
+        return this.getPlanningVideoconferenceAuditDetail(requestedRecord.id);
+      }
+      record = reconciledRecord;
+    }
+
+    const zoomMeetingId = record.zoom_meeting_id;
+    if (!zoomMeetingId) {
       return this.getPlanningVideoconferenceAuditDetail(requestedRecord.id);
     }
 
     if (!record.start_url) {
-      const activeMeeting = await this.zoomAccountService.getMeeting(record.zoom_meeting_id);
+      const activeMeeting = await this.zoomAccountService.getMeeting(zoomMeetingId);
       if (activeMeeting?.start_url) {
         record.start_url = activeMeeting.start_url;
         await this.planningVideoconferencesRepo.save(record);
@@ -795,7 +807,17 @@ export class AuditService {
     }
 
     try {
-      const instances = await this.zoomAccountService.listPastMeetingInstances(record.zoom_meeting_id);
+      const instances = await this.zoomAccountService.listPastMeetingInstances(zoomMeetingId);
+      if (instances.length === 0) {
+        record.audit_sync_status = 'PENDING';
+        record.audit_synced_at = new Date();
+        record.audit_sync_error = null;
+        record.updated_at = new Date();
+        await this.planningVideoconferencesRepo.save(record);
+        await this.syncInheritedAuditState(record.id);
+        return this.getPlanningVideoconferenceAuditDetail(requestedRecord.id);
+      }
+
       const seenInstanceIds = new Set<string>();
       for (const item of instances) {
         const detail = (await this.zoomAccountService.getPastMeetingDetail(item.uuid)) ?? {
@@ -890,7 +912,7 @@ export class AuditService {
     const baseQuery = this.buildPlanningAuditBaseQuery(filters)
       .select('vc.id', 'id')
       .andWhere("vc.link_mode = 'OWNED'")
-      .andWhere("COALESCE(vc.audit_sync_status, 'PENDING') = 'PENDING'")
+      .andWhere("COALESCE(vc.audit_sync_status, 'PENDING') <> 'SYNCED'")
       .andWhere("(vc.delete_status IS NULL OR vc.delete_status <> 'DELETED')")
       .orderBy('vc.conference_date', 'ASC')
       .addOrderBy('vc.start_time', 'ASC');

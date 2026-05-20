@@ -7902,33 +7902,41 @@ export class VideoconferenceService implements OnModuleInit {
                 'live',
             ]);
             const candidates = meetings.filter((meeting) => {
+                const sameTopic = normalizeLoose(meeting.topic) === normalizeLoose(topic);
+                if (!sameTopic) {
+                    return false;
+                }
+                const isLive = meeting.source_type === 'live';
+                if (isLive) {
+                    return true;
+                }
                 const meetingStart = parseRemoteMeetingStart(meeting.start_time);
                 if (!meetingStart) {
                     return false;
                 }
-                const sameTopic = normalizeLoose(meeting.topic) === normalizeLoose(topic);
-                const isLive = meeting.source_type === 'live';
-                // Live meetings in Zoom often return duration=0 (the meeting is already running),
-                // so we skip the duration check for them to avoid false negatives.
-                // Also, live meetings may have a slightly different start_time (actual host-join time
-                // vs scheduled), so we allow a wider 10-minute window.
-                const timeToleranceMs = isLive ? 10 * 60 * 1000 : 2 * 60 * 1000;
                 const durationDelta =
-                    isLive || meeting.duration_minutes === null
+                    meeting.duration_minutes === null
                         ? 0
                         : Math.abs(meeting.duration_minutes - durationMinutes);
                 return (
-                    sameTopic &&
-                    Math.abs(meetingStart.getTime() - scheduledStart.getTime()) <= timeToleranceMs &&
+                    Math.abs(meetingStart.getTime() - scheduledStart.getTime()) <= 2 * 60 * 1000 &&
                     durationDelta <= 2
                 );
             });
 
-            if (candidates.length === 1) {
-                const meetingDetail = await this.zoomAccountService.getMeeting(candidates[0].id);
+            if (candidates.length > 0) {
+                const selected = [...candidates].sort((left, right) => {
+                    if (left.source_type !== right.source_type) {
+                        return left.source_type === 'live' ? -1 : 1;
+                    }
+                    const leftStart = parseRemoteMeetingStart(left.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+                    const rightStart = parseRemoteMeetingStart(right.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+                    return Math.abs(leftStart - scheduledStart.getTime()) - Math.abs(rightStart - scheduledStart.getTime());
+                })[0];
+                const meetingDetail = await this.zoomAccountService.getMeeting(selected.id);
                 return {
-                    ...candidates[0],
-                    start_url: meetingDetail?.start_url ?? candidates[0].start_url ?? null,
+                    ...selected,
+                    start_url: meetingDetail?.start_url ?? selected.start_url ?? null,
                     attempts: attempt,
                 };
             }

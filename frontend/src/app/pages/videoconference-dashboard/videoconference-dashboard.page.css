@@ -1300,16 +1300,24 @@
 .session-item__cta {
     align-self: flex-start;
     padding: 4px 10px;
+    border: none;
     background: #2563eb;
     color: #ffffff;
     font-size: 0.75rem;
     font-weight: 600;
     border-radius: 6px;
     text-decoration: none;
+    font-family: inherit;
+    cursor: pointer;
 }
 
 .session-item__cta:hover {
     background: #1d4ed8;
+}
+
+.session-item__cta:disabled {
+    opacity: 0.7;
+    cursor: wait;
 }
 
 .session-item__cta--monitor {

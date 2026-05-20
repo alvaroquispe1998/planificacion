@@ -45,7 +45,7 @@ export class AuditPageComponent implements OnInit {
   showDeleted = false;
   // SincronizaciÃ³n masiva
   syncing = false;
-  readonly syncBatchSize = 10;
+  readonly syncBatchSize = 500;
   syncingAulaVirtual = false;
   syncingAulaVirtualRowId = '';
   readonly aulaVirtualBatchSize = 5;
@@ -425,30 +425,23 @@ export class AuditPageComponent implements OnInit {
     let remaining = initialPending;
 
     try {
-      while (remaining > 0) {
-        const res = await firstValueFrom(
-          this.api.syncPendingPlanningVideoconferences({
-            ...payload,
-            limit: this.syncBatchSize,
-          }),
-        );
+      const res = await firstValueFrom(
+        this.api.syncPendingPlanningVideoconferences({
+          ...payload,
+          limit: Math.min(this.syncBatchSize, initialPending),
+        }),
+      );
 
-        const batchProcessed = Math.max(0, Number(res?.processed ?? 0));
-        processed += batchProcessed;
-        synced += Math.max(0, Number(res?.synced ?? 0));
-        reconciled += Math.max(0, Number(res?.reconciled ?? 0));
-        errors += Math.max(0, Number(res?.errors ?? 0));
-        remaining = Math.max(0, Number(res?.total_pending ?? remaining) - batchProcessed);
-        this.syncProgress = {
-          processed: Math.min(initialPending, processed),
-          total: initialPending,
-        };
-        this.cdr.detectChanges();
-
-        if (batchProcessed === 0) {
-          break;
-        }
-      }
+      processed = Math.max(0, Number(res?.processed ?? 0));
+      synced = Math.max(0, Number(res?.synced ?? 0));
+      reconciled = Math.max(0, Number(res?.reconciled ?? 0));
+      errors = Math.max(0, Number(res?.errors ?? 0));
+      remaining = Math.max(0, Number(res?.total_pending ?? initialPending) - processed);
+      this.syncProgress = {
+        processed: Math.min(initialPending, processed),
+        total: initialPending,
+      };
+      this.cdr.detectChanges();
 
       this.syncing = false;
       this.syncHadErrors = errors > 0;

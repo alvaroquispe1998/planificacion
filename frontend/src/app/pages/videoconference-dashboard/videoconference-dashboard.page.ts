@@ -56,6 +56,7 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
 
     loading = false;
     error = '';
+    monitoringSessionId = '';
 
     // Today tab data
     summary: DashboardTodaySummary | null = null;
@@ -657,5 +658,51 @@ export class VideoconferenceDashboardPageComponent implements OnInit, OnDestroy 
         if (s === 'ERROR') return 'is-danger';
         if (s === 'CREATING') return 'is-info';
         return 'is-muted';
+    }
+
+    monitorSession(session: { videoconferenceId: string; startUrl: string | null }) {
+        if (!session?.videoconferenceId) return;
+        const popup = window.open('', '_blank');
+        this.monitoringSessionId = session.videoconferenceId;
+        this.error = '';
+        this.api.getFreshStartUrl(session.videoconferenceId)
+            .pipe(finalize(() => {
+                this.monitoringSessionId = '';
+                this.cdr.detectChanges();
+            }))
+            .subscribe({
+                next: ({ startUrl }) => {
+                    if (popup && startUrl) {
+                        popup.opener = null;
+                        popup.location.href = startUrl;
+                    } else if (startUrl) {
+                        window.open(startUrl, '_blank', 'noopener');
+                    }
+                    this.updateSessionStartUrl(session.videoconferenceId, startUrl);
+                },
+                error: (err) => {
+                    popup?.close();
+                    this.error = err?.error?.message ?? 'No se pudo abrir el enlace de monitoreo.';
+                },
+            });
+    }
+
+    isMonitoring(session: { videoconferenceId: string }) {
+        return this.monitoringSessionId === session.videoconferenceId;
+    }
+
+    private updateSessionStartUrl(videoconferenceId: string, startUrl: string) {
+        const apply = <T extends { videoconferenceId: string; startUrl: string | null }>(items: T[]) =>
+            items.map((item) => item.videoconferenceId === videoconferenceId ? { ...item, startUrl } : item);
+        this.ongoing = apply(this.ongoing);
+        this.upcoming = apply(this.upcoming);
+        this.past = apply(this.past);
+        this.hostSessions = apply(this.hostSessions);
+        if (this.selectedSession?.videoconferenceId === videoconferenceId) {
+            this.selectedSession = { ...this.selectedSession, startUrl };
+        }
+        if (this.hostWeekColumns.length > 0) {
+            this.hostWeekColumns = this.buildWeekColumns(this.hostSessions);
+        }
     }
 }
